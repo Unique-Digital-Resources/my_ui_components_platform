@@ -1,0 +1,50 @@
+"use client";
+import * as React from "react";
+import { TableEditor, type TableColumn, type TableRow, type TableEditorOptions, type TableEditorEventPayload } from "@/lib/components/table-editor";
+export type { TableColumn, TableRow, TableEditorOptions, TableEditorEventPayload };
+export function TableEditorReact({ columns, rows, frozenHeader, frozenFirstCol, rowNumbers, striped, editable, selectable, resizable, reorderable, sortable, showToolbar, onCellChange, onSelectionChange, onColumnResize, onColumnReorder, onSortChange, onRowAdded, onRowRemoved, className, instanceRef }: {
+  columns?: TableColumn[]; rows?: TableRow[]; frozenHeader?: boolean; frozenFirstCol?: boolean;
+  rowNumbers?: boolean; striped?: boolean; editable?: boolean; selectable?: boolean;
+  resizable?: boolean; reorderable?: boolean; sortable?: boolean; showToolbar?: boolean;
+  onCellChange?: (p: TableEditorEventPayload) => void;
+  onSelectionChange?: (p: TableEditorEventPayload) => void;
+  onColumnResize?: (p: TableEditorEventPayload) => void;
+  onColumnReorder?: (p: TableEditorEventPayload) => void;
+  onSortChange?: (p: TableEditorEventPayload) => void;
+  onRowAdded?: (p: TableEditorEventPayload) => void;
+  onRowRemoved?: (p: TableEditorEventPayload) => void;
+  className?: string; instanceRef?: React.MutableRefObject<TableEditor | null>;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const inst = React.useRef<TableEditor | null>(null);
+  const cbRef = React.useRef({ onCellChange, onSelectionChange, onColumnResize, onColumnReorder, onSortChange, onRowAdded, onRowRemoved });
+  React.useEffect(() => { cbRef.current = { onCellChange, onSelectionChange, onColumnResize, onColumnReorder, onSortChange, onRowAdded, onRowRemoved }; });
+  const initCols = React.useRef(columns);
+  const initRows = React.useRef(rows);
+  React.useEffect(() => {
+    if (!ref.current) return;
+    const opts: TableEditorOptions = { columns: initCols.current ?? [], rows: initRows.current ?? [], frozenHeader, frozenFirstCol, rowNumbers, striped, editable, selectable, resizable, reorderable, sortable, showToolbar };
+    const t = new TableEditor(ref.current, opts);
+    inst.current = t; if (instanceRef) instanceRef.current = t;
+    t.on("cell_change", (p) => cbRef.current.onCellChange?.(p));
+    t.on("selection_change", (p) => cbRef.current.onSelectionChange?.(p));
+    t.on("column_resize", (p) => cbRef.current.onColumnResize?.(p));
+    t.on("column_reorder", (p) => cbRef.current.onColumnReorder?.(p));
+    t.on("sort_change", (p) => cbRef.current.onSortChange?.(p));
+    t.on("row_added", (p) => cbRef.current.onRowAdded?.(p));
+    t.on("row_removed", (p) => cbRef.current.onRowRemoved?.(p));
+    return () => { t.destroy(); inst.current = null; if (instanceRef) instanceRef.current = null; };
+  }, []);
+  React.useEffect(() => { if (frozenHeader !== undefined) inst.current?.setProperty("frozenHeader", frozenHeader); }, [frozenHeader]);
+  React.useEffect(() => { if (frozenFirstCol !== undefined) inst.current?.setProperty("frozenFirstCol", frozenFirstCol); }, [frozenFirstCol]);
+  React.useEffect(() => { if (rowNumbers !== undefined) inst.current?.setProperty("rowNumbers", rowNumbers); }, [rowNumbers]);
+  React.useEffect(() => { if (striped !== undefined) inst.current?.setProperty("striped", striped); }, [striped]);
+  React.useEffect(() => { if (editable !== undefined) inst.current?.setProperty("editable", editable); }, [editable]);
+  React.useEffect(() => { if (selectable !== undefined) inst.current?.setProperty("selectable", selectable); }, [selectable]);
+  React.useEffect(() => { if (resizable !== undefined) inst.current?.setProperty("resizable", resizable); }, [resizable]);
+  React.useEffect(() => { if (reorderable !== undefined) inst.current?.setProperty("reorderable", reorderable); }, [reorderable]);
+  React.useEffect(() => { if (sortable !== undefined) inst.current?.setProperty("sortable", sortable); }, [sortable]);
+  React.useEffect(() => { if (columns !== undefined) inst.current?.setColumns(columns); }, [columns]);
+  React.useEffect(() => { if (rows !== undefined) inst.current?.setRows(rows); }, [rows]);
+  return <div ref={ref} className={className} />;
+}
