@@ -1,0 +1,522 @@
+# UI Component Specification: Kanban Board
+
+## 1. Purpose and design principles
+
+A Kanban Board is a reusable UI component that organizes items into columns representing workflow stages. Items can be inspected, created, edited, reordered, and moved between columns, usually through drag-and-drop or explicit actions.
+
+It should work across JavaScript frameworks, Python frontends, and Rust UI frameworks such as Vue, Dioxus, Leptos, and Freya, while keeping its behavior independent of the underlying programming language.
+
+Core design principles:
+
+- Configurable: Columns, cards, properties, layouts, and interaction rules can be configured through the shared component API.
+- Flexible: Support simple task boards as well as boards displaying projects, issues, applications, content, or other structured records.
+- Predictable: Moving or editing an item has clearly defined effects and emits consistent events.
+- Responsive: Adapt the board to narrow containers without making items difficult to read or manipulate.
+- Appropriately scoped: The board handles presentation and interactions, not the entire project-management or workflow system.
+
+A Kanban board is more than a collection of independent cards: it coordinates the relationship between items, columns, ordering, and movement.
+
+## 2. Component modes and use cases
+
+[Kanban Board | Workflowy Help](https://images.openai.com/static-rsc-4/2l83F99gqqniOg02gIatOyPCn8Irn8YFSyAF7gGw4e2kw4eTvZtaSvKr3eSgdtR00JNtrSyRuqYDzXAi2uA4eAYeeyq70BqQ1CRcaMAkr1Gslr8IjE8qPVk8xVVGaX1UugFpzSBu6VqbAzhcvCRMArG6lJkyl5F4855malsyOMc?purpose=inline)
+
+A. Standard Kanban
+
+Columns and cards.
+
+The default mode for tasks, issues, and project workflows. Supports adding, editing, moving, and reordering items.
+
+[Implementation plan: What to include and 5 essential steps](https://images.openai.com/static-rsc-4/gHnyeexmDIaT5G1weFMYrwycATwXoJpSoi97Ilo4L1myTwb3-ZOSwF0KtintxCXkUm9VsNUrf3sqV8bzDNde7pf3TnuTAcSO6yTgxJlMcDQH6w3qCiRor7E5Rtbk9tAyvZv8pg4J6eoEwZXsHEhDgMb-FiKNQttCud8Ni0G7jpc?purpose=inline)
+
+B. Rich-card Kanban
+
+Cards with structured metadata.
+
+Cards can display labels, avatars, priorities, due dates, progress indicators, and other optional fields.
+
+[Kanban board by Imeth Sasvin on Dribbble](https://images.openai.com/static-rsc-4/0Order8I_oJO6AB4LVISOT-o7tDl0u-JvsASxkixRur571iRHRJ2K1WX9tTsuPSpQmQWP5hLxJaIPgjDdBO6sFP9oaGVL8-FaBmQmh9zhVetSv6P7tmj2mIjGQ3OT1n9bXQZfGcIr0jnJQZTj_27pRmVG-zbJKJREcG6Av_QIxc?purpose=inline)
+
+C. Compact or responsive Kanban
+
+Reduced-width or reduced-density presentation.
+
+Useful for side panels, dashboards, and smaller screens. May show one column at a time or permit horizontal scrolling.
+
+[Solved: Stories marked as "Done" still appears in the next...](https://images.openai.com/static-rsc-4/efXA1elJLDJgx5zheR6Y1JwVmWVt8TKCdK_R4WovfF5gK1Ou1tFRQa_VjP4IzbZZL98acRbq5zAsQrKfLvjdJtcI2EUcJMGWwKIqXf97mXBVHsBkhmwJWx2S2C9WR1VG6_gbVTCXok2pZQnSFm-_avw3pp082Q4GIDjtP4h3BFU?purpose=inline)
+
+D. Read-only Kanban
+
+Display and inspect items.
+
+Suitable for dashboards, public project views, and workflow summaries without modification controls.
+
+These are configuration profiles rather than necessarily separate components.
+
+## 3. Layout and structure
+
+A typical Kanban board has the following hierarchy:
+
+## Project tasks
+
+Board header
+
+To do
+
+2
+
+Design login
+
+Task card
+
+Review brief
+
+Task card
+
+Add item
+
+In progress
+
+1
+
+Build interface
+
+Task card
+
+Add item
+
+Done
+
+1
+
+Set up repo
+
+Task card
+
+Add item
+
+Illustrative structure. A real board may have more columns, card content, and controls.
+
+### Recommended structural hierarchy
+
+1. Board container — manages the overall width, height, overflow, and spacing.
+2. Optional board header — title, search, filters, view settings, and creation actions.
+3. Column collection — lays out workflow columns horizontally or vertically.
+4. Column — contains a heading, optional count or actions, an ordered list of cards, and an optional insertion area.
+5. Card — displays an item's primary information and optional metadata.
+6. Optional card details view — a dialog, drawer, or external view for detailed editing.
+7. Optional empty states — guidance when a board or column contains no items.
+
+The card details view does not need to be implemented inside the Kanban component. The host application can supply it.
+
+## 4. Responsive layout best practices
+
+| Available space            | Recommended behavior                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| Wide desktop               | Display columns horizontally with comfortable card widths.                          |
+| Standard desktop or tablet | Show as many columns as fit; scroll horizontally for the rest.                      |
+| Narrow mobile              | Show one column at a time, with horizontal column navigation or a selectable stage. |
+| Embedded panel             | Adapt to the panel's width, not just the device viewport.                           |
+| Very large board           | Preserve readable card widths and allow independent horizontal board scrolling.     |
+
+### Layout rules
+
+- Prefer horizontal column arrangement for the standard Kanban experience.
+- Use a consistent column width or a documented flexible-width strategy.
+- Let each column scroll vertically when the board has a constrained height and long lists.
+- Keep horizontal board scrolling independent of vertical column scrolling where the host platform supports it.
+- Do not shrink columns indefinitely until cards become unreadable.
+- Keep column headings visible where practical, especially when lists are long.
+- Provide a clear drop indicator when dragging cards.
+- Use wrapping and truncation deliberately for long titles, descriptions, and labels.
+- Avoid relying on hover-only controls; touch devices need equivalent actions.
+- On mobile, do not force users to drag a card across a large horizontal distance. Offer a “Move to” action as an alternative.
+- Support empty columns as valid drop targets.
+- Avoid automatically changing the workflow stages solely because the screen becomes narrow.
+
+Sizing defaults to consider: a standard column width around 260–340 CSS pixels, with a minimum width suitable for the card content. These are starting points, not fixed requirements.
+
+## 5. Properties and options
+
+Properties should use the same general configuration mechanism as other reusable UI components. Keep domain-specific data separate from presentation options.
+
+### 5.1 Core board properties
+
+| Property           | Type                       | Purpose                                                                    |
+| ------------------ | -------------------------- | -------------------------------------------------------------------------- |
+| `items`            | List of item records       | Items displayed on the board.                                              |
+| `columns`          | List of column definitions | Available workflow columns and their ordering.                             |
+| `item_id_key`      | Field name or accessor     | Identifies items uniquely.                                                 |
+| `column_id_key`    | Field name or accessor     | Identifies each column.                                                    |
+| `item_column_key`  | Field name or accessor     | Identifies the column containing each item.                                |
+| `item_order_key`   | Field name or accessor     | Optional item ordering field.                                              |
+| `mode`             | Enum                       | `editable`, `read_only`.                                                   |
+| `layout`           | Enum                       | `horizontal`, `vertical`, or supported adaptive layout.                    |
+| `orientation`      | Enum                       | Card orientation, if multiple card layouts are supported.                  |
+| `selected_item_id` | Identifier or nullable     | Currently selected card, if selection is supported.                        |
+| `active_column_id` | Identifier or nullable     | Active column in compact layouts.                                          |
+| `disabled`         | Boolean                    | Disables board interactions.                                               |
+| `read_only`        | Boolean                    | Prevents modifications while allowing inspection and permitted navigation. |
+
+The board should not require a specific card data schema. A host application might supply tasks with `title`, `priority`, and `assignee`, while another supplies articles with `headline`, `author`, and `publication_status`.
+
+### 5.2 Column properties
+
+Each column definition can support:
+
+| Property         | Type                        | Purpose                                      |
+| ---------------- | --------------------------- | -------------------------------------------- |
+| `id`             | Identifier                  | Stable identity.                             |
+| `title`          | String                      | Visible column heading.                      |
+| `description`    | String, optional            | Additional contextual information.           |
+| `position`       | Number                      | Display order.                               |
+| `color`          | Theme token or color        | Optional column accent.                      |
+| `collapsed`      | Boolean                     | Whether the column's contents are collapsed. |
+| `is_drop_target` | Boolean                     | Whether the column accepts moved items.      |
+| `item_limit`     | Integer, optional           | Maximum number of items allowed.             |
+| `show_count`     | Boolean                     | Show the number of items.                    |
+| `allow_add_item` | Boolean                     | Show a column-level add action.              |
+| `allow_reorder`  | Boolean                     | Allow changing the column order.             |
+| `custom_header`  | Slot, template, or renderer | Optional custom header content.              |
+
+`item_limit` is a board interaction constraint, not a guarantee that the application can never contain more items in that stage. The host application must enforce its own business rules when necessary.
+
+### 5.3 Card properties
+
+| Property              | Type                        | Purpose                                    |
+| --------------------- | --------------------------- | ------------------------------------------ |
+| `card_layout`         | Enum                        | `compact`, `standard`, `detailed`.         |
+| `card_min_width`      | Dimension                   | Minimum card width, if applicable.         |
+| `card_padding`        | Dimension                   | Internal spacing.                          |
+| `card_gap`            | Dimension                   | Spacing between cards.                     |
+| `card_radius`         | Dimension or preset         | Corner rounding.                           |
+| `show_card_border`    | Boolean                     | Display card boundaries.                   |
+| `show_item_count`     | Boolean                     | Show column counts, not card counts.       |
+| `show_drag_handle`    | Boolean                     | Display an explicit drag handle.           |
+| `show_item_actions`   | Boolean                     | Display configured card actions.           |
+| `selectable`          | Boolean                     | Allow card selection.                      |
+| `multi_select`        | Boolean                     | Allow selecting multiple cards, if needed. |
+| `custom_card_content` | Slot, template, or renderer | Render application-specific card content.  |
+
+For a language-independent component definition, `custom_card_content` should represent a rendering extension point rather than executable code that must be portable across languages.
+
+### 5.4 Interaction properties
+
+| Property                | Type    | Purpose                                           |
+| ----------------------- | ------- | ------------------------------------------------- |
+| `drag_enabled`          | Boolean | Allow moving cards by drag-and-drop.              |
+| `drop_enabled`          | Boolean | Accept drag-and-drop operations.                  |
+| `reorder_within_column` | Boolean | Allow reordering items in the same column.        |
+| `move_between_columns`  | Boolean | Allow moving items across columns.                |
+| `column_reordering`     | Boolean | Allow columns to be reordered.                    |
+| `keyboard_dragging`     | Boolean | Support keyboard-based move operations.           |
+| `move_action_enabled`   | Boolean | Provide an explicit Move action.                  |
+| `selection_mode`        | Enum    | `none`, `single`, `multiple`.                     |
+| `confirm_move`          | Boolean | Require confirmation for configured moves.        |
+| `auto_scroll_on_drag`   | Boolean | Scroll when dragging near a board or column edge. |
+| `show_drop_preview`     | Boolean | Preview the insertion position.                   |
+| `allow_empty_columns`   | Boolean | Permit columns without items.                     |
+
+Do not add separate properties for every mouse gesture. Define a small, consistent set of interaction options and let each rendering adapter implement the appropriate native behavior.
+
+### 5.5 Appearance properties
+
+| Property             | Type                 | Purpose                                         |
+| -------------------- | -------------------- | ----------------------------------------------- |
+| `width` / `height`   | Dimension            | Overall board dimensions.                       |
+| `min_column_width`   | Dimension            | Minimum usable column width.                    |
+| `max_column_width`   | Dimension, optional  | Optional upper width limit.                     |
+| `column_gap`         | Dimension            | Horizontal or vertical spacing between columns. |
+| `column_padding`     | Dimension            | Internal column spacing.                        |
+| `density`            | Enum                 | `compact`, `comfortable`, `spacious`.           |
+| `theme`              | Theme reference      | Shared theme.                                   |
+| `background`         | Style or theme token | Board background.                               |
+| `column_style`       | Style reference      | Column container appearance.                    |
+| `card_style`         | Style reference      | Card appearance.                                |
+| `dragged_card_style` | Style reference      | Appearance while dragging.                      |
+| `drop_target_style`  | Style reference      | Highlighting for valid targets.                 |
+| `empty_state`        | Content or renderer  | Optional empty-state content.                   |
+
+Avoid introducing a separate styling system for every card type. Prefer the host design system, reusable style tokens, and a few well-defined visual states.
+
+## 6. States
+
+### 6.1 Board-level state
+
+- Enabled or disabled.
+- Read-only or editable.
+- Current selected item or items.
+- Active column in compact mode.
+- Current drag operation, if any.
+- Optional pending move awaiting confirmation.
+
+### 6.2 Column state
+
+- Default.
+- Hovered or focused.
+- Collapsed or expanded.
+- Empty.
+- Valid drop target.
+- Invalid drop target.
+- Receiving a dragged item.
+- At or beyond its configured item limit.
+
+### 6.3 Card state
+
+- Default.
+- Hovered.
+- Focused.
+- Selected.
+- Dragging.
+- Drop-position preview.
+- Disabled or not movable.
+- Pending confirmation, if applicable.
+
+States may overlap. For example, a selected card can be focused, and a column can be both empty and a valid drop target.
+
+### Recommended visual precedence
+
+1. Disabled or unavailable interaction state.
+2. Dragging state for the active card.
+3. Selected state.
+4. Focus-visible state.
+5. Hover state.
+6. Default state.
+
+Drop-target highlighting should be rendered on the target column or insertion position independently of the card's own state.
+
+Do not rely on color alone to distinguish these states. Use outlines, icons, labels, or other visual cues where necessary.
+
+## 7. Interactions and behavior
+
+### 7.1 Card interactions
+
+- Click or activate a card to select it or open its details, according to configuration.
+- Provide a clear action for creating a new card.
+- Allow editing through a host-provided dialog, drawer, form, or inline editor.
+- Support moving a card using drag-and-drop and an explicit menu or action.
+- Allow reordering cards when enabled.
+- Provide optional card actions such as duplicate, archive, or delete through configured action slots.
+- Prevent unintended card activation when the user finishes a drag operation.
+
+Do not assume that clicking a card must always open a detail dialog. The host application should decide the intended action.
+
+### 7.2 Drag-and-drop
+
+A move operation should follow a predictable sequence:
+
+1. User starts dragging a movable card.
+2. The board displays the dragged card's state.
+3. Valid target columns and insertion positions are identified.
+4. The board previews the proposed destination.
+5. User releases the card or cancels the operation.
+6. The board validates the move against configured constraints.
+7. The item is moved and reordered, or the operation is rejected.
+8. Relevant events are emitted.
+
+Recommended rules:
+
+- Do not allow dropping a card into a disabled or invalid target.
+- Make empty columns valid targets when permitted.
+- Support reordering before, after, or between existing cards.
+- Keep the original position if the drag is canceled or rejected.
+- Avoid requiring precise pointer placement.
+- Provide an accessible alternative to dragging.
+- Define what happens if the underlying item or target column disappears during a move.
+- For asynchronous persistence, allow the host to report failure and restore or reconcile the displayed state.
+
+### 7.3 Column interactions
+
+- Add, rename, collapse, or reorder columns only when the corresponding actions are enabled.
+- Provide a clear empty-column state and insertion target.
+- Show item counts when useful.
+- Keep column actions separate from card actions.
+- Do not implicitly delete cards when a column is removed. Require an explicit policy such as moving its items, archiving them, or rejecting the removal.
+
+### 7.4 Read-only behavior
+
+A read-only board should still permit legitimate viewing operations such as scrolling, expanding supported sections, and opening details if permitted.
+
+It must not allow card movement, editing, deletion, or other modifications through pointer, keyboard, or touch interaction.
+
+## 8. Events and signals
+
+Events should describe meaningful changes and user intentions. They should not duplicate every internal rendering or pointer movement.
+
+| Event / signal             | When it occurs                                             | Useful payload                                                       |
+| -------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
+| `item_selected`            | An item is selected.                                       | `item_id`, `previous_item_id`, `source`                              |
+| `selection_changed`        | The selected item set changes.                             | `item_ids`, `previous_item_ids`                                      |
+| `item_activated`           | An item is activated.                                      | `item_id`, `source`                                                  |
+| `item_create_requested`    | The user requests a new item.                              | `column_id`, optional insertion position                             |
+| `item_edit_requested`      | The user requests editing.                                 | `item_id`                                                            |
+| `item_move_requested`      | A move is proposed.                                        | `item_id`, `source_column_id`, `target_column_id`, `target_position` |
+| `item_moved`               | A move has been accepted and reflected in component state. | `item_id`, old and new column IDs, old and new positions             |
+| `item_move_rejected`       | A move is rejected.                                        | `item_id`, target, reason                                            |
+| `item_reorder_requested`   | A reorder is proposed.                                     | `item_id`, `column_id`, old and new positions                        |
+| `item_reordered`           | An item has been reordered.                                | `item_id`, `column_id`, old and new positions                        |
+| `column_selected`          | A column becomes active or selected.                       | `column_id`, previous column ID                                      |
+| `column_create_requested`  | The user requests a new column.                            | Optional insertion position                                          |
+| `column_update_requested`  | The user requests changing column settings.                | `column_id`, changed properties                                      |
+| `column_reorder_requested` | The user requests reordering columns.                      | `column_id`, old and new positions                                   |
+| `item_delete_requested`    | The user requests deletion.                                | `item_id`                                                            |
+| `drag_started`             | A drag operation begins.                                   | `item_id`, source column                                             |
+| `drag_cancelled`           | A drag operation is canceled.                              | `item_id`, source column                                             |
+| `drop_target_changed`      | The active drop target changes.                            | Item ID, target column, target position                              |
+
+### Event design rules
+
+- Distinguish requested operations from completed operations.
+- Emit `item_moved` only after the component has accepted and reflected the move.
+- Use stable item and column identifiers, not array indices alone.
+- Include old and new positions when order changes matter.
+- Include a reason when an operation is rejected, such as `column_limit`, `invalid_target`, or `read_only`.
+- Avoid emitting `item_moved` if the item remains in the same position.
+- Do not emit business-level events for every pointer movement.
+- Keep event names and payloads consistent across framework implementations.
+
+For boards connected to a backend, the host application decides whether a requested operation can be committed, rejected, or delayed pending persistence.
+
+## 9. Commands and property updates
+
+The component should reuse the common command interface rather than implement a separate command bus.
+
+| Command                                          | Purpose                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------- |
+| `set_property(name, value)`                      | Update one configurable property.                             |
+| `set_properties(values)`                         | Apply multiple property changes together.                     |
+| `set_items(items)`                               | Replace or synchronize the displayed item collection.         |
+| `set_columns(columns)`                           | Replace or synchronize column definitions.                    |
+| `select_item(item_id)`                           | Select a card.                                                |
+| `clear_selection()`                              | Clear card selection.                                         |
+| `move_item(item_id, target_column_id, position)` | Request moving a card.                                        |
+| `reorder_item(item_id, position)`                | Request changing an item's order within its column.           |
+| `create_item(column_id, item)`                   | Add an item through the component's configured data contract. |
+| `update_item(item_id, changes)`                  | Request updating an item's fields.                            |
+| `remove_item(item_id)`                           | Request removing an item.                                     |
+| `select_column(column_id)`                       | Make a column active or selected.                             |
+| `collapse_column(column_id)`                     | Collapse a column when supported.                             |
+| `expand_column(column_id)`                       | Expand a collapsed column.                                    |
+| `cancel_interaction()`                           | Cancel an active drag or pending interaction.                 |
+
+These are semantic operations. A particular framework may implement them as methods, actions, messages, or state updates.
+
+Important distinctions:
+
+- `move_item` changes the item's column and potentially its position.
+- `reorder_item` changes its position without changing its column.
+- `set_items` synchronizes data; it is not necessarily equivalent to a sequence of user-driven create, move, or delete events.
+- If a move is controlled by the host application, the board should report the request and wait for the host to accept or reject it rather than silently mutating authoritative data.
+- A command should fail predictably when the item or target column does not exist.
+- Avoid adding individual commands for every card property. The generic property-update mechanism is usually sufficient.
+
+## 10. Data and ordering rules
+
+Cross-framework compatibility depends on a consistent item and column contract.
+
+### Recommended minimum item contract
+
+Each item needs:
+
+- A stable, unique identifier.
+- A column identifier.
+- A defined ordering value or a consistent ordering policy.
+- A data record that can contain application-specific fields.
+
+For example, a task record may contain a title, description, assignee, labels, priority, and due date. These fields are optional from the perspective of the base board.
+
+### Recommended ordering rules
+
+- Define whether items are ordered by array position, explicit rank, or another configured field.
+- Define how the board handles two items with the same rank.
+- Make the insertion position explicit when moving between cards.
+- Keep ordering stable when unrelated items are updated.
+- Ensure a move into another column updates both the column membership and ordering consistently.
+- Do not assume that ordering values are always consecutive integers.
+
+For a small local board, array order may be sufficient. A backend-backed or collaborative board may use explicit ranks and application-level conflict resolution.
+
+### Data ownership
+
+Two integration models are reasonable:
+
+Controlled board: The host application owns the item data. The board emits operation requests, and the host supplies updated data after accepting them.
+
+Locally managed board: The component updates its supplied collection and emits change events. The host can persist the resulting data.
+
+Support the integration model used by the broader component framework. Avoid combining both models without a clearly documented synchronization policy.
+
+## 11. Accessibility and usability
+
+- Make cards and column controls keyboard-accessible.
+- Provide a keyboard alternative to drag-and-drop, such as Move to column and Move up/down actions.
+- Show a visible focus indicator.
+- Give icon-only buttons accessible names.
+- Ensure card selection is distinguishable from keyboard focus.
+- Announce successful moves and rejected operations appropriately to assistive technologies.
+- Avoid relying on hover to expose the only available actions.
+- Provide sufficiently large touch targets.
+- Preserve a logical reading and focus order when columns are horizontally scrollable.
+- Support reduced-motion preferences for drag previews and reordering animations.
+- Keep focus stable after a card is moved, deleted, or a column is collapsed.
+
+## 12. Optional extensions
+
+Add these when they serve a specific use case rather than making them mandatory parts of the base component.
+
+| Extension                        | Purpose                                                     |
+| -------------------------------- | ----------------------------------------------------------- |
+| Filters and search               | Show matching cards based on fields or user criteria.       |
+| Grouping                         | Group cards within columns by another property.             |
+| Swimlanes                        | Display horizontal groups across multiple workflow columns. |
+| WIP limits                       | Show or enforce work-in-progress thresholds.                |
+| Card labels and badges           | Display priority, category, status, or other metadata.      |
+| Multi-selection and bulk actions | Move, archive, or update multiple cards together.           |
+| Card virtualization              | Render only visible cards for large boards.                 |
+| Column virtualization            | Handle boards with many columns.                            |
+| Custom card templates            | Display application-specific content.                       |
+| Activity indicators              | Show comments, attachments, or recent updates.              |
+| Undo integration                 | Allow the host application to reverse accepted moves.       |
+| Optimistic updates               | Show a move immediately while persistence is pending.       |
+| Collaboration indicators         | Display concurrent edits or other users' activity.          |
+| Swimlane summaries               | Show counts or progress per group.                          |
+
+Workflow permissions, business rules, user assignments, notifications, audit logs, and conflict resolution should remain in the host application or a domain-level service.
+
+## 13. Recommended implementation boundaries
+
+Host application or domain
+
+Owns business rules, authorization, persistence, workflow validation, and collaboration.
+
+Kanban component
+
+Renders columns and cards, handles selection and movement interactions, previews drops, and emits events.
+
+Framework rendering adapter
+
+Maps shared behavior to native layout, pointer and touch input, keyboard controls, and accessibility APIs.
+
+The Kanban component can own temporary drag state, insertion previews, column collapse state, and local selection. It should not require a database, networking layer, background task manager, or workflow engine.
+
+For cross-language compatibility, standardize the behavioral contract—especially move requests, ordering, selection, and event payloads—while allowing each framework to use its native rendering and input mechanisms.
+
+## 14. Minimum viable specification
+
+- Render configurable columns and ordered cards.
+- Accept generic item records with stable identifiers.
+- Support horizontal scrolling and responsive column sizing.
+- Display optional card content and metadata.
+- Add, select, and move cards when enabled.
+- Support drag-and-drop and a non-drag move alternative.
+- Support reordering within and between columns.
+- Handle empty columns and invalid drop targets.
+- Define editable, read-only, and disabled behavior.
+- Expose configurable card and column styles.
+- Emit consistent selection, move, reorder, and rejection events.
+- Support keyboard navigation and accessible controls.
+- Synchronize correctly with host-owned data.
+- Define ordering and move-validation rules.
+
+Recommended default: Start with a horizontally arranged board, configurable columns, generic cards, within-column reordering, cross-column movement, and explicit move events. Keep rich card templates, swimlanes, collaboration, persistence, and workflow automation optional.
+
+This provides a reusable Kanban component without turning it into a complete project-management application.

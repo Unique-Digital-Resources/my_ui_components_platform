@@ -1,0 +1,546 @@
+# UI Component Specification: Gantt Chart Timeline Bars
+
+## 1. Purpose and design principles
+
+A Gantt Chart Timeline Bars component displays time-based items as horizontal bars positioned along a timeline. Each bar represents an item with a start time, an end time, and optional additional information.
+
+It can be used for project schedules, production plans, task timelines, resource allocation, milestones, and other time-based visualizations.
+
+The key design principle is to separate the timeline's layout and interaction behavior from the content rendered inside each bar. The component should not require a predefined task-card template or a particular project-management data model.
+
+For example, one implementation might render a task name inside each bar, another might show a thumbnail and status, and another might render a custom visual created by the host application. The timeline should position and interact with these items consistently regardless of their content.
+
+### Core principles
+
+- Content-independent: Bars are generic visual containers associated with time intervals and data records.
+- Template-independent: Custom bar templates can be created, replaced, or omitted without changing the timeline's fundamental behavior.
+- Configurable: Layout, scale, spacing, interaction, time constraints, and appearance are exposed through reusable properties and options.
+- Responsive: The timeline adapts its visible time range and available width without distorting the underlying schedule.
+- Framework-independent: The same behavioral contract can be implemented in JavaScript, Python, Rust, or other frontend technologies.
+- Not a scheduling engine: Dependency resolution, resource optimization, automatic task scheduling, and project planning rules remain outside the base component.
+
+## 2. Component scope and related variants
+
+[Gantt Chart Layout - Directus Extension](https://images.openai.com/static-rsc-4/B2Xyew-35ln9xKeG1F1fefPYFPPgflhH_BPQg6liboYM3SYFUY9VUGKYViruiYAHEynJlcQ8vSXP9OkGEgaOgEyNTNEUH05F7LJr9SYNS0YVn1BdkqhdhfJ3-643_f3MH5KENnFH4329t5kDGWX-4OjnPbXzZ32tuGBLNXEyeO0?purpose=inline)
+
+A. Basic timeline bars
+
+Core component.
+
+Displays items as horizontal bars across a time axis. Supports different start and end times, configurable scale, and optional row grouping.
+
+[GanttPRO’s Dependencies Feature](https://images.openai.com/static-rsc-4/RBaqctrfimwbj-qnvuUT5B5P5Lze-4shdwVgHdQ_C6j5vCvwptOxlVRnVh91FFZ8YMVtx8OtjaDCmIEgZLE8xdDHeXUgxXT4DjEINuFczH1JjmOVmO5x_A8Yvsv2F43rXaysPzqJetooIijF9yvE2Tt2QJkjSRiyJ9kLx0I73Ag?purpose=inline)
+
+B. Timeline with dependencies
+
+Optional extension.
+
+Displays relationships between bars using connector lines. The component visualizes dependencies but does not calculate the project schedule automatically.
+
+[Bryntum Scheduler Pro - Examples](https://images.openai.com/static-rsc-4/llF_YBoOpBhJQ5R9YT22PrHOc8rSUk9hwSUV3FK82v79vuSJ2U0VkToB0TwJe-_Nwac6J03zTyUHDpg07EofMYBM_HTG2h_8h9aiOUehVCJBT0viTELw95Ij2tUsduL_2ECtPNjuu-EpqgnGTsKcTpMsyBbeL7ZHVohhlM0EIDk?purpose=inline)
+
+C. Resource or reservation timeline
+
+Alternative data organization.
+
+Each row may represent a person, machine, room, or other resource, with bars showing occupied intervals.
+
+[Public Sector Delivery & Governance Platform | Verto](https://images.openai.com/static-rsc-4/0-W_7yM2jU7Uhx-jaQpveAO6DJgp_MxGV-HwehnPi5aCzJZsdZNyvscCVGcCsjrMUOaCCRq00rVGjvUUee9XntSXuWlTpby9w0bOEwx5RqrDqN23EPzOxgRcrwpIK9qLSMPdemTXD80dKczPODCgxeEegP2PY9UhbXy19i1pDek?purpose=inline)
+
+D. Progress and milestone timeline
+
+Optional visual features.
+
+Bars can show progress, while zero-duration milestones use a marker rather than a conventional duration bar.
+
+These are supported configurations or extensions of the timeline visualization, not necessarily independent components.
+
+## 3. Layout and structure
+
+A typical Gantt timeline consists of the following logical regions:
+
+### Project schedule
+
+Item / row labels
+
+Oct 1
+
+Oct 8
+
+Oct 15
+
+Oct 22
+
+Oct 29
+
+Research
+
+Design
+
+Implementation
+
+Testing
+
+Illustrative only. A real timeline positions bars using time-to-pixel calculations rather than fixed percentages.
+
+### Recommended structural hierarchy
+
+1. Timeline container — controls overall size, overflow, and background.
+2. Optional toolbar — zoom, fit-to-range, navigation, and view options.
+3. Time axis — displays date or time labels and scale divisions.
+4. Optional row-header region — shows row names or grouping labels.
+5. Timeline grid — provides the horizontal coordinate system and optional vertical row divisions.
+6. Timeline rows — organize items by task, resource, group, or another host-defined dimension.
+7. Timeline bars — represent individual intervals and provide a stable interaction target.
+8. Optional overlays — today marker, selection, dependency lines, progress overlays, and drag previews.
+9. Optional detail or editing surface — a host-provided popup, panel, or editor.
+
+The row-header region may be hidden entirely. A simple timeline can display bars without names or row labels.
+
+## 4. Separate layout, bar data, and content templates
+
+This is a foundational requirement for a reusable component system.
+
+The timeline should not define what a bar's content means. It should define where a bar appears, how its time interval is represented, and which interactions are supported.
+
+### A. Timeline layout and behavior
+
+Time scale, coordinate mapping, rows, spacing, scrolling, zoom, selection, movement, resizing, and event emission.
+
+### B. Bar geometry and data
+
+Item identifier, start, end, optional row assignment, progress, constraints, and interaction permissions.
+
+### C. Optional content template
+
+Text, icons, badges, images, custom layouts, buttons, or arbitrary host-defined content.
+
+These are logical responsibilities, not necessarily three separate runtime objects.
+
+### Template independence rules
+
+- A bar must work with no custom template configured.
+- The component should provide a minimal default appearance, such as a plain colored bar.
+- A template may render inside a bar without controlling its timeline position.
+- Template changes must not reset the item's start time, end time, row, or selection.
+- The timeline should not require a title, description, priority, or any other specific content field.
+- Custom templates should be replaceable without modifying the component's layout rules.
+- The host application may define templates independently and reuse them across compatible timeline components.
+- A template may receive item data and visual state as inputs, but should not secretly become the authority for timeline geometry.
+
+### Content template configuration
+
+A common template contract can expose:
+
+| Property              | Purpose                                                                     |
+| --------------------- | --------------------------------------------------------------------------- |
+| `template`            | Reference to an optional reusable content template.                         |
+| `template_data`       | Data passed to that template.                                               |
+| `fallback_content`    | Optional content used when a template is missing.                           |
+| `content_alignment`   | Alignment of content within the bar.                                        |
+| `content_padding`     | Space between the bar's boundary and its content.                           |
+| `content_overflow`    | How content behaves when the bar is too narrow.                             |
+| `content_interactive` | Whether embedded controls can receive interaction independently of the bar. |
+
+The exact template registration and rendering mechanism belongs to the shared component system. It should not be hard-coded to Vue slots, React render functions, Python widgets, or Rust view macros.
+
+Important: Bar content and bar geometry must remain independent. A long title must not automatically extend a bar beyond its configured end time.
+
+## 5. Properties and options
+
+### 5.1 Core timeline properties
+
+| Property            | Type                             | Purpose                                                                                  |
+| ------------------- | -------------------------------- | ---------------------------------------------------------------------------------------- |
+| `items`             | List of records                  | Items represented by bars.                                                               |
+| `item_id_key`       | Field name or accessor           | Stable identifier for each item.                                                         |
+| `start_key`         | Field name or accessor           | Field containing the start date/time.                                                    |
+| `end_key`           | Field name or accessor           | Field containing the end date/time.                                                      |
+| `row_key`           | Field name or accessor, optional | Assigns items to rows.                                                                   |
+| `rows`              | List of definitions, optional    | Explicit row order and row configuration.                                                |
+| `view_start`        | Date/time                        | Beginning of the visible time range.                                                     |
+| `view_end`          | Date/time                        | End of the visible time range.                                                           |
+| `scale`             | Enum                             | `minute`, `hour`, `day`, `week`, `month`, `quarter`, `year`, or supported custom scales. |
+| `orientation`       | Enum                             | Usually `horizontal`; other orientations are optional.                                   |
+| `selection_mode`    | Enum                             | `none`, `single`, or `multiple`.                                                         |
+| `selected_item_ids` | List of identifiers              | Selected bars.                                                                           |
+| `read_only`         | Boolean                          | Prevents editing while allowing viewing.                                                 |
+| `disabled`          | Boolean                          | Disables supported interactions.                                                         |
+
+`start_key` and `end_key` describe data fields, not the component's own time-axis settings. The component should allow the host to supply a different record structure through accessors or field mappings.
+
+### 5.2 Time-axis properties
+
+| Property          | Type                 | Purpose                                              |
+| ----------------- | -------------------- | ---------------------------------------------------- |
+| `time_zone`       | Time-zone identifier | Interprets and displays date-time values.            |
+| `locale`          | Locale identifier    | Formats dates, times, and labels.                    |
+| `calendar_system` | Identifier           | Defines the calendar system, if configurable.        |
+| `week_start`      | Weekday or `locale`  | Determines weekly boundaries.                        |
+| `axis_position`   | Enum                 | `top`, `bottom`, or `both`.                          |
+| `show_axis`       | Boolean              | Shows or hides the time axis.                        |
+| `show_grid`       | Boolean              | Shows time-grid lines.                               |
+| `grid_interval`   | Duration or `auto`   | Defines the spacing of grid divisions.               |
+| `label_format`    | Format or `auto`     | Controls time-label formatting.                      |
+| `min_scale`       | Enum                 | Smallest allowed zoom level.                         |
+| `max_scale`       | Enum                 | Largest allowed zoom level.                          |
+| `zoom_level`      | Number or preset     | Current zoom level, if continuous zoom is supported. |
+| `snap_interval`   | Duration or `none`   | Optional time increment for moving or resizing bars. |
+| `auto_fit`        | Boolean              | Fits the selected time range to available width.     |
+| `show_today`      | Boolean              | Displays a marker for the current date or time.      |
+
+The component should distinguish the visible time range from the data's actual time range. Zooming or scrolling changes what is visible, not the stored dates of each item.
+
+### 5.3 Layout properties
+
+| Property              | Type                | Purpose                                             |
+| --------------------- | ------------------- | --------------------------------------------------- |
+| `width` / `height`    | Dimension           | Overall component dimensions.                       |
+| `row_height`          | Dimension or `auto` | Height of each timeline row.                        |
+| `min_row_height`      | Dimension           | Minimum usable row height.                          |
+| `row_gap`             | Dimension           | Space between rows.                                 |
+| `bar_height`          | Dimension or `auto` | Height of bars within rows.                         |
+| `bar_min_width`       | Dimension           | Minimum visible or interactive width.               |
+| `bar_radius`          | Dimension or preset | Corner rounding.                                    |
+| `bar_gap`             | Dimension           | Optional spacing between bars in the same row.      |
+| `header_height`       | Dimension           | Height of the time-axis header.                     |
+| `row_header_width`    | Dimension           | Width of the optional row-label region.             |
+| `show_row_headers`    | Boolean             | Shows or hides row labels.                          |
+| `row_header_position` | Enum                | `left`, `right`, or hidden.                         |
+| `row_height_mode`     | Enum                | `fixed`, `content`, or supported adaptive behavior. |
+| `density`             | Enum                | `compact`, `comfortable`, `spacious`.               |
+| `theme`               | Theme reference     | Shared visual theme.                                |
+
+The timeline grid should use a consistent time-to-pixel mapping across all rows. Rows may vary in height, but the same time must align horizontally throughout the visible timeline.
+
+### 5.4 Bar appearance properties
+
+| Property                                | Type                   | Purpose                             |
+| --------------------------------------- | ---------------------- | ----------------------------------- |
+| `bar_style`                             | Style reference        | Default bar appearance.             |
+| `bar_color`                             | Color or theme token   | Default background color.           |
+| `bar_opacity`                           | Number                 | Optional transparency.              |
+| `bar_border`                            | Style reference        | Border appearance.                  |
+| `selected_style`                        | Style reference        | Selected bar appearance.            |
+| `hover_style`                           | Style reference        | Hover appearance.                   |
+| `focused_style`                         | Style reference        | Keyboard focus appearance.          |
+| `dragging_style`                        | Style reference        | Appearance during movement.         |
+| `resize_handle_style`                   | Style reference        | Appearance of resize controls.      |
+| `progress_enabled`                      | Boolean                | Enables progress visualization.     |
+| `progress_key`                          | Field name or accessor | Optional progress field.            |
+| `progress_style`                        | Style reference        | Appearance of the progress overlay. |
+| `minimum_progress` / `maximum_progress` | Number                 | Defines the valid progress range.   |
+
+The progress overlay is a visual feature, not a requirement that every item have a completion percentage.
+
+### 5.5 Interaction properties
+
+| Property                  | Type    | Purpose                                                                     |
+| ------------------------- | ------- | --------------------------------------------------------------------------- |
+| `selectable`              | Boolean | Allows selecting bars.                                                      |
+| `movable`                 | Boolean | Allows changing bar start times or positions.                               |
+| `resizable`               | Boolean | Allows changing start or end times through bar handles.                     |
+| `row_movable`             | Boolean | Allows moving items between rows.                                           |
+| `keyboard_navigation`     | Boolean | Supports keyboard-based navigation.                                         |
+| `keyboard_movement`       | Boolean | Allows moving bars with the keyboard.                                       |
+| `keyboard_resizing`       | Boolean | Allows resizing bars with the keyboard.                                     |
+| `show_resize_handles`     | Boolean | Displays resize handles where permitted.                                    |
+| `show_tooltips`           | Boolean | Displays optional hover or focus details.                                   |
+| `snap_to_grid`            | Boolean | Snaps changes to the configured time increment.                             |
+| `allow_negative_duration` | Boolean | Normally `false`; negative-duration intervals should generally be rejected. |
+| `allow_zero_duration`     | Boolean | Enables zero-duration items where meaningful.                               |
+| `confirm_changes`         | Boolean | Requires confirmation for configured operations.                            |
+| `show_context_menu`       | Boolean | Enables optional contextual actions.                                        |
+
+For most timelines, a zero-duration item should use a milestone marker rather than a conventional bar.
+
+## 6. Time-to-position and bar geometry
+
+This is the central behavior of the component.
+
+A bar's horizontal position and width must be derived from its start and end times, not from its text content or the number of items in the row.
+
+For a linear timeline with a visible start time \\(T_0\\), visible end time \\(T_1\\), and usable width \\(W\\):
+
+\\[ x(t)=W\frac{t-T_0}{T_1-T_0} \\]
+
+For an item with start time \\(S\\) and end time \\(E\\):
+
+\\[ x\_{\text{bar}}=x(S), \qquad w\_{\text{bar}}=x(E)-x(S) \\]
+
+These equations describe a basic linear time axis. Implementations must also account for the row-header region, internal padding, clipping, and any reserved space.
+
+### Geometry rules
+
+- Use a single shared horizontal time scale for every row.
+- Preserve the actual interval even when part of a bar is outside the visible range.
+- Clip the visible portion of a bar at the viewport boundaries without changing its underlying dates.
+- Ensure zooming and scrolling update all bars and time-axis labels consistently.
+- Prevent negative visual widths from invalid date ranges.
+- Keep the interaction target usable for short-duration bars.
+- Distinguish the visible hit area from the exact time interval if minimum-width interaction targets are needed.
+- Avoid introducing visual gaps that imply a different time interval unless that is an explicit styling choice.
+
+Short intervals: A bar may be mathematically narrower than a usable pointer target. The component may expand its hit target or provide an alternate selection mechanism, but must not silently modify the actual start and end times.
+
+Nonlinear calendars: Day, week, and month scales can involve calendar boundaries rather than equal fixed durations. For example, month boundaries are not uniformly spaced in duration. Define whether the axis represents elapsed time or calendar units, and ensure the geometry and labels use the same rule.
+
+## 7. States
+
+### 7.1 Timeline-level states
+
+- Default.
+- Enabled or disabled.
+- Read-only.
+- Loading or empty, if the host provides these states.
+- Current zoom and visible time range.
+- Active navigation or drag operation.
+- Focused timeline region.
+
+### 7.2 Bar-level states
+
+- Default.
+- Hovered.
+- Focused.
+- Selected.
+- Dragging or moving.
+- Resizing from the start edge.
+- Resizing from the end edge.
+- Partially outside the visible range.
+- Disabled or non-editable.
+- Pending update.
+- Rejected update.
+
+### 7.3 Optional visual states
+
+- Progress overlay.
+- Dependency connector.
+- Milestone marker.
+- Today marker.
+- Critical or highlighted item.
+- Overlapping or conflicting interval indicator.
+
+These optional states should not be assumed to have business meaning unless the host application defines it.
+
+### Visual precedence
+
+1. Disabled interaction state.
+2. Active drag or resize state.
+3. Selected state.
+4. Focus-visible state.
+5. Hover state.
+6. Default state.
+
+Progress and dependency visuals should be composed separately where practical, so changing the selection style does not remove progress information.
+
+## 8. Interactions and behavior
+
+### 8.1 Navigation and zoom
+
+- Scroll horizontally to navigate through time.
+- Zoom in or out using configured controls, supported gestures, or keyboard actions.
+- Offer a fit-to-range action when useful.
+- Keep the pointer's time position stable during pointer-centered zoom, if that interaction is supported.
+- Allow the host to set the visible time range directly.
+- Do not automatically change the item's dates when the user scrolls or zooms.
+- Avoid unexpectedly resetting the visible range when item data changes.
+
+### 8.2 Selecting a bar
+
+- Selecting a bar identifies its associated item.
+- Selection should not depend on whether the bar contains text or custom content.
+- Clicking a control embedded in a custom template should not unintentionally trigger the bar's selection or movement action.
+- A host may use selection to open a separate details panel.
+- Clicking an empty timeline region should clear selection only if configured.
+
+### 8.3 Moving a bar
+
+A typical move interaction:
+
+1. The user starts dragging a movable bar.
+2. The component captures the initial position and interval.
+3. A preview follows the pointer along the time axis.
+4. The new start and end times are calculated using the shared scale.
+5. Optional snapping is applied.
+6. The component checks basic constraints.
+7. On release, the move is accepted or reported to the host.
+8. The component updates or reconciles its data and emits the appropriate event.
+
+Moving a bar normally preserves its duration:
+
+\\[ S'=S+\Delta t,\qquad E'=E+\Delta t \\]
+
+This is the recommended default. A different policy must be explicitly configured.
+
+### 8.4 Resizing a bar
+
+- Dragging the left handle changes the start time.
+- Dragging the right handle changes the end time.
+- The opposite endpoint remains fixed.
+- Enforce the configured minimum duration, if any.
+- Do not allow the end time to precede the start time unless the component explicitly supports an unusual interval model.
+- Apply snapping consistently to both endpoints.
+- Provide keyboard-accessible alternatives.
+
+### 8.5 Row movement
+
+When rows represent categories, resources, or task groups, moving a bar to another row should update its row assignment only if permitted.
+
+The component should not infer that moving a bar to another row changes its dates, status, assignee, or other domain fields.
+
+## 9. Events and signals
+
+Use semantic events for meaningful changes rather than exposing low-level pointer movement as the primary public API.
+
+| Event / signal             | When it occurs                                       | Useful payload                                 |
+| -------------------------- | ---------------------------------------------------- | ---------------------------------------------- |
+| `bar_selected`             | A bar is selected.                                   | `item_id`, `previous_item_id`, `source`        |
+| `selection_changed`        | The selected item set changes.                       | `item_ids`, `previous_item_ids`                |
+| `bar_activated`            | A bar is activated.                                  | `item_id`, `source`                            |
+| `view_range_changed`       | The visible time range changes.                      | `view_start`, `view_end`, `reason`             |
+| `scale_changed`            | Timeline scale or zoom changes.                      | `scale`, `zoom_level`                          |
+| `bar_move_requested`       | A move is proposed.                                  | `item_id`, original and proposed intervals     |
+| `bar_moved`                | A move is accepted and reflected in component state. | `item_id`, old and new start/end times         |
+| `bar_resize_requested`     | A resize is proposed.                                | `item_id`, changed endpoint, proposed interval |
+| `bar_resized`              | A resize is accepted.                                | `item_id`, old and new intervals               |
+| `bar_move_rejected`        | A move or resize is rejected.                        | `item_id`, proposed interval, reason           |
+| `bar_row_change_requested` | A bar is proposed for another row.                   | `item_id`, old and new row IDs                 |
+| `bar_row_changed`          | A row change is accepted.                            | `item_id`, old and new row IDs                 |
+| `drag_started`             | A drag interaction begins.                           | `item_id`, operation type                      |
+| `drag_cancelled`           | A drag is canceled.                                  | `item_id`, operation type                      |
+| `empty_timeline_activated` | An empty area is activated, if supported.            | `time`, `row_id`, `source`                     |
+| `milestone_activated`      | A milestone is activated.                            | `item_id`, milestone time                      |
+
+### Event rules
+
+- Include stable identifiers and typed timestamps.
+- Distinguish a proposed change from an accepted change.
+- Emit `bar_moved` only when the effective interval or row has changed.
+- Do not emit a move event merely because the visible range or zoom changed.
+- Define whether date-time values are normalized to a particular time zone.
+- Keep drag-preview updates local where possible; emit a final semantic event on completion.
+- If the host rejects a change, restore the previous state or reconcile it with the authoritative data.
+- Avoid emitting duplicate events during rerendering or data synchronization.
+
+For an asynchronous host, the component may expose pending state while the host validates or persists the proposed update.
+
+## 10. Commands and property updates
+
+Use the common component command mechanism.
+
+| Command                               | Purpose                                         |
+| ------------------------------------- | ----------------------------------------------- |
+| `set_property(name, value)`           | Change a configurable property.                 |
+| `set_properties(values)`              | Apply multiple property changes together.       |
+| `set_items(items)`                    | Replace or synchronize the displayed item data. |
+| `set_view_range(start, end)`          | Change the visible time range.                  |
+| `set_scale(scale)`                    | Change the timeline scale.                      |
+| `zoom_in()` / `zoom_out()`            | Change zoom level.                              |
+| `fit_to_range(start, end)`            | Fit a given interval into the visible width.    |
+| `navigate_to(time)`                   | Move the visible range to a target time.        |
+| `select_bar(item_id)`                 | Select a bar.                                   |
+| `clear_selection()`                   | Clear selection.                                |
+| `move_bar(item_id, start, end)`       | Request a bar interval change.                  |
+| `resize_bar(item_id, endpoint, time)` | Request changing one endpoint.                  |
+| `move_bar_to_row(item_id, row_id)`    | Request a row assignment change.                |
+| `cancel_interaction()`                | Cancel an active drag or resize.                |
+
+Commands should not duplicate the generic property mechanism. For example, use `set_properties` to update display preferences, but a semantic `move_bar` operation when a move needs validation, an event, or host approval.
+
+A command should fail predictably if the item does not exist, the time interval is invalid, or the requested operation is disabled.
+
+## 11. Time and interval correctness
+
+- Date-only versus date-time: Decide whether items represent calendar dates or precise instants. Do not silently mix the two.
+- Time zones: Use an explicit policy for date-time items and labels.
+- Daylight saving: Elapsed-time calculations and local-calendar boundaries can differ. Keep the chosen axis model consistent.
+- Interval boundaries: Document whether an interval is treated as `[start, end)` or another convention. Half-open intervals are often useful because adjacent tasks can meet without overlapping.
+- Zero duration: Represent milestones with a marker or explicit zero-duration mode.
+- Invalid intervals: Reject or flag intervals where the end precedes the start.
+- Snapping: Apply the same snapping rules during preview and final commit.
+- Partial visibility: A bar crossing the viewport boundary remains the same underlying interval.
+- Overlapping bars: Define whether overlap is allowed, displayed in separate subrows, or handled by the host.
+- Date scale: Month and year views should align with actual calendar boundaries, not arbitrary fixed day counts.
+- Precision: Avoid unnecessary rounding that changes stored timestamps when converting between time and pixel coordinates.
+
+The component should handle visualization-level interval validity. Resource conflicts, working calendars, holidays, business-day arithmetic, and scheduling dependencies are domain concerns unless explicitly supplied as extensions.
+
+## 12. Accessibility and usability
+
+- Make selectable bars keyboard-accessible.
+- Provide visible focus indicators.
+- Expose the item's time interval in an accessible label or description.
+- Provide keyboard alternatives for moving and resizing bars.
+- Ensure selection, progress, and dependency states are not communicated through color alone.
+- Make resize handles discoverable and operable without a pointer.
+- Keep labels readable at different zoom levels.
+- Offer an accessible item list or equivalent view when the visual timeline is too dense to navigate effectively.
+- Prevent embedded template controls from trapping or confusing keyboard focus.
+- Respect reduced-motion preferences.
+- Announce accepted or rejected changes appropriately.
+
+A visual timeline can be difficult to navigate with screen readers alone. An alternative tabular or list representation of the same items is often a valuable accessibility extension.
+
+## 13. Optional extensions
+
+| Extension                  | Purpose                                                            |
+| -------------------------- | ------------------------------------------------------------------ |
+| Dependency connectors      | Display links between related bars.                                |
+| Milestones                 | Show zero-duration points in time.                                 |
+| Progress overlays          | Visualize completion within bars.                                  |
+| Baseline bars              | Compare planned and actual intervals.                              |
+| Resource rows              | Group bars by people, equipment, or other resources.               |
+| Row grouping               | Organize rows into collapsible groups.                             |
+| Multi-level time axis      | Show years, months, weeks, or days in separate header levels.      |
+| Today marker               | Highlight the current date or time.                                |
+| Critical-path styling      | Highlight items identified by an external scheduling engine.       |
+| Working-time calendar      | Display non-working periods or business hours.                     |
+| Conflict indicators        | Highlight overlapping assignments or other host-defined conflicts. |
+| Custom templates           | Render arbitrary reusable content inside bars.                     |
+| Tooltips and detail panels | Show more information without changing the basic bar contract.     |
+| Virtualization             | Render visible rows and bars efficiently for large datasets.       |
+| Undo integration           | Let the host reverse accepted changes.                             |
+| Comparison mode            | Display planned and actual timelines together.                     |
+
+These features should remain optional. In particular, dependency visualization must not imply that the component automatically calculates a valid project schedule.
+
+## 14. Recommended implementation boundaries
+
+Host application or domain
+
+Owns scheduling rules, working calendars, permissions, dependency calculations, persistence, and business validation.
+
+Timeline component
+
+Owns the time axis, coordinate mapping, rows, bar geometry, zoom, selection, move/resize interactions, and semantic events.
+
+Reusable content-template system
+
+Optionally renders arbitrary content inside bars, independently of time positioning and geometry.
+
+Framework rendering adapter
+
+Maps the shared component contract to native layout, drawing, input, and accessibility facilities.
+
+The content-template system may be a shared facility used by Kanban cards, timeline bars, list rows, and other components. It should not be recreated independently inside each component.
+
+## 15. Minimum viable specification
+
+- Display generic items as horizontal bars.
+- Configure start and end fields independently of item content.
+- Map time intervals to a shared horizontal coordinate system.
+- Support configurable visible range, scale, and scrolling.
+- Support optional row assignment and row headers.
+- Provide a minimal default bar appearance.
+- Allow custom templates without requiring them.
+- Keep bar geometry independent of rendered content.
+- Support selection and optional move/resize interactions.
+- Define interval validation, snapping, and time-zone behavior.
+- Expose view-range, scale, selection, move, and resize events.
+- Support responsive layout and usable targets for short bars.
+- Provide keyboard alternatives and accessible item descriptions.
+- Separate visualization behavior from scheduling logic and persistence.
+
+Recommended default: Start with a horizontal time axis, configurable rows, generic interval bars, zoom and scrolling, optional selection, and a plain fallback bar renderer. Add custom templates, movement, resizing, milestones, progress, and dependencies as optional capabilities.
+
+This establishes a reusable timeline foundation that can serve Gantt charts, resource schedules, reservation views, and other time-based interfaces without coupling the component to a particular task model or content template.
