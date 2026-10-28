@@ -1,0 +1,1056 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  RotateCcw,
+     6→  ArrowLeftRight,
+     7→  ArrowUpDown,
+     8→  Sparkles,
+     9→  Ruler,
+    10→  Plus,
+    11→  Minus,
+    12→  Circle,
+    13→} from "lucide-react";
+    14→import { getComponent } from "@/lib/platform/content";
+    15→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+    16→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+    17→import { AgentSkillTabs, CollapsibleSection } from "@/components/platform/agent-skill-tabs";
+    18→import {
+    19→  PeriodicRangeReact,
+    20→  type PeriodicRangeOrientation,
+    21→  type PeriodicRangeValue,
+    22→} from "./periodic-range-react";
+    23→import type { PeriodicRange } from "@/lib/components/periodic-range";
+    24→import { cn } from "@/lib/utils";
+    25→import { toast } from "sonner";
+    26→
+    27→interface PlaygroundState {
+    28→  min: number;
+    29→  max: number;
+    30→  valueMin: number;
+    31→  valueMax: number;
+    32→  step: number;
+    33→  showMarkers: boolean;
+    34→  markerStep: number;
+    35→  orientation: PeriodicRangeOrientation;
+    36→  thickness: number;
+    37→  length: number;
+    38→}
+    39→
+    40→const DEFAULTS: PlaygroundState = {
+    41→  min: 0,
+    42→  max: 100,
+    43→  valueMin: 25,
+    44→  valueMax: 75,
+    45→  step: 0,
+    46→  showMarkers: false,
+    47→  markerStep: 10,
+    48→  orientation: "horizontal",
+    49→  thickness: 8,
+    50→  length: 320,
+    51→};
+    52→
+    53→export function PeriodicRangePlayground() {
+    54→  const meta = getComponent("periodic-range")!;
+    55→  const [state, setState] = React.useState<PlaygroundState>(DEFAULTS);
+    56→  const [out, setOut] = React.useState<PeriodicRangeValue>({
+    57→    valueMin: DEFAULTS.valueMin,
+    58→    valueMax: DEFAULTS.valueMax,
+    59→  });
+    60→  const [activeTab, setActiveTab] = React.useState<
+    61→    "javascript" | "html" | "css" | "api"
+    62→  >("javascript");
+    63→  const instanceRef = React.useRef<PeriodicRange | null>(null);
+    64→
+    65→  const onInput = React.useCallback((v: PeriodicRangeValue) => {
+    66→    setOut(v);
+    67→    // Sync the inspector state with the (possibly snapped / clamped) values
+    68→    // emitted by the instance. This keeps the property inspector's valueMin /
+    69→    // valueMax inputs in lockstep with what the canvas actually shows, even
+    70→    // when the user typed a value that the instance rounded.
+    71→    setState((s) => {
+    72→      if (s.valueMin !== v.valueMin || s.valueMax !== v.valueMax) {
+    73→        return { ...s, valueMin: v.valueMin, valueMax: v.valueMax };
+    74→      }
+    75→      return s;
+    76→    });
+    77→  }, []);
+    78→
+    79→  const update = React.useCallback(
+    80→    <K extends keyof PlaygroundState>(key: K, value: PlaygroundState[K]) => {
+    81→      setState((s) => {
+    82→        const next = { ...s, [key]: value } as PlaygroundState;
+    83→        // Keep min ≤ max (swap if the user inverted them).
+    84→        const lo = Math.min(next.min, next.max);
+    85→        const hi = Math.max(next.min, next.max);
+    86→        next.min = lo;
+    87→        next.max = hi;
+    88→        // Clamp values to the (possibly new) range.
+    89→        let vMin = clampNum(next.valueMin, next.min, next.max);
+    90→        let vMax = clampNum(next.valueMax, next.min, next.max);
+    91→        // Enforce valueMin ≤ valueMax. The thumb the user is moving wins —
+    92→        // the other one stays put and the moving thumb clamps to it.
+    93→        if (vMin > vMax) {
+    94→          if (key === "valueMin") {
+    95→            // User raised valueMin above valueMax → clamp valueMin down.
+    96→            vMin = vMax;
+    97→          } else if (key === "valueMax") {
+    98→            // User lowered valueMax below valueMin → clamp valueMax up.
+    99→            vMax = vMin;
+   100→          } else {
+   101→            // Range bounds changed in a way that inverted the values
+   102→            // (e.g. min rose above valueMax). Push them to the new edges.
+   103→            vMin = next.min;
+   104→            vMax = next.max;
+   105→            if (vMin > vMax) vMin = vMax = next.min;
+   106→          }
+   107→        }
+   108→        next.valueMin = vMin;
+   109→        next.valueMax = vMax;
+   110→        return next;
+   111→      });
+   112→    },
+   113→    [],
+   114→  );
+   115→
+   116→  const reset = React.useCallback(() => {
+   117→    setState(DEFAULTS);
+   118→    setOut({ valueMin: DEFAULTS.valueMin, valueMax: DEFAULTS.valueMax });
+   119→    toast.success("Reset to defaults");
+   120→  }, []);
+   121→
+   122→  // Sync the live component instance's range (min/max) with the inspector.
+   123→  // valueMin / valueMax changes are pushed via the React wrapper's prop
+   124→  // effects (which call setValueMin / setValueMax, applying snapping).
+   125→  React.useEffect(() => {
+   126→    instanceRef.current?.setRange(state.min, state.max);
+   127→  }, [state.min, state.max]);
+   128→
+   129→  // Code generation.
+   130→  const jsCode = React.useMemo(() => generateJsCode(state), [state]);
+   131→  const htmlCode = React.useMemo(() => generateHtmlCode(state), [state]);
+   132→  const cssCode = React.useMemo(() => generateCssCode(), []);
+   133→  const apiCode = React.useMemo(() => generateApiCode(), []);
+   134→
+   135→  const span = state.max - state.min;
+   136→  const selectedSpan = out.valueMax - out.valueMin;
+   137→
+   138→  return (
+   139→    <div>
+   140→      {/* Page header */}
+   141→      <div className="border-b border-border bg-background">
+   142→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   143→          <Breadcrumbs />
+   144→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   145→            <div>
+   146→              <PageOverline>Components / Inputs</PageOverline>
+   147→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+   148→                {meta.name}
+   149→              </h1>
+   150→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">
+   151→                {meta.longDescription}
+   152→              </p>
+   153→            </div>
+   154→            <div className="flex flex-wrap items-center gap-2">
+   155→              {meta.tags.map((tag) => (
+   156→                <span
+   157→                  key={tag}
+   158→                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground"
+   159→                >
+   160→                  {tag}
+   161→                </span>
+   162→              ))}
+   163→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   164→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />
+   165→                {meta.status}
+   166→              </span>
+   167→            </div>
+   168→          </div>
+   169→        </div>
+   170→      </div>
+   171→
+   172→      {/* Playground workspace */}
+   173→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   174→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
+   175→          {/* Live preview */}
+   176→          <section
+   177→            aria-label="Live preview"
+   178→            className="panel relative flex h-[600px] flex-col overflow-hidden"
+   179→          >
+   180→            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+   181→              <div className="flex items-center gap-2">
+   182→                <span className="h-2 w-2 rounded-full bg-brand-lemon animate-pulse" />
+   183→                <span className="eyebrow">Live canvas</span>
+   184→              </div>
+   185→              <button
+   186→                type="button"
+   187→                onClick={reset}
+   188→                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   189→              >
+   190→                <RotateCcw className="h-3 w-3" />
+   191→                Reset
+   192→              </button>
+   193→            </div>
+   194→
+   195→            <div className="flex flex-1 min-h-0 items-center justify-center overflow-hidden bg-grid p-10">
+   196→              <PeriodicRangeReact
+   197→                min={state.min}
+   198→                max={state.max}
+   199→                valueMin={state.valueMin}
+   200→                valueMax={state.valueMax}
+   201→                step={state.step}
+   202→                showMarkers={state.showMarkers}
+   203→                markerStep={state.markerStep}
+   204→                orientation={state.orientation}
+   205→                thickness={state.thickness}
+   206→                length={state.length}
+   207→                onInput={onInput}
+   208→                instanceRef={instanceRef}
+   209→              />
+   210→            </div>
+   211→
+   212→            {/* Output section */}
+   213→            <div className="border-t border-border p-4">
+   214→              <div className="mb-3 flex items-center justify-between">
+   215→                <span className="eyebrow">Output</span>
+   216→                <span className="font-mono text-[11px] text-muted-foreground">
+   217→                  span {formatNum(selectedSpan)} / {formatNum(span)}
+   218→                </span>
+   219→              </div>
+   220→              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+   221→                <ValueChip
+   222→                  label="Min"
+   223→                  value={formatNum(out.valueMin)}
+   224→                  accent="min"
+   225→                />
+   226→                <ValueChip
+   227→                  label="Max"
+   228→                  value={formatNum(out.valueMax)}
+   229→                  accent="max"
+   230→                />
+   231→                <CopyableValue
+   232→                  label="valueMin"
+   233→                  value={String(out.valueMin)}
+   234→                />
+   235→                <CopyableValue
+   236→                  label="valueMax"
+   237→                  value={String(out.valueMax)}
+   238→                />
+   239→              </div>
+   240→            </div>
+   241→          </section>
+   242→
+   243→          {/* Property inspector */}
+   244→          <AgentSkillTabs
+   245→            agentPath="/docs/components/periodic-range-AGENT.md"
+   246→            skillPath="/docs/components/periodic-range-SKILL.md"
+   247→          >
+   248→              {/* Range */}
+   249→              <PropertyField label="Range" hint="Minimum and maximum bounds of the track">
+   250→                <div className="grid grid-cols-2 gap-2">
+   251→                  <NumberInput
+   252→                    label="min"
+   253→                    value={state.min}
+   254→                    onChange={(v) => update("min", v)}
+   255→                  />
+   256→                  <NumberInput
+   257→                    label="max"
+   258→                    value={state.max}
+   259→                    onChange={(v) => update("max", v)}
+   260→                  />
+   261→                </div>
+   262→              </PropertyField>
+   263→
+   264→              {/* Values */}
+   265→              <PropertyField label="Values" hint="Current low and high thumb positions">
+   266→                <div className="grid grid-cols-2 gap-2">
+   267→                  <DeferredNumberInput
+   268→                    label="valueMin"
+   269→                    value={state.valueMin}
+   270→                    onCommit={(v) => update("valueMin", v)}
+   271→                  />
+   272→                  <DeferredNumberInput
+   273→                    label="valueMax"
+   274→                    value={state.valueMax}
+   275→                    onCommit={(v) => update("valueMax", v)}
+   276→                  />
+   277→                </div>
+   278→              </PropertyField>
+   279→
+   280→              {/* Step */}
+   281→              <PropertyField
+   282→                label="Step"
+   283→                hint="Snap increment. 0 = no snapping."
+   284→                value={state.step === 0 ? "off" : String(state.step)}
+   285→              >
+   286→                <NumberInput
+   287→                  label="step"
+   288→                  value={state.step}
+   289→                  min={0}
+   290→                  onChange={(v) => update("step", Math.max(0, v))}
+   291→                />
+   292→              </PropertyField>
+   293→
+   294→              {/* Markers */}
+   295→              <PropertyField label="Markers" hint="Tick marks with numeric labels">
+   296→                <div className="flex items-center gap-2">
+   297→                  <ToggleSwitch
+   298→                    checked={state.showMarkers}
+   299→                    onChange={(v) => update("showMarkers", v)}
+   300→                    label={state.showMarkers ? "On" : "Off"}
+   301→                  />
+   302→                </div>
+   303→              </PropertyField>
+   304→
+   305→              {state.showMarkers && (
+   306→                <PropertyField
+   307→                  label="Marker step"
+   308→                  hint="Interval between markers"
+   309→                  value={String(state.markerStep)}
+   310→                >
+   311→                  <NumberInput
+   312→                    label="markerStep"
+   313→                    value={state.markerStep}
+   314→                    min={1}
+   315→                    onChange={(v) => update("markerStep", Math.max(1, v))}
+   316→                  />
+   317→                </PropertyField>
+   318→              )}
+   319→
+   320→              {/* Orientation */}
+   321→              <PropertyField label="Orientation" hint="Track direction">
+   322→                <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   323→                  {(
+   324→                    [
+   325→                      { value: "horizontal", label: "Horizontal", icon: ArrowLeftRight },
+   326→                      { value: "vertical", label: "Vertical", icon: ArrowUpDown },
+   327→                    ] as const
+   328→                  ).map((o) => {
+   329→                    const Icon = o.icon;
+   330→                    const active = state.orientation === o.value;
+   331→                    return (
+   332→                      <button
+   333→                        key={o.value}
+   334→                        type="button"
+   335→                        onClick={() => update("orientation", o.value)}
+   336→                        aria-pressed={active}
+   337→                        className={cn(
+   338→                          "flex items-center justify-center gap-2 rounded px-2 py-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   339→                          active
+   340→                            ? "bg-brand-purple-strong text-foreground"
+   341→                            : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   342→                        )}
+   343→                      >
+   344→                        <Icon className="h-3.5 w-3.5" />
+   345→                        {o.label}
+   346→                      </button>
+   347→                    );
+   348→                  })}
+   349→                </div>
+   350→              </PropertyField>
+   351→
+   352→              {/* Thickness */}
+   353→              <PropertyField
+   354→                label="Thickness"
+   355→                hint="Track thickness (px)"
+   356→                value={`${state.thickness} px`}
+   357→              >
+   358→                <RangeInput
+   359→                  min={4}
+   360→                  max={48}
+   361→                  step={1}
+   362→                  value={state.thickness}
+   363→                  onChange={(v) => update("thickness", v)}
+   364→                />
+   365→              </PropertyField>
+   366→
+   367→              {/* Length */}
+   368→              <PropertyField
+   369→                label="Length"
+   370→                hint="Track length (px)"
+   371→                value={`${state.length} px`}
+   372→              >
+   373→                <RangeInput
+   374→                  min={80}
+   375→                  max={500}
+   376→                  step={2}
+   377→                  value={state.length}
+   378→                  onChange={(v) => update("length", v)}
+   379→                />
+   380→              </PropertyField>
+   381→
+   382→              {/* Nested component: Thumb (Custom Button style) */}
+   383→              <CollapsibleSection title="Thumb Style" icon={Circle}>
+   384→                <PropertyField label="Thumb variant" hint="Visual style of the range thumbs">
+   385→                  <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   386→                    {([
+   387→                      { value: "primary", label: "Primary" },
+   388→                      { value: "secondary", label: "Secondary" },
+   389→                    ] as const).map((v) => (
+   390→                      <button
+   391→                        key={v.value}
+   392→                        type="button"
+   393→                        className={cn(
+   394→                          "rounded px-2 py-2 text-[11px] font-medium transition-colors",
+   395→                          "text-muted-foreground hover:text-foreground hover:bg-accent"
+   396→                        )}
+   397→                      >
+   398→                        {v.label}
+   399→                      </button>
+   400→                    ))}
+   401→                  </div>
+   402→                </PropertyField>
+   403→                <PropertyField label="Thumb size" hint="Thumb diameter (px)" value="16 px">
+   404→                  <RangeInput min={8} max={32} step={1} value={16} onChange={() => {}} />
+   405→                </PropertyField>
+   406→                <PropertyField label="Thumb border" hint="Border width (px)" value="2 px">
+   407→                  <RangeInput min={0} max={6} step={1} value={2} onChange={() => {}} />
+   408→                </PropertyField>
+   409→              </CollapsibleSection>
+   410→          </AgentSkillTabs>
+   411→        </div>
+   412→
+   413→        {/* Code panel */}
+   414→        <section className="panel mt-6 overflow-hidden">
+   415→          <div className="flex items-center justify-between border-b border-border px-2">
+   416→            <div className="flex">
+   417→              {(
+   418→                [
+   419→                  ["javascript", "JavaScript"],
+   420→                  ["html", "HTML"],
+   421→                  ["css", "CSS"],
+   422→                  ["api", "API"],
+   423→                ] as const
+   424→              ).map(([key, label]) => (
+   425→                <button
+   426→                  key={key}
+   427→                  type="button"
+   428→                  onClick={() => setActiveTab(key)}
+   429→                  className={cn(
+   430→                    "relative h-9 px-3 text-[12px] font-medium transition-colors focus-visible:outline-none",
+   431→                    activeTab === key
+   432→                      ? "text-foreground"
+   433→                      : "text-muted-foreground hover:text-foreground",
+   434→                  )}
+   435→                >
+   436→                  {label}
+   437→                  {activeTab === key && (
+   438→                    <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />
+   439→                  )}
+   440→                </button>
+   441→              ))}
+   442→            </div>
+   443→            <span className="pr-2 text-[11px] font-mono text-muted-foreground/70">
+   444→              Synchronized with live configuration
+   445→            </span>
+   446→          </div>
+   447→          <div className="p-4">
+   448→            {activeTab === "javascript" && (
+   449→              <CodeBlock code={jsCode} language="javascript" filename="init.js" />
+   450→            )}
+   451→            {activeTab === "html" && (
+   452→              <CodeBlock code={htmlCode} language="html" filename="index.html" />
+   453→            )}
+   454→            {activeTab === "css" && (
+   455→              <CodeBlock code={cssCode} language="css" filename="styles.css" />
+   456→            )}
+   457→            {activeTab === "api" && (
+   458→              <CodeBlock code={apiCode} language="typescript" filename="api.ts" />
+   459→            )}
+   460→          </div>
+   461→        </section>
+   462→
+   463→        {/* Documentation */}
+   464→        <ComponentDocumentation />
+   465→      </div>
+   466→    </div>
+   467→  );
+   468→}
+   469→
+   470→// ---- Local helpers ----
+   471→
+   472→function clampNum(v: number, min: number, max: number): number {
+   473→  if (Number.isNaN(v)) return min;
+   474→  return v < min ? min : v > max ? max : v;
+   475→}
+   476→
+   477→function formatNum(v: number): string {
+   478→  const rounded = Math.round(v * 100) / 100;
+   479→  if (Number.isInteger(rounded)) return String(rounded);
+   480→  return rounded.toFixed(2);
+   481→}
+   482→
+   483→function PropertyField({
+   484→  label,
+   485→  hint,
+   486→  value,
+   487→  children,
+   488→}: {
+   489→  label: string;
+   490→  hint?: string;
+   491→  value?: string;
+   492→  children: React.ReactNode;
+   493→}) {
+   494→  return (
+   495→    <div>
+   496→      <div className="mb-1.5 flex items-center justify-between">
+   497→        <label className="text-[12px] font-medium text-foreground">{label}</label>
+   498→        {value && (
+   499→          <span className="font-mono text-[11px] text-brand-lemon">{value}</span>
+   500→        )}
+   501→      </div>
+   502→      {children}
+   503→      {hint && (
+   504→        <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p>
+   505→      )}
+   506→    </div>
+   507→  );
+   508→}
+   509→
+   510→function NumberInput({
+   511→  label,
+   512→  value,
+   513→  onChange,
+   514→  min,
+   515→  max,
+   516→}: {
+   517→  label: string;
+   518→  value: number;
+   519→  onChange: (v: number) => void;
+   520→  min?: number;
+   521→  max?: number;
+   522→}) {
+   523→  return (
+   524→    <div className="relative">
+   525→      <input
+   526→        type="number"
+   527→        value={Number.isFinite(value) ? value : 0}
+   528→        min={min}
+   529→        max={max}
+   530→        onChange={(e) => {
+   531→          const v = Number(e.target.value);
+   532→          onChange(Number.isFinite(v) ? v : 0);
+   533→        }}
+   534→        spellCheck={false}
+   535→        aria-label={label}
+   536→        className="h-9 w-full rounded-md border border-border bg-background pl-2.5 pr-2 font-mono text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   537→      />
+   538→      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono uppercase text-muted-foreground/60">
+   539→        {label}
+   540→      </span>
+   541→    </div>
+   542→  );
+   543→}
+   544→
+   545→/**
+   546→ * A number input that defers committing its value to the parent until the
+   547→ * user blurs the field or presses Enter. While focused, the user can type
+   548→ * freely (e.g. "33") without each keystroke being snapped / clamped back by
+   549→ * the underlying component (which would make typing multi-digit numbers
+   550→ * impossible when step snapping is on).
+   551→ *
+   552→ * The displayed value tracks the `value` prop while unfocused, and tracks
+   553→ * the local draft while focused.
+   554→ */
+   555→function DeferredNumberInput({
+   556→  label,
+   557→  value,
+   558→  onCommit,
+   559→  min,
+   560→  max,
+   561→}: {
+   562→  label: string;
+   563→  value: number;
+   564→  onCommit: (v: number) => void;
+   565→  min?: number;
+   566→  max?: number;
+   567→}) {
+   568→  const [draft, setDraft] = React.useState<string>(String(value));
+   569→  const [focused, setFocused] = React.useState(false);
+   570→
+   571→  // Sync the draft from the external value whenever the input is not focused
+   572→  // (so external changes — e.g. canvas drags, reset — are reflected).
+   573→  React.useEffect(() => {
+   574→    if (!focused) setDraft(String(value));
+   575→  }, [value, focused]);
+   576→
+   577→  const commit = React.useCallback(() => {
+   578→    const v = Number(draft);
+   579→    if (Number.isFinite(v)) {
+   580→      onCommit(v);
+   581→    } else {
+   582→      // Reset to the last known good value on invalid input.
+   583→      setDraft(String(value));
+   584→    }
+   585→  }, [draft, value, onCommit]);
+   586→
+   587→  return (
+   588→    <div className="relative">
+   589→      <input
+   590→        type="number"
+   591→        value={focused ? draft : String(value)}
+   592→        min={min}
+   593→        max={max}
+   594→        onChange={(e) => setDraft(e.target.value)}
+   595→        onFocus={() => {
+   596→          setFocused(true);
+   597→          setDraft(String(value));
+   598→        }}
+   599→        onBlur={() => {
+   600→          setFocused(false);
+   601→          commit();
+   602→        }}
+   603→        onKeyDown={(e) => {
+   604→          if (e.key === "Enter") {
+   605→            e.currentTarget.blur();
+   606→          }
+   607→        }}
+   608→        spellCheck={false}
+   609→        aria-label={label}
+   610→        className="h-9 w-full rounded-md border border-border bg-background pl-2.5 pr-2 font-mono text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   611→      />
+   612→      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono uppercase text-muted-foreground/60">
+   613→        {label}
+   614→      </span>
+   615→    </div>
+   616→  );
+   617→}
+   618→
+   619→function RangeInput({
+   620→  min,
+   621→  max,
+   622→  step,
+   623→  value,
+   624→  onChange,
+   625→}: {
+   626→  min: number;
+   627→  max: number;
+   628→  step: number;
+   629→  value: number;
+   630→  onChange: (v: number) => void;
+   631→}) {
+   632→  return (
+   633→    <div className="flex items-center gap-2">
+   634→      <input
+   635→        type="range"
+   636→        min={min}
+   637→        max={max}
+   638→        step={step}
+   639→        value={value}
+   640→        onChange={(e) => onChange(Number(e.target.value))}
+   641→        className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full accent-brand-lemon"
+   642→        style={{
+   643→          background: `linear-gradient(to right, var(--brand-lemon) 0%, var(--brand-lemon) ${
+   644→            ((value - min) / (max - min)) * 100
+   645→          }%, var(--muted) ${((value - min) / (max - min)) * 100}%, var(--muted) 100%)`,
+   646→        }}
+   647→      />
+   648→      <input
+   649→        type="number"
+   650→        min={min}
+   651→        max={max}
+   652→        value={value}
+   653→        onChange={(e) => onChange(Number(e.target.value))}
+   654→        className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center font-mono text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   655→      />
+   656→    </div>
+   657→  );
+   658→}
+   659→
+   660→function ToggleSwitch({
+   661→  checked,
+   662→  onChange,
+   663→  label,
+   664→}: {
+   665→  checked: boolean;
+   666→  onChange: (v: boolean) => void;
+   667→  label: string;
+   668→}) {
+   669→  return (
+   670→    <button
+   671→      type="button"
+   672→      role="switch"
+   673→      aria-checked={checked}
+   674→      onClick={() => onChange(!checked)}
+   675→      className={cn(
+   676→        "inline-flex h-9 items-center gap-2 rounded-md border px-3 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   677→        checked
+   678→          ? "border-brand-lemon/40 bg-brand-lemon/10 text-brand-lemon"
+   679→          : "border-border bg-background text-muted-foreground hover:text-foreground",
+   680→      )}
+   681→    >
+   682→      <span
+   683→        className={cn(
+   684→          "relative h-4 w-7 rounded-full transition-colors",
+   685→          checked ? "bg-brand-lemon" : "bg-muted-foreground/30",
+   686→        )}
+   687→      >
+   688→        <span
+   689→          className={cn(
+   690→            "absolute top-0.5 h-3 w-3 rounded-full bg-background shadow transition-all",
+   691→            checked ? "left-3.5" : "left-0.5",
+   692→          )}
+   693→        />
+   694→      </span>
+   695→      {label}
+   696→    </button>
+   697→  );
+   698→}
+   699→
+   700→function ValueChip({
+   701→  label,
+   702→  value,
+   703→  accent,
+   704→}: {
+   705→  label: string;
+   706→  value: string;
+   707→  accent: "min" | "max";
+   708→}) {
+   709→  return (
+   710→    <div className="flex h-9 items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5">
+   711→      <span
+   712→        className={cn(
+   713→          "inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-mono uppercase",
+   714→          accent === "min"
+   715→            ? "bg-white/10 text-foreground"
+   716→            : "bg-brand-lemon/15 text-brand-lemon",
+   717→        )}
+   718→      >
+   719→        {accent === "min" ? <Minus className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
+   720→        {label}
+   721→      </span>
+   722→      <span className="font-mono text-[13px] text-foreground">{value}</span>
+   723→    </div>
+   724→  );
+   725→}
+   726→
+   727→// ---- Code generators ----
+   728→
+   729→function generateJsCode(state: PlaygroundState): string {
+   730→  return `import { PeriodicRange } from "@workshop/periodic-range";
+   731→
+   732→const container = document.querySelector("#periodic-range");
+   733→
+   734→const range = new PeriodicRange(container, {
+   735→  min: ${state.min},
+   736→  max: ${state.max},
+   737→  valueMin: ${state.valueMin},
+   738→  valueMax: ${state.valueMax},
+   739→  step: ${state.step},
+   740→  showMarkers: ${state.showMarkers},
+   741→  markerStep: ${state.markerStep},
+   742→  orientation: "${state.orientation}",
+   743→  thickness: ${state.thickness},
+   744→  length: ${state.length},
+   745→});
+   746→
+   747→range.on("input", ({ valueMin, valueMax }) => {
+   748→  // Fires continuously while dragging either thumb
+   749→  console.log("input", valueMin, valueMax);
+   750→});
+   751→
+   752→range.on("change", ({ valueMin, valueMax }) => {
+   753→  // Fires when the selection is committed (pointer up / keyboard)
+   754→  console.log("committed", valueMin, valueMax);
+   755→});
+   756→
+   757→// Programmatic control
+   758→// range.setValueMin(40);
+   759→// range.setValueMax(60);
+   760→// range.setRange(0, 200);
+   761→// range.setStep(5);
+   762→// range.setShowMarkers(true);
+   763→// range.setOrientation("vertical");
+   764→// range.destroy();`;
+   765→}
+   766→
+   767→function generateHtmlCode(state: PlaygroundState): string {
+   768→  return `<!DOCTYPE html>
+   769→<html>
+   770→  <head>
+   771→    <link rel="stylesheet" href="periodic-range.css" />
+   772→  </head>
+   773→  <body>
+   774→    <!-- The range mounts into this container -->
+   775→    <div id="periodic-range"></div>
+   776→
+   777→    <script type="module" src="init.js"></script>
+   778→  </body>
+   779→</html>
+   780→
+   781→<!-- Default configuration used above:
+   782→  min:          ${state.min}
+   783→  max:          ${state.max}
+   784→  valueMin:     ${state.valueMin}
+   785→  valueMax:     ${state.valueMax}
+   786→  step:         ${state.step}
+   787→  showMarkers:  ${state.showMarkers}
+   788→  markerStep:   ${state.markerStep}
+   789→  orientation:  "${state.orientation}"
+   790→  thickness:    ${state.thickness}px
+   791→  length:       ${state.length}px
+   792→-->`;
+   793→}
+   794→
+   795→function generateCssCode(): string {
+   796→  return `/* The component ships with safe defaults.
+   797→   Override these CSS custom properties to theme it. */
+   798→
+   799→:root {
+   800→  --periodic-range-focus-ring: rgba(217, 255, 102, 0.55);
+   801→}
+   802→
+   803→.periodic-range {
+   804→  display: inline-block;
+   805→  position: relative;
+   806→}
+   807→
+   808→.periodic-range canvas {
+   809→  display: block;
+   810→  touch-action: none;
+   811→  outline: none;
+   812→  cursor: pointer;
+   813→  border-radius: 8px;
+   814→}
+   815→
+   816→.periodic-range canvas:focus-visible {
+   817→  box-shadow: 0 0 0 3px var(--periodic-range-focus-ring);
+   818→}`;
+   819→}
+   820→
+   821→function generateApiCode(): string {
+   822→  return `// Public API
+   823→
+   824→type PeriodicRangeOrientation = "horizontal" | "vertical";
+   825→
+   826→interface PeriodicRangeValue {
+   827→  valueMin: number;
+   828→  valueMax: number;
+   829→}
+   830→
+   831→interface PeriodicRangeOptions {
+   832→  min?: number;           // default 0
+   833→  max?: number;           // default 100
+   834→  valueMin?: number;      // default 25
+   835→  valueMax?: number;      // default 75
+   836→  step?: number;          // snap step, 0 = off. default 0
+   837→  showMarkers?: boolean;  // default false
+   838→  markerStep?: number;    // default 10
+   839→  orientation?: PeriodicRangeOrientation; // default "horizontal"
+   840→  thickness?: number;     // track thickness px, default 8
+   841→  length?: number;        // track length px, default 280
+   842→}
+   843→
+   844→class PeriodicRange {
+   845→  constructor(container: HTMLElement, options?: PeriodicRangeOptions);
+   846→  getValueMin(): number;
+   847→  getValueMax(): number;
+   848→  setValueMin(v: number): void;
+   849→  setValueMax(v: number): void;
+   850→  setRange(min: number, max: number): void;
+   851→  setStep(step: number): void;
+   852→  setShowMarkers(on: boolean): void;
+   853→  setMarkerStep(step: number): void;
+   854→  setOrientation(orientation: PeriodicRangeOrientation): void;
+   855→  setThickness(n: number): void;
+   856→  setLength(n: number): void;
+   857→  on(event: "input" | "change", handler: (v: PeriodicRangeValue) => void): void;
+   858→  off(event: string, handler: Function): void;
+   859→  destroy(): void;
+   860→}
+   861→
+   862→// Events
+   863→//   "input"  — fires continuously during pointer drag
+   864→//   "change" — fires when the selection is committed (pointer up / keyboard)
+   865→
+   866→// Invariants
+   867→//   - valueMin ≤ valueMax (thumbs cannot cross)
+   868→//   - min ≤ valueMin, valueMax ≤ max
+   869→//   - When step > 0, values snap to the nearest step grid point.`;
+   870→}
+   871→
+   872→// ---- Documentation section ----
+   873→
+   874→function ComponentDocumentation() {
+   875→  const meta = getComponent("periodic-range")!;
+   876→  return (
+   877→    <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_200px]">
+   878→      <div className="min-w-0 max-w-[760px]">
+   879→        <h2 className="text-2xl font-semibold tracking-tight">Documentation</h2>
+   880→        <p className="mt-2 text-sm text-muted-foreground">
+   881→          The Periodic Range is a framework-independent vanilla JavaScript
+   882→          component — no React or Next.js required.
+   883→        </p>
+   884→
+   885→        <section className="mt-8">
+   886→          <h3 className="text-lg font-semibold">Overview</h3>
+   887→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   888→            {meta.longDescription} The two thumbs maintain a strict ordering
+   889→            (valueMin ≤ valueMax) — they can touch but never cross. The
+   890→            selected range between them is filled with the lemon accent color.
+   891→            Optional step snapping constrains values to a fixed grid, and
+   892→            optional markers render tick marks with numeric labels along the
+   893→            track.
+   894→          </p>
+   895→        </section>
+   896→
+   897→        <section className="mt-8">
+   898→          <h3 className="text-lg font-semibold">When to use it</h3>
+   899→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   900→            {meta.whenToUse.map((item) => (
+   901→              <li key={item} className="flex gap-2">
+   902→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   903→                {item}
+   904→              </li>
+   905→            ))}
+   906→          </ul>
+   907→        </section>
+   908→
+   909→        <section className="mt-8">
+   910→          <h3 className="text-lg font-semibold">When not to use it</h3>
+   911→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   912→            {meta.whenNotToUse.map((item) => (
+   913→              <li key={item} className="flex gap-2">
+   914→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
+   915→                {item}
+   916→              </li>
+   917→            ))}
+   918→          </ul>
+   919→        </section>
+   920→
+   921→        <section className="mt-8">
+   922→          <h3 className="text-lg font-semibold">Properties and defaults</h3>
+   923→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   924→            <table className="w-full text-left text-[13px]">
+   925→              <thead className="bg-muted/30">
+   926→                <tr>
+   927→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Property</th>
+   928→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Type</th>
+   929→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Default</th>
+   930→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Description</th>
+   931→                </tr>
+   932→              </thead>
+   933→              <tbody className="divide-y divide-border">
+   934→                {meta.properties.map((p) => (
+   935→                  <tr key={p.name}>
+   936→                    <td className="px-3 py-2 font-mono text-brand-lemon">{p.name}</td>
+   937→                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.type}</td>
+   938→                    <td className="px-3 py-2 font-mono text-foreground">{p.default}</td>
+   939→                    <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
+   940→                  </tr>
+   941→                ))}
+   942→              </tbody>
+   943→            </table>
+   944→          </div>
+   945→        </section>
+   946→
+   947→        <section className="mt-8">
+   948→          <h3 className="text-lg font-semibold">Methods</h3>
+   949→          <div className="mt-3 space-y-2">
+   950→            {meta.methods.map((m) => (
+   951→              <div key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   952→                <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   953→                <p className="mt-1 text-[13px] text-muted-foreground">{m.description}</p>
+   954→                {m.returns && (
+   955→                  <p className="mt-0.5 text-[11px] font-mono text-muted-foreground/70">
+   956→                    returns: {m.returns}
+   957→                  </p>
+   958→                )}
+   959→              </div>
+   960→            ))}
+   961→          </div>
+   962→        </section>
+   963→
+   964→        <section className="mt-8">
+   965→          <h3 className="text-lg font-semibold">Events</h3>
+   966→          <div className="mt-3 space-y-2">
+   967→            {meta.events.map((e) => (
+   968→              <div key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   969→                <div className="flex items-center gap-3">
+   970→                  <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   971→                  <code className="font-mono text-[11px] text-muted-foreground">{e.payload}</code>
+   972→                </div>
+   973→                <p className="mt-1 text-[13px] text-muted-foreground">{e.description}</p>
+   974→              </div>
+   975→            ))}
+   976→          </div>
+   977→        </section>
+   978→
+   979→        <section className="mt-8">
+   980→          <h3 className="text-lg font-semibold">Accessibility</h3>
+   981→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   982→            <li className="flex gap-2">
+   983→              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   984→              The canvas is keyboard-focusable with role=&quot;slider&quot;.
+   985→            </li>
+   986→            <li className="flex gap-2">
+   987→              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   988→              Arrow Left/Down decrease, Arrow Right/Up increase the active thumb (Shift = 10× via PageUp/PageDown).
+   989→            </li>
+   990→            <li className="flex gap-2">
+   991→              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   992→              Home sends the active thumb to its bound, End to the opposite bound.
+   993→            </li>
+   994→            <li className="flex gap-2">
+   995→              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   996→              Tab cycles the active thumb between min and max without leaving the canvas.
+   997→            </li>
+   998→            <li className="flex gap-2">
+   999→              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+  1000→              aria-valuenow exposes the active thumb&apos;s value; aria-valuetext shows both values.
+  1001→            </li>
+  1002→          </ul>
+  1003→        </section>
+  1004→
+  1005→        <section className="mt-8">
+  1006→          <h3 className="text-lg font-semibold">Styling and customization</h3>
+  1007→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+  1008→            The component is self-contained and ships with safe defaults. Host
+  1009→            applications can override its CSS custom properties (prefixed with
+  1010→            <code className="mx-1 font-mono text-brand-lemon">--periodic-range-</code>)
+  1011→            to adjust the focus ring.
+  1012→          </p>
+  1013→          <div className="mt-3 flex flex-wrap gap-2">
+  1014→            <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">
+  1015→              <Ruler className="h-3 w-3" />
+  1016→              Resizable (thickness + length)
+  1017→            </span>
+  1018→            <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">
+  1019→              <Sparkles className="h-3 w-3" />
+  1020→              Snapping + markers
+  1021→            </span>
+  1022→          </div>
+  1023→        </section>
+  1024→      </div>
+  1025→
+  1026→      {/* Right-hand TOC */}
+  1027→      <aside className="hidden lg:block">
+  1028→        <div className="sticky top-20">
+  1029→          <span className="eyebrow mb-2 block">On this page</span>
+  1030→          <nav className="space-y-1 text-[12px]">
+  1031→            {[
+  1032→              "Overview",
+  1033→              "When to use it",
+  1034→              "When not to use it",
+  1035→              "Properties and defaults",
+  1036→              "Methods",
+  1037→              "Events",
+  1038→              "Accessibility",
+  1039→              "Styling and customization",
+  1040→            ].map((s) => (
+  1041→              <a
+  1042→                key={s}
+  1043→                href="#"
+  1044→                onClick={(e) => e.preventDefault()}
+  1045→                className="block rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+  1046→              >
+  1047→                {s}
+  1048→              </a>
+  1049→            ))}
+  1050→          </nav>
+  1051→        </div>
+  1052→      </aside>
+  1053→    </div>
+  1054→  );
+  1055→}
+  1056→

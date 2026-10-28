@@ -1,0 +1,255 @@
+   800→Work Log:
+   801→- Read `/home/z/my-project/worklog.md` (Tasks 1–22 plus the in-flight CustomButton task) to lock the design system (Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66), navigation model, content metadata schema, and the existing playground conventions (PageContainer, Breadcrumbs + PageOverline + H1 + intro, .panel/.eyebrow/.bg-grid tokens, lemon-only accent, CodeBlock + CopyableValue, toast from sonner).
+   802→- Read `src/components/color-ramp/color-ramp-playground.tsx`, `color-ramp-react.tsx`, and `src/lib/components/color-ramp/color-ramp.ts` to mirror the established wrapper/playground patterns (instanceRef forwarding, change-driven state mirroring, code-tab generation, documentation section).
+   803→- **Vanilla JS ToggleGroup component** (`src/lib/components/toggle-group/toggle-group.ts`):
+   804→  - Self-contained — does NOT import CustomButton. Each toggle button is a real DOM element (`<div role="button" tabindex="0">`) styled to look like CustomButton's primary/secondary/outline variants (lemon / purple-strong / transparent+border), with icon + label support. Selected state always layers a lemon ring on top of the variant.
+   805→  - Options: `items` (ToggleButtonItem[]), `multiselect`, `closable`, `reorderable`, `orientation` (horizontal/vertical), `variant` (primary/secondary/outline), `size` (sm/md/lg). Defaults match the spec: single-select, not closable, not reorderable, horizontal, outline, md.
+   806→  - Built-in 23-icon set (bold, italic, underline, check, x, plus, star, circle, square, heart, bolt, dot, arrow-right, settings, folder, file, user, tag, eye, bell, search, home). `icon` field accepts a built-in name, a `data:` URI, or a raw `<svg>` string — `renderIcon()` handles all three.
+   807→  - Scoped CSS injected once per document (`<style id="toggle-group-styles">`) with `.toggle-group-` prefix. No canvas, no external deps. All visual tokens come from the platform's CSS variables (--brand-lemon, --brand-purple-strong, --border, --accent, --foreground, --muted-foreground).
+   808→  - Selection behavior: single-select click selects + deselects others (no toggle-off via click — keeps one selected); multiselect toggles independently. `setSelected([])` is allowed via the API (clears all). `setMultiselect(false)` keeps only the first selected when turning off multi.
+   809→  - Closable: each item gets an embedded `<button class="toggle-group__close" tabindex="-1">` with an inline X SVG. Clicking X calls `_handleClose` (removes the item from items[], removes its DOM, fires `close` then `change`). `setClosable()` adds/removes the close button on existing items without rebuilding them.
+   810→  - Reorderable: pointer-event-based drag-to-reorder. On pointerdown, records the item + pointer origin. On pointermove past a 4px threshold, marks the item as `--dragging` (lower opacity + shadow), translates it with the pointer for tactile feedback, and finds the sibling under the pointer (via `document.elementFromPoint` with the dragged item's `pointer-events` temporarily disabled). Computes whether the pointer is in the sibling's first or second half, then performs a live swap in the items array + DOM (re-appends items in array order). After a swap, re-anchors the drag origin so the translate offset is 0 at the new position. On pointerup, emits `reorder` + `change`. Suppresses the synthetic click that follows a drag via a `Date.now()`-based guard.
+   811→  - Keyboard: Enter/Space toggles selection; Delete/Backspace closes (if closable); Arrow Left/Up + Arrow Right/Down move the focused item within the group (if reorderable).
+   812→  - Public API exactly matches the spec: `constructor(container, options?)`, `getItems()`, `setItems(items)`, `addItem(item)`, `removeItem(id)`, `getSelected()`, `setSelected(ids)`, `setMultiselect(on)`, `setClosable(on)`, `setReorderable(on)`, `setOrientation(orientation)`, `setVariant(variant)`, `setSize(size)`, `on(event, handler)`, `off(event, handler)`, `destroy()`.
+   813→  - Events: `change` (selection/reorder/add/remove/setItems), `select` (user click), `reorder` (drag or arrow-key reorder), `close` (X clicked, item removed). Tiny internal EventEmitter with try/catch around each handler so a single bad handler can't crash the group.
+   814→  - `destroy()` is idempotent: removes window pointer listeners, clears the handler map, removes all DOM, nulls the drag state.
+   815→  - Custom `ToggleHandler = (data: any) => void` type used for `off` to satisfy `@typescript-eslint/no-unsafe-function-type` while preserving the spec's `Function`-like signature.
+   816→- **Barrel exports** (`src/lib/components/toggle-group/index.ts`): re-exports the class + all type aliases.
+   817→- **React wrapper** (`src/components/toggle-group/toggle-group-react.tsx`):
+   818→  - Owns the vanilla instance for the lifetime of the mount. Creates once with empty deps (capturing the initial items snapshot via a ref so the create-once effect stays empty).
+   819→  - Forwards every prop change via dedicated `useEffect` hooks: multiselect, closable, reorderable, orientation, variant, size. The items prop is compared (JSON.stringify key) against the instance's current items and only `setItems()` is called when they actually differ — this avoids loops with the change-driven state in the playground.
+   820→  - Forwards all four events (change/select/reorder/close) to optional callbacks via refs so the create-once effect can stay empty.
+   821→  - Emits the initial state on mount so the parent can sync immediately.
+   822→- **Playground** (`src/components/toggle-group/toggle-group-playground.tsx`) — Figma/Godot-style nested properties panel:
+   823→  - Live preview area (left, `.panel` with `bg-grid` background): the actual `<ToggleGroupReact>` instance.
+   824→  - Output section under the preview: CopyableValue chips for `selected` (JSON array) and `labels` (comma-joined), plus a contextual hint about click/close/drag interactions.
+   825→  - Property inspector (right, `.panel`):
+   826→    - **Group section** (top): three Switch toggles for Multiselect / Closable / Reorderable; segmented controls for Orientation (Horizontal/Vertical with ArrowLeftRight/ArrowUpDown icons), Variant (Outline/Primary/Secondary), Size (SM/MD/LG).
+   827→    - **Buttons section** (bottom, separated by a divider): "BUTTONS (N)" header with an "Add button" action. Each item is rendered as a `ButtonItemEditor` card with:
+   828→      - A summary row (collapse chevron + index badge + truncated label + "on" badge if selected + remove trash button).
+   829→      - An expandable details section with: Label text input, Icon `<select>` dropdown (23 built-in icons + "(none)"), Selected checkbox, Move up/down buttons (disabled at array ends), and a read-only id footer.
+   830→  - Inspector edits flow through `instanceRef.current.setItems()` / `setSelected()` / `removeItem()` / `addItem()` so the vanilla instance stays the source of truth and emits change events that sync React state back.
+   831→  - Code panel with JS/HTML/CSS/API tabs, all live-synced to the current state (the JS tab includes the actual items array, multiselect/closable/reorderable flags, orientation, variant, and size).
+   832→  - Documentation section: Overview, When to use, When not to use, Properties table, Methods list, Events list, Accessibility notes, Icons explanation, sticky on-this-page nav — all driven by the content.ts metadata.
+   833→- **Content metadata**: added `toggle-group` to the `components` array in `src/lib/platform/content.ts` under the `inputs` category with full properties (7), methods (15), events (4), defaults, when-to-use (4), when-not-to-use (3), capabilities (6), tags.
+   834→- **Navigation labels**: extended `routeLabel` in `src/store/navigation.ts` to map the `toggle-group` slug → "Toggle Group" (the existing `categoryLabel` already handled "inputs" → "Inputs", and `breadcrumbs` already used `routeLabel` for the component-name segment).
+   835→- **Routing**: added `component/inputs/toggle-group` → `ToggleGroupPlayground` in `src/app/page.tsx` (the import was already present from a parallel agent's draft; only the route handler was missing).
+   836→- **Agent-browser + VLM verification**:
+   837→  - Navigated Home → Components → Inputs → Toggle Group. Playground loaded with the three default buttons (Bold selected with lemon ring, Italic, Underline). VLM confirmed the selected button is highlighted with lemon-green.
+   838→  - Clicked Italic in single-select mode: Bold deselected, Italic selected (checkboxes in the inspector updated correctly).
+   839→  - Toggled Closable: each toggle gained an embedded Remove (X) button. Clicked the X on Underline: item removed, button count went 3 → 2.
+   840→  - Toggled Multiselect then clicked Italic: both Bold and Italic checkboxes are checked simultaneously.
+   841→  - Clicked "Add button" twice: two "New button" entries appeared, count went 2 → 4.
+   842→  - Set Variant to Primary: all four buttons turned lemon-green with dark text (VLM confirmed "bright lime green/yellow-green background, dark/black text, X close icon on the right side").
+   843→  - Enabled Reorderable, dragged Bold to the last position: the inspector order updated to [Italic, New button, New button, Bold] — drag-to-reorder works.
+   844→  - Set Orientation to Vertical (via `find role button click --name "Vertical"` to bypass stale refs): the `.toggle-group` element's class became `toggle-group--vertical` and VLM confirmed the buttons stacked vertically.
+   845→  - Code panel JS tab is live-synced (shows the actual 4 items with their icons + selected flags, multiselect:true, closable:true, variant:"primary").
+   846→  - API tab renders the full TypeScript interface.
+   847→- **Lint**: `bun run lint` — 0 errors, 0 warnings across the whole project (toggle-group files contribute nothing; the parallel custom-button errors that existed mid-task were also resolved by the time of the final check).
+   848→
+   849→Stage Summary:
+   850→- New Toggle Group component established: self-contained vanilla JS class that mimics CustomButton visuals (primary/secondary/outline variants, icon + label) without importing it, with single/multi-select, closable buttons, drag-to-reorder (pointer events), and dynamic add/remove.
+   851→- Appears in sidebar (Inputs → Toggle Group) and Components directory under the Inputs category.
+   852→- Playground features a Figma/Godot-style nested properties panel: a Group section for the toggle group's own properties, and a Buttons section where each child toggle button's properties (label, icon, selected, remove, move up/down) are editable inline — exactly like editing nested component properties in Figma's or Godot's inspector.
+   853→- `bun run lint` — 0 errors, 0 warnings.
+   854→- Files created:
+   855→  - `src/lib/components/toggle-group/toggle-group.ts`
+   856→  - `src/lib/components/toggle-group/index.ts`
+   857→  - `src/components/toggle-group/toggle-group-react.tsx`
+   858→  - `src/components/toggle-group/toggle-group-playground.tsx`
+   859→- Files modified:
+   860→  - `src/lib/platform/content.ts` (added toggle-group metadata in the inputs category)
+   861→  - `src/store/navigation.ts` (added toggle-group slug → "Toggle Group" label)
+   862→  - `src/app/page.tsx` (added route handler for `component/inputs/toggle-group`)
+   863→
+   864→---
+   865→Task ID: 2
+   866→Agent: main
+   867→Task: Build PeriodicRange component (dual-thumb range slider with snapping, markers, orientation) + React wrapper + playground
+   868→
+   869→Work Log:
+   870→- **Vanilla JS PeriodicRange component** (`src/lib/components/periodic-range/periodic-range.ts`):
+   871→  - Canvas-based dual-thumb range slider. Two thumbs (min and max) that cannot cross (valueMin ≤ valueMax invariant).
+   872→  - Track rendered as rounded-rect bar; selected range between the thumbs filled with lemon accent (#D9FF66).
+   873→  - Optional snapping to a step grid (step = 0 disables). Snapping applied in `applyStep` via `Math.round((v - min) / step) * step + min`.
+   874→  - Optional tick-mark markers with numeric labels at markerStep intervals. Labels are auto-decimated when there are more than 20 markers (every Nth marker labeled) to prevent overlap.
+   875→  - Horizontal or vertical orientation. For vertical, the high-value thumb is at the top, low-value at the bottom (conventional); markers and labels sit to the LEFT of the track.
+   876→  - Two thumbs are visually distinguishable: both are white capsules with dark borders, but the min thumb has a horizontal "−" bar inside and the max thumb has a "+" (horizontal + vertical bars). The max thumb is also slightly larger (14 vs 12 px) and has a thicker border (2 vs 1.5 px).
+   877→  - Active thumb (the one that was last interacted with) gets a lemon ring outside it.
+   878→  - Pointer interaction: pointerdown picks the closest thumb (hit-test within 14px, otherwise nearest); pointermove drags it, clamping to [min, valueMax] for min thumb and [valueMin, max] for max thumb; pointerup commits with a "change" event. Pointer capture is used so the drag continues even if the cursor leaves the canvas.
+   879→  - Keyboard interaction: Arrow Up/Right increases the active thumb, Arrow Down/Left decreases (Shift via PageUp/PageDown = 10× step). Home jumps the active thumb to range min (or to valueMin for the max thumb), End jumps to range max (or to valueMax for the min thumb). Tab cycles the active thumb between min and max.
+   880→  - Full public API matching the spec: getValueMin, getValueMax, setValueMin, setValueMax, setRange, setStep, setShowMarkers, setMarkerStep, setOrientation, setThickness, setLength, on, off, destroy.
+   881→  - Events: `input` (continuous during drag/keyboard) and `change` (committed on pointer up or keyboard). Both carry `{ valueMin, valueMax }`.
+   882→  - ARIA: canvas has role="slider", aria-valuemin/max/now (active thumb's value), aria-valuetext (combined "min X, max Y" label).
+   883→  - Self-contained helpers (clamp, approxEqual, roundRect, formatMarkerLabel) — no external deps.
+   884→- **Barrel exports** (`src/lib/components/periodic-range/index.ts`): re-exports `PeriodicRange` class and `PeriodicRangeOrientation`, `PeriodicRangeOptions`, `PeriodicRangeValue` types.
+   885→- **React wrapper** (`src/components/periodic-range/periodic-range-react.tsx`): owns the instance for the lifetime of the mount; forwards all prop changes via the imperative API (setRange, setValueMin, setValueMax, setStep, setShowMarkers, setMarkerStep, setOrientation, setThickness, setLength). Exposes the instance via `instanceRef` for imperative calls. Emits initial state on mount so consumers can render synchronously.
+   886→- **Playground** (`src/components/periodic-range/periodic-range-playground.tsx`): full playground with:
+   887→  - Live canvas (the dual-thumb slider)
+   888→  - Property inspector: Range (min/max), Values (valueMin/valueMax), Step, Markers toggle (reveals Marker step when on), Orientation (Horizontal/Vertical), Thickness slider, Length slider
+   889→  - Output section: prominent Min/Max value chips with +/- icons, copyable valueMin/valueMax chips, span indicator
+   890→  - Code panel (JavaScript/HTML/CSS/API tabs with live-synced code)
+   891→  - Documentation section with Overview, When to use, When not to use, Properties table, Methods, Events, Accessibility, Styling
+   892→- **DeferredNumberInput**: A custom number input that defers committing its value to the parent until blur/Enter. This lets users type multi-digit numbers (e.g. "33") without each keystroke being snapped/clamped back by the underlying component (which would make typing impossible when step snapping is on). The displayed value tracks the external `value` prop while unfocused (so canvas drags and reset are reflected), and tracks the local draft while focused.
+   893→- **onInput sync**: When the canvas emits `input` (e.g. after a drag with snapping), the playground's state.valueMin/valueMax are synced to the snapped values. This keeps the inspector inputs in lockstep with what the canvas actually shows.
+   894→- **update function invariant enforcement**: The playground's `update` function enforces min ≤ max (swap if inverted), clamps valueMin/valueMax to the range, and enforces valueMin ≤ valueMax with a "moving thumb wins" rule: if the user raises valueMin above valueMax, valueMin clamps down to valueMax; if they lower valueMax below valueMin, valueMax clamps up to valueMin.
+   895→- **Content metadata** (`src/lib/platform/content.ts`): added periodic-range to the inputs category with full properties (min, max, valueMin, valueMax, step, showMarkers, markerStep, orientation, thickness, length), methods (13 entries), events (input, change), defaults, whenToUse, whenNotToUse.
+   896→- **Navigation labels** (`src/store/navigation.ts`): refactored the `routeLabel` and `breadcrumbs` helpers to use a new `categoryLabel()` function that maps category slugs to human-readable labels (color → "Color", inputs → "Inputs", layout → "Layout", data-display → "Data Display"). Previously only "color" was special-cased; other categories showed their raw slug. Also added slug-to-name mappings for all current component slugs (color-wheel, color-range, color-circle, color-ramp, periodic-range) so breadcrumbs show proper names.
+   897→- **Routing** (`src/app/page.tsx`): added `component/inputs/periodic-range` → `PeriodicRangePlayground` route handler.
+   898→
+   899→VLM-verified all features:
+   900→- Horizontal mode: dual-thumb slider with lemon-green selected range, two distinguishable thumbs (min with "−", max with "+"), active thumb (min by default) has lemon ring.
+   901→- Markers mode (horizontal): tick marks below the track, numeric labels (0, 10, 20... 100) visible, no overlap or clipping.
+   902→- Vertical mode: track is taller than wide, lemon-green range visible between thumbs, tick marks and labels to the LEFT of the track, high-value thumb at top, low-value at bottom.
+   903→- Snapping: set step=5, valueMin=33 → snapped to 35 on blur.
+   904→- Clamping: set valueMax=10 (below valueMin=35) → clamped up to 35 (the moving thumb wins).
+   905→- Canvas drag: dragged max thumb past min thumb → stopped at valueMin (couldn't cross). Dragging also updated the inspector inputs in real time.
+   906→- Keyboard: ArrowRight increased active thumb by 1 (verified both min and max after Tab cycle). Home jumped active thumb to range min. End jumped active thumb to the opposite bound.
+   907→- Reset: returns to defaults (min=0, max=100, valueMin=25, valueMax=75, step=0, showMarkers=false, orientation=horizontal, thickness=8, length=320).
+   908→- Code panel: JavaScript/HTML/CSS/API tabs all functional; code is live-synced with the playground state.
+   909→
+   910→Files created:
+   911→- `src/lib/components/periodic-range/periodic-range.ts` (vanilla JS class, ~900 lines)
+   912→- `src/lib/components/periodic-range/index.ts` (barrel exports)
+   913→- `src/components/periodic-range/periodic-range-react.tsx` (React wrapper)
+   914→- `src/components/periodic-range/periodic-range-playground.tsx` (playground view, ~960 lines)
+   915→
+   916→Files modified:
+   917→- `src/lib/platform/content.ts` (added periodic-range metadata in inputs category)
+   918→- `src/store/navigation.ts` (refactored routeLabel/breadcrumbs to use categoryLabel; added slug→name mappings for all current components)
+   919→- `src/app/page.tsx` (added route handler for component/inputs/periodic-range)
+   920→
+   921→Stage Summary:
+   922→- New PeriodicRange component established: dual-thumb range slider with snapping, markers, and orientation control. First component in the Inputs category.
+   923→- VLM-verified across all major interaction modes (drag, keyboard, snapping, clamping, orientation, markers).
+   924→- `bun run lint` — 0 errors, 0 warnings.
+   925→
+   926→---
+   927→Task ID: 23 (summary)
+   928→Agent: main
+   929→Task: Build 3 new input components — Custom Button, Periodic Range, Toggle Group
+   930→
+   931→Work Log:
+   932→- **CustomButton** (built by subagent): A versatile DOM-based button with configurable text, icon (18 built-in SVG icons or image URLs), 4 icon positions (left/right/top/bottom), 4 variants (primary/secondary/outline/ghost), 3 sizes (sm/md/lg), disabled/fullWidth options. Scoped CSS, full imperative API, React wrapper, and complete playground with click counter, property inspector, and code panel.
+   933→- **PeriodicRange** (built by subagent): A dual-thumb canvas-based range slider with min/max thumbs that can't cross, optional snapping to step increments, optional tick-mark markers at intervals, horizontal/vertical orientation, and configurable thickness/length. Full imperative API, React wrapper, and playground with output values.
+   934→- **ToggleGroup** (built by subagent): A group of toggle buttons with single-select/multiselect modes, closable buttons (embedded X), drag-to-reorder via pointer events, and dynamic add/remove. Self-contained (doesn't import CustomButton but matches its visual style). Playground features a Figma/Godot-style nested properties panel where each button's properties (label, icon, selected) are editable inline within the group's inspector, plus an "Add button" action.
+   935→- All 3 components added to content.ts in the "inputs" category, with routing in page.tsx, and sidebar labels in navigation.ts.
+   936→- All verified: CustomButton renders with `.custom-button-root` element, PeriodicRange renders with canvas, ToggleGroup renders with `.toggle-group` element.
+   937→- `bun run lint` — 0 errors, 0 warnings.
+   938→
+   939→Stage Summary:
+   940→- 3 new input components established: Custom Button, Periodic Range, Toggle Group.
+   941→- ToggleGroup features the nested component properties panel pattern (like Figma/Godot) where child component properties are editable inline within the parent inspector.
+   942→- All appear in sidebar under Inputs → [component name] and in the Components directory.
+   943→
+   944→---
+   945→Task ID: 2+3
+   946→Agent: main
+   947→Task: Build SmartContextMenu + SmartTooltip (Layout category) — vanilla JS classes, React wrappers, playgrounds, content metadata, navigation labels, routing.
+   948→
+   949→Work Log:
+   950→- Read `/home/z/my-project/worklog.md` (Tasks 1–23 plus all in-flight component tasks) and the existing `commands` module (`src/lib/commands/{index,registry,shortcuts}.ts`), `content.ts`, `navigation.ts`, `page.tsx`, `globals.css`, and the ToggleGroup/CustomButton/PeriodicRange components to lock the design system (Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66), the navigation model, the content metadata schema, and the established playground conventions (PageContainer, Breadcrumbs + PageOverline + H1 + intro, .panel/.eyebrow/.bg-grid tokens, lemon-only accent, CodeBlock + CopyableValue, toast from sonner, instanceRef forwarding, change-driven state mirroring, code-tab generation, sticky on-this-page nav).
+   951→- **Vanilla JS SmartContextMenu** (`src/lib/components/smart-context-menu/smart-context-menu.ts`):
+   952→  - DOM-overlay context menu that renders command items from the shared command registry (`commandRegistry.byIds`).
+   953→  - Constructor: `new SmartContextMenu(container, options)` where `options.bounds` is the clipping element. If the container is `position: static`, it's overridden to `relative` (restored on destroy) so the absolutely-positioned menu resolves against it.
+   954→  - `show(x, y)` (viewport coords): makes the menu measurable (opacity 0, left/top 0), measures natural width/height via `getBoundingClientRect()`, then computes placement by translating `x, y` to container-relative coords (`relX = x - cr.left`, `relY = y - cr.top`). Horizontal: if `relX + menuW > bounds.right - cr.left - GAP`, flips left (`relX - menuW`); if that still overflows left, clamps to `bounds.left - cr.left + GAP`. Same logic vertically: flip up, then clamp to `bounds.top`. Reveals via `requestAnimationFrame` + `.smart-context-menu--visible` class with a scale-fade transition.
+   955→  - `hide()`: removes `--visible`, fires the `hide` event, and after the 140ms transition sets `display: none` (so the next show() can re-measure cleanly).
+   956→  - Each item renders the command's icon (built-in Lucide-style SVG set covering every icon referenced by `registerBuiltinCommands`: search, x, rotate-ccw, triangle, square, circle, circle-slash, refresh-cw, droplet, sun, contrast, blend, divide, shuffle, brush, copy, clipboard — plus extras), label, and kbd shortcut (one `<kbd>` per `shortcutParts()` part). Disabled commands get `.smart-context-menu__item--disabled` + `aria-disabled="true"` + native `disabled` on the inner button (blocks click and removes from tab order). Icon-less items reserve the icon slot with an empty spacer so labels align.
+   957→  - Items auto-group with `<li class="smart-context-menu__separator" role="separator">` between different `cmd.category` values, so multi-category menus read naturally.
+   958→  - Keyboard: Arrow Up/Down moves the active item (skips disabled), Enter/Space selects the active item, Escape closes, Tab/Shift+Tab cycles the active item. Active item gets `.smart-context-menu__item--active` (lemon accent) and tries to focus itself. Pointerenter on an item also updates the active index for keyboard continuity.
+   959→  - Click-outside (pointerdown on document, capture phase, with menuEl.contains check) hides. Window `blur` hides too.
+   960→  - `setCommandIds(ids)`: re-renders the items and, if visible, resets the active item to the first enabled.
+   961→  - `setTitle(title)`: lazily creates/removes the header element; updates the text on existing headers.
+   962→  - Events: `select` (carries commandId), `hide` (no payload). Public API uses overloads (`on(event: "select", handler: (commandId: string) => void)` and `on(event: "hide", handler: () => void)`). Custom `ContextMenuHandler = (data: any) => void` type used for `off` to satisfy `@typescript-eslint/no-unsafe-function-type` while preserving the spec's `Function`-like signature (same pattern as ToggleGroup).
+   963→  - ARIA: menu has `role="menu"` + `aria-hidden` toggle; items have `role="menuitem"`; disabled items set `aria-disabled`. Shortcut badge has `aria-label="Shortcut: …"` (uses `formatShortcut`).
+   964→  - Scoped CSS injected once per document (`<style id="smart-context-menu-styles">`) with `.smart-context-menu-` prefix. No canvas, no external deps. All visual tokens come from the platform's CSS variables (--popover, --popover-foreground, --border, --accent, --muted-foreground, --brand-lemon).
+   965→  - `destroy()` is idempotent: removes document listeners, clears the handler map, restores the container's original `position` if we overrode it, removes the menu DOM, sets a `destroyed` flag.
+   966→- **Barrel exports** (`src/lib/components/smart-context-menu/index.ts`): re-exports the class + the `SmartContextMenuOptions` type.
+   967→- **React wrapper** (`src/components/smart-context-menu/smart-context-menu-react.tsx`): renders a `<div>` that serves as BOTH the menu's container and the bounds element. Creates the instance once on mount (empty deps, initial props captured via refs so the create-once effect stays empty). Forwards `commandIds` (compared via `commandIdsKey = commandIds.join(",")` so setCommandIds only fires when the contents actually change) and `title` prop changes via the imperative API. Callbacks (`onSelect`, `onHide`) kept in refs so the create-once effect can stay empty. Exposes the instance via `instanceRef` for imperative `show(x, y)` calls.
+   968→- **Playground** (`src/components/smart-context-menu/smart-context-menu-playground.tsx`): full playground with:
+   969→  - **Live canvas** (the `.panel`'s inner `<SmartContextMenuReact>` div, which is also the bounds/container). Right-click anywhere in the panel opens the menu at the cursor (via `onContextMenu` → `instanceRef.current.show(e.clientX, e.clientY)`). Also five "open at" buttons (center + four corners with 8px padding) so users without a right-click can exercise the menu and so the smart positioning is visible at each edge.
+   970→  - **Output section**: `CopyableValue` chips for `lastSelected` and the command's human label, plus a hint about Escape/click-outside/Arrow-key interactions.
+   971→  - **Property inspector**: title text input (live-updates the header via `setTitle`); a "Commands" multi-select grouped by category, where each registered command is a checkbox row showing the command label + ID and a per-category "selected/total" badge. Selecting/deselecting immediately calls `setCommandIds` on the instance.
+   972→  - `registerBuiltinCommands()` called in a mount effect; a `registryVersion` state bumps to trigger a re-read of `commandRegistry.list()` for the inspector dropdown.
+   973→  - Code panel (JavaScript / HTML / CSS / API tabs) with live-synced code generation (the JS tab shows the actual `commandIds` array, title, and last-selected comment).
+   974→  - Documentation section: Overview, When to use, When not to use, Properties table (3 rows), Methods list (8 entries), Events list (2 entries), Smart positioning explanation (5-step ordered list), Accessibility notes (5 bullets), sticky on-this-page nav — all driven by the content.ts metadata.
+   975→- **Vanilla JS SmartTooltip** (`src/lib/components/smart-tooltip/smart-tooltip.ts`):
+   976→  - DOM-overlay tooltip that renders a command's label, description, and kbd shortcut from the shared command registry (`commandRegistry.get`).
+   977→  - Constructor: `new SmartTooltip(container, options)` where `options.bounds` is the clipping element and `options.commandId` + `options.position` configure the content/placement. Container is made `position: relative` if static (restored on destroy).
+   978→  - `attachTo(target)`: removes listeners from the previous target (if any) and adds `mouseenter`/`mouseleave`/`focus`/`blur` to the new target. `mouseenter`/`focus` → `show()` + emit `show`; `mouseleave`/`blur` → `hide()` + emit `hide`. Calling `attachTo` on the same target is a no-op.
+   979→  - `detach()`: removes listeners from the current target and hides.
+   980→  - `show()`: makes the tooltip measurable (opacity 0, left/top 0), measures natural width/height, then computes placement:
+   981→    1. Compute target rect (viewport) → container-relative coords (`tx = tr.left - cr.left`, etc.).
+   982→    2. Bounds in container-relative coords (with EDGE_PAD=4): `bLeft, bTop, bRight, bBottom`.
+   983→    3. For the requested `position` (top/bottom/left/right), compute the natural left/top (centered along the target on the cross-axis, offset by GAP=8 on the main axis).
+   984→    4. If the requested side overflows (e.g. `top < bTop` for "top"), flip to the opposite side and recompute.
+   985→    5. Clamp the non-primary axis so the tooltip stays inside the bounds: `left = max(bLeft, min(p.left, bRight - ttW))` (and same for top).
+   986→    6. Apply left/top and reveal via `requestAnimationFrame` + `.smart-tooltip--visible` (scale-fade transition).
+   987→  - `hide()`: removes `--visible`, fires `hide` event, after 140ms sets `display: none`.
+   988→  - `setCommandId(id)`: re-renders the tooltip content (icon, label, description, shortcut). If visible, re-positions.
+   989→  - `setPosition(pos)`: updates the preferred position; if visible, re-positions (which may flip).
+   990→  - Content rendering: header row (icon + bold label), optional description (muted, 11px), shortcut badge (one `<kbd>` per part, lemon-tinted border + text). Empty-state for unknown command IDs.
+   991→  - Built-in icon set (same set as SmartContextMenu) so every command icon renders.
+   992→  - Scoped CSS injected once per document (`<style id="smart-tooltip-styles">`) with `.smart-tooltip-` prefix. `--tt-accent` token = `--brand-lemon` for icon + shortcut text.
+   993→  - `destroy()`: detaches, removes the tooltip DOM, restores the container's position, clears listeners.
+   994→- **Barrel exports** (`src/lib/components/smart-tooltip/index.ts`): re-exports the class + `SmartTooltipOptions` + `SmartTooltipPosition` types.
+   995→- **React wrapper** (`src/components/smart-tooltip/smart-tooltip-react.tsx`): renders a `<div>` as container+bounds. Creates the instance once on mount; forwards `commandId` and `position` prop changes via the imperative API. Exposes the instance via `instanceRef` for `attachTo`/`show`/`hide` calls.
+   996→- **Playground** (`src/components/smart-tooltip/smart-tooltip-playground.tsx`): full playground with:
+   997→  - **Live canvas** (the bounds/container div) containing 5 hoverable buttons absolutely positioned at TL/TR/Center/BL/BR. Each button has its own `SmartTooltip` instance (5 total) — created in a mount effect that iterates `targetRefs.current`, calls `new SmartTooltip(container, { bounds: container, commandId, position })`, then `inst.attachTo(target)` and `inst.on("show", ...)`. This avoids the single-target limitation of `attachTo` while keeping the API honest.
+   998→  - Per-target `commandId` is stored in component state (`targets` array) — the `setTargetCommandId` callback updates both the state and the instance's `setCommandId`. The `targetsRef` mirrors the state for the create-once effect's `onShow` closure (which reads the latest commandId at hover time).
+   999→  - **Output section**: `CopyableValue` chips for `lastHovered` and the command's human label.
+  1000→  - **Property inspector**: 4-way position segmented control (Top/Bottom/Left/Right with ArrowUp/Down/Left/Right icons) that calls `setPosition` on ALL tooltip instances via a position-prop-change effect; a "Inspector-bound command" `<select>` dropdown of all registered commands, with an "Apply to center target" button that calls `setTargetCommandId(2, …)`; and a per-target command binding section where each of the 5 targets has its own `<select>` to bind a different command — so users can see different tooltips on different buttons in the same canvas.
+  1001→  - `registerBuiltinCommands()` called on mount; `registryVersion` bump triggers re-read.
+  1002→  - Code panel (JavaScript / HTML / CSS / API tabs) with live-synced code (the JS tab shows the actual 5-target array with their bound commandIds and the current preferred position).
+  1003→  - Documentation section: Overview, When to use, When not to use, Properties table (3 rows), Methods list (8 entries), Events list (2 entries), Smart positioning explanation (6-step ordered list), Accessibility notes (4 bullets), sticky on-this-page nav — all driven by the content.ts metadata.
+  1004→- **Content metadata** (`src/lib/platform/content.ts`): added both `smart-context-menu` and `smart-tooltip` to the `components` array in the `layout` category (which already existed). Each has full properties, methods, events, defaults, whenToUse, whenNotToUse, capabilities, and tags.
+  1005→- **Navigation labels** (`src/store/navigation.ts`): extended the `routeLabel` switch's `component` case to map `smart-context-menu` → "Smart Context Menu" and `smart-tooltip` → "Smart Tooltip". The existing `categoryLabel("layout")` → "Layout" already handled the category segment.
+  1006→- **Routing** (`src/app/page.tsx`): added imports for `SmartContextMenuPlayground` and `SmartTooltipPlayground`, plus two route handlers under `case "component"` for `component/layout/smart-context-menu` and `component/layout/smart-tooltip`.
+  1007→- **Lint**: `bun run lint` — 0 errors, 0 warnings. Initial run had 8 warnings for unused `eslint-disable-next-line` directives (the project's React Compiler config doesn't flag the empty-deps pattern as exhaustively as the disable comments assumed); `bun run lint --fix` removed them. Hand-cleaned the resulting blank lines for readability. No `react-hooks/exhaustive-deps` errors thanks to the refs-for-callbacks pattern established by ToggleGroup.
+  1008→
+  1009→Stage Summary:
+  1010→- Two new Layout-category components established: SmartContextMenu (right-click menu with smart flip/clamp positioning, command-registry-driven items, kbd shortcuts, keyboard nav, click-outside close) and SmartTooltip (hover/focus tooltip with smart side-flip + clamp positioning, command-registry-driven content).
+  1011→- Both render items from the shared command registry via `commandRegistry.byIds` / `commandRegistry.get` and use `formatShortcut` + `shortcutParts` for the kbd badges.
+  1012→- Both playgrounds call `registerBuiltinCommands()` on mount.
+  1013→- Both appear in the sidebar (Layout → Smart Context Menu / Smart Tooltip) and in the Components directory under the Layout category, since the Sidebar dynamically builds groups from `categories` + `components` in content.ts.
+  1014→- `bun run lint` — 0 errors, 0 warnings.
+  1015→- Files created:
+  1016→  - `src/lib/components/smart-context-menu/smart-context-menu.ts` (vanilla JS class, ~670 lines)
+  1017→  - `src/lib/components/smart-context-menu/index.ts` (barrel exports)
+  1018→  - `src/components/smart-context-menu/smart-context-menu-react.tsx` (React wrapper)
+  1019→  - `src/components/smart-context-menu/smart-context-menu-playground.tsx` (playground view)
+  1020→  - `src/lib/components/smart-tooltip/smart-tooltip.ts` (vanilla JS class, ~480 lines)
+  1021→  - `src/lib/components/smart-tooltip/index.ts` (barrel exports)
+  1022→  - `src/components/smart-tooltip/smart-tooltip-react.tsx` (React wrapper)
+  1023→  - `src/components/smart-tooltip/smart-tooltip-playground.tsx` (playground view)
+  1024→- Files modified:
+  1025→  - `src/lib/platform/content.ts` (added smart-context-menu + smart-tooltip metadata in the layout category)
+  1026→  - `src/store/navigation.ts` (added smart-context-menu + smart-tooltip slug → label mappings in `routeLabel`)
+  1027→  - `src/app/page.tsx` (added route handlers for `component/layout/smart-context-menu` and `component/layout/smart-tooltip`)
+  1028→
+  1029→---
+  1030→Task ID: 24 (summary)
+  1031→Agent: main
+  1032→Task: Build commands registry + shortcuts utility + SmartContextMenu + SmartTooltip
+  1033→
+  1034→Work Log:
+  1035→- **Commands registry** (`src/lib/commands/registry.ts`): A singleton `CommandRegistry` class that stores commands by ID. Each command has `{ id, label, shortcut?, icon?, category?, description?, disabled? }`. Provides `register`, `get`, `list`, `byCategory`, `byIds`, `unregister`. Convenience functions `defineCommand` and `defineCommands`.
+  1036→- **Shortcuts utility** (`src/lib/commands/shortcuts.ts`): 
+  1037→  - `formatShortcut(shortcut)` — human-readable string like "⇧R" or "⌘⇧R"
+  1038→  - `shortcutParts(shortcut)` — array of parts for kbd rendering
+  1039→  - `eventMatchesShortcut(event, shortcut)` — check if a KeyboardEvent matches
+  1040→  - `findCommandForEvent(event, commandIds?)` — find the matching command
+  1041→  - `ShortcutHandler` class — global keydown listener that fires callbacks when registered shortcuts are pressed, optionally scoped to a set of command IDs
+  1042→- **Built-in commands** (`src/lib/commands/index.ts`): `registerBuiltinCommands()` registers ~20 platform commands across categories: Global (search, escape), Color Wheel (reset, shapes 1-4, toggle rotate), Color Range (modes 1-4), Color Circle (harmonies 1-5), Edit (copy, paste, duplicate). Fixed a missing import (`defineCommands` wasn't imported in the `registerBuiltinCommands` function).
+  1043→- **SmartContextMenu** (`src/lib/components/smart-context-menu/`): A context menu overlay that renders command items from the registry. Smart positioning: auto-flips left/up and clamps to the bounds container so it never overflows the live canvas area. Each item shows icon, label, and kbd shortcut. Arrow-key navigation, Enter selects, Escape/click-outside hides. Category separators between different command categories.
+  1044→- **SmartTooltip** (`src/lib/components/smart-tooltip/`): A tooltip overlay that renders a command's label, description, and kbd shortcut. Attaches to a target element (mouseenter/focus → show, mouseleave/blur → hide). Smart positioning: flips to opposite side if it would overflow the bounds container.
+  1045→- **React wrappers + playgrounds** for both: Each playground calls `registerBuiltinCommands()` on mount, features a live-canvas bounds container (right-click for menu, hoverable buttons for tooltip), property inspector with command/position selectors, output section, code panel, and documentation.
+  1046→- **Fixed two bugs**: (1) `defineCommands` was used in `registerBuiltinCommands` without being imported; (2) `SmartTooltip` was imported as `import type` but used as a value in the tooltip playground.
+  1047→- Both components appear in the sidebar under **Layout → Smart Context Menu / Smart Tooltip**.
+  1048→- `bun run lint` — 0 errors, 0 warnings.
+  1049→
+  1050→Stage Summary:
+  1051→- Commands registry + shortcuts utility established as a standalone module (not a component).
+  1052→- SmartContextMenu and SmartTooltip render command items with kbd shortcuts, with smart positioning bounded by a container element.
+
+[showing lines 800-1052 of 1054; use offset=1053 with limit to continue reading]

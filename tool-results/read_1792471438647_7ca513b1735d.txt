@@ -1,0 +1,578 @@
+     1→     1→# Platform Website Structure & UX Specification
+     2→     2→
+     3→     3→Scope: Information architecture · Page specifications · Interaction design · Functionality · Routing
+     4→     4→
+     5→     5→## 1. Platform structure at a glance
+     6→     6→
+     7→     7→The website should combine three complementary experiences:
+     8→     8→
+     9→     9→- Discover: Browse component categories, search the library, and explore use cases.
+    10→    10→- Explore: Interact with live components, adjust their properties, and understand their behavior.
+    11→    11→- Implement: Access installation instructions, API documentation, code examples, and integration guidance.
+    12→    12→
+    13→    13→The platform should feel like a professional software-development tool rather than a conventional marketing website or a simple gallery of UI elements.
+    14→    14→
+    15→    15→## 2. Global information architecture
+    16→    16→
+    17→    17→Platform
+    18→    18→
+    19→    19→Global navigation · Search · Theme · Version
+    20→    20→
+    21→    21→Home
+    22→    22→
+    23→    23→Introduction · Featured components · Categories · Quick start
+    24→    24→
+    25→    25→Components
+    26→    26→
+    27→    27→Category index · Component details · Live playground
+    28→    28→
+    29→    29→Documentation
+    30→    30→
+    31→    31→Installation · API reference · Guides · Integration
+    32→    32→
+    33→    33→Resources
+    34→    34→
+    35→    35→Examples · Patterns · Recipes · Templates
+    36→    36→
+    37→    37→Project
+    38→    38→
+    39→    39→About · Principles · Contribution · Changelog
+    40→    40→
+    41→    41→### Primary navigation
+    42→    42→
+    43→    43→| Item          | Purpose                                                |
+    44→    44→| ------------- | ------------------------------------------------------ |
+    45→    45→| Components    | Discover and browse the library                        |
+    46→    46→| Documentation | Learn how to install and use components                |
+    47→    47→| Examples      | Explore components in realistic application interfaces |
+    48→    48→| Resources     | Find patterns, recipes, and reusable solutions         |
+    49→    49→| Search        | Search components, APIs, guides, and examples          |
+    50→    50→
+    51→    51→The platform logo links to Home. A persistent theme control and a global search shortcut should be available throughout the documentation experience.
+    52→    52→
+    53→    53→## 3. Route structure
+    54→    54→
+    55→    55→Use human-readable, stable URLs that reflect the content hierarchy.
+    56→    56→
+    57→    57→PUBLIC ROUTES
+    58→    58→
+    59→    59→`/`
+    60→    60→
+    61→    61→Home and product introduction
+    62→    62→
+    63→    63→`/components`
+    64→    64→
+    65→    65→Component directory and category overview
+    66→    66→
+    67→    67→`/components/color`
+    68→    68→
+    69→    69→Color category overview
+    70→    70→
+    71→    71→`/components/color/color-wheel`
+    72→    72→
+    73→    73→Individual component documentation and playground
+    74→    74→
+    75→    75→`/docs`
+    76→    76→
+    77→    77→Documentation landing page
+    78→    78→
+    79→    79→`/docs/installation`
+    80→    80→
+    81→    81→Setup and distribution
+    82→    82→
+    83→    83→`/docs/concepts`
+    84→    84→
+    85→    85→Architecture and component conventions
+    86→    86→
+    87→    87→`/docs/theming`
+    88→    88→
+    89→    89→Styling and customization
+    90→    90→
+    91→    91→`/examples`
+    92→    92→
+    93→    93→Application-oriented examples
+    94→    94→
+    95→    95→`/examples/[slug]`
+    96→    96→
+    97→    97→Individual example with component references
+    98→    98→
+    99→    99→`/changelog`
+   100→   100→
+   101→   101→Releases and component changes
+   102→   102→
+   103→   103→`/contributing`
+   104→   104→
+   105→   105→Contribution guidelines
+   106→   106→
+   107→   107→These are proposed routes, not requirements for any specific framework. Component pages should use stable slugs rather than internal identifiers or implementation filenames.
+   108→   108→
+   109→   109→## 4. Global application shell
+   110→   110→
+   111→   111→The shared shell must support efficient navigation and long technical documentation pages.
+   112→   112→
+   113→   113→[Introducing: Documentation template for Astro and daisyUI — daisyUI Tailwind CSS Component UI Library](https://images.openai.com/static-rsc-4/2hXuiFl0woqnjq0DN7AcH1m22Y6s_FrSB0I8gdB-Bj15FSE97fCjRg046xBrNrKPzNpNWBkFp7dd8IbKZZai1xkcueIRv46rKpdnXm_b6TMaFck59po8v3CviKKabVCy28PGcd4rECDxjTL3pp0PV_cNOwGCbjXp1CoqCbOsbD0?purpose=inline)
+   114→   114→
+   115→   115→[daisyui.com](https://daisyui.com/blog/daisyui-astro-tailwind-documentation-template/?utm_source=chatgpt.com)
+   116→   116→
+   117→   117→### Layout regions
+   118→   118→
+   119→   119→[Navigation Menus Components | 21st](https://images.openai.com/static-rsc-4/XHPmTuDKuescYqVGSMcV5FQehLNkxosYqY3L5tdefReJsC46wqJ9YFs6F82bopsG7SgRQAUqWcUyNPlLRvLGkQ_peLH4e3ZvUqVZUx1liDZ1kvPYQsirfHRvhGSXUtXCNl0boyhqItAFpuqYOzOo19fG6jOWRkRQbALOToZGIs8?purpose=inline)
+   120→   120→
+   121→   121→A. Global header
+   122→   122→
+   123→   123→- Brand logo and name.
+   124→   124→- Main navigation links.
+   125→   125→- Global search field or search trigger.
+   126→   126→- Theme switcher.
+   127→   127→- Git repository link, when available.
+   128→   128→- Responsive mobile navigation.
+   129→   129→
+   130→   130→[Sweating the small stuff in Fern Docs | Fern](https://images.openai.com/static-rsc-4/QXTBSF8qiAIO_fdu2nfsRPTc9NV1O_8nuvLuR3ApWTenM9d6rtUNISARTUF7hr4EF0jTiEuOhi8Aab5Yf8S2q4SVWFIVpUvK80MUqtAmeVN36dmpCkm3pZRqnMVzMg4VhbH6JsCjqbV8P0Atc1jpwbnCycoFDm6S0qmH7stwhBc?purpose=inline)
+   131→   131→
+   132→   132→B. Documentation sidebar
+   133→   133→
+   134→   134→- Component categories and nested component links.
+   135→   135→- Documentation sections.
+   136→   136→- Expandable and collapsible groups.
+   137→   137→- Current-page indicator.
+   138→   138→- Optional sidebar collapse control.
+   139→   139→
+   140→   140→[New Storybook integration & hosting | Made with Supernova](https://images.openai.com/static-rsc-4/z6PjMJVqB5l-TjwznL6vHfNmrygq15wCHgDKuAtR5sfn2URWGzqrqpsa39S2_g7O_WnA0SZim_C9M1nXRXh6Qm4TrrSCnzAkilKh1MVuzUjNIedk7O5PAjUvunRjGGss0ah13ggMzNLsx3HYdTkn3NjTxuLPWxODvSq7e56zb4E?purpose=inline)
+   141→   141→
+   142→   142→C. Main content region
+   143→   143→
+   144→   144→- Page title and summary.
+   145→   145→- Component previews or documentation content.
+   146→   146→- Interactive examples and configuration controls.
+   147→   147→- Code examples and contextual actions.
+   148→   148→
+   149→   149→[Sticky Nested Table of Contents JS - CodeShack](https://images.openai.com/static-rsc-4/KKoR4e28XlEKraiuHSbtCSSgM89hf0SDnk7NqzO52DkZCPlBza4PDcARIs5OEG_SCNK2WnhnfVOA686TzCM-_uzP2Yr8OrcwOTHROkMLRlU89955XKG1p5KPMUKRsfaGVsNWv_mUjcKhcEUAvzWqZdhOO8IgxWhUpcICN78LJOI?purpose=inline)
+   150→   150→
+   151→   151→D. Contextual right sidebar
+   152→   152→
+   153→   153→- Table of contents.
+   154→   154→- Section anchors.
+   155→   155→- Optional component properties summary.
+   156→   156→- Related components or documentation links.
+   157→   157→
+   158→   158→The right sidebar should be contextual rather than mandatory. On the homepage and category index, the full content width should be used instead.
+   159→   159→
+   160→   160→### Responsive behavior
+   161→   161→
+   162→   162→- Desktop: persistent navigation sidebar, wide content region, and optional right sidebar.
+   163→   163→- Tablet: collapsible component sidebar and simplified content layout.
+   164→   164→- Mobile: drawer navigation, full-width content, stacked previews and controls.
+   165→   165→
+   166→   166→The interactive component must remain usable on touch devices even when its primary target is a precision control such as a color wheel.
+   167→   167→
+   168→   168→## 5. Page-by-page specifications
+   169→   169→
+   170→   170→### Page 1 — Home
+   171→   171→
+   172→   172→Route: `/`
+   173→   173→
+   174→   174→Purpose: Explain the library's value and help developers quickly reach a component or learn how to use it.
+   175→   175→
+   176→   176→[The 10 Best Alternatives to Ark UI in 2025](https://images.openai.com/static-rsc-4/_OXwXNbFQC45uVZQtH1-081WjFCcDao_T9s9QvPW0-_ZymOGsyMMs4l3OhqHG9Xko2cPPY19lPEccfn-T9d_JZVS4WoEO2M5I7YgK90wB29QLvA3GPHJKGU1sTUZKDgRm-ABzZ2yv1PCoG8-KEVPR5t7-1N5PD_SNUeBbw6A-nE?purpose=inline)
+   177→   177→
+   178→   178→[subframe.com](https://www.subframe.com/tips/ark-ui-alternatives?utm_source=chatgpt.com)
+   179→   179→
+   180→   180→| Section            | Content and functionality                                                     |
+   181→   181→| ------------------ | ----------------------------------------------------------------------------- |
+   182→   182→| Hero               | Product statement, short description, Browse Components and Get Started links |
+   183→   183→| Featured component | A live interactive demonstration of the Color Wheel Picker                    |
+   184→   184→| Category explorer  | Visual category cards, descriptions, and component counts                     |
+   185→   185→| Why this library   | Framework independence, application-focused components, composability         |
+   186→   186→| Quick start        | Minimal installation and usage example                                        |
+   187→   187→| Featured examples  | Application interfaces demonstrating component use                            |
+   188→   188→| Footer             | Documentation, repository, contribution, and project information              |
+   189→   189→
+   190→   190→Interactions
+   191→   191→
+   192→   192→- Clicking a category opens its category overview.
+   193→   193→- Clicking a component opens its dedicated page.
+   194→   194→- The featured component can be manipulated directly without leaving Home.
+   195→   195→- Quick-start actions navigate to the relevant documentation.
+   196→   196→- Global search opens from the header.
+   197→   197→
+   198→   198→The homepage should emphasize working components over oversized promotional illustrations.
+   199→   199→
+   200→   200→### Page 2 — Component Directory
+   201→   201→
+   202→   202→Route: `/components`
+   203→   203→
+   204→   204→Purpose: Provide a searchable, browsable index of the entire component library.
+   205→   205→
+   206→   206→[15 Open-source Tailwind-based UI Frameworks and Component Libraries](https://images.openai.com/static-rsc-4/RpGtW9jTcUeXDwRTIBWXKpEymXVMoaHLGSmX90y7XfaHbeuz2AaDrOYLEb7zOg18V2abefQS1iv2_g-QBVI771HhMRG-8PrLxh6fctt9vp6VCY-pzWCbZo2jCUqTmkliohz6lA_pKjt3ChySgY3ypAZa3sV9g9Zy_XDWZMeLQik?purpose=inline)
+   207→   207→
+   208→   208→[medevel.com](https://medevel.com/15-tailwind-libraries/?utm_source=chatgpt.com)
+   209→   209→
+   210→   210→Content structure
+   211→   211→
+   212→   212→- Page title and introduction.
+   213→   213→- Component search.
+   214→   214→- Category navigation.
+   215→   215→- Component cards.
+   216→   216→- Optional filters for component status and capabilities.
+   217→   217→- Sorting controls when the library grows.
+   218→   218→
+   219→   219→Each component card should include:
+   220→   220→
+   221→   221→- Component name.
+   222→   222→- Short description.
+   223→   223→- Small visual preview or interactive thumbnail.
+   224→   224→- Category.
+   225→   225→- Availability status, such as stable, beta, or experimental.
+   226→   226→- Link to its documentation and playground.
+   227→   227→
+   228→   228→Interactions
+   229→   229→
+   230→   230→- Search filters the displayed component list.
+   231→   231→- Selecting a category navigates to its category page.
+   232→   232→- Selecting a component opens its dedicated page.
+   233→   233→- Filters can be combined and cleared.
+   234→   234→- Search and filter state should be preserved in the URL when appropriate.
+   235→   235→
+   236→   236→Do not introduce rating systems or popularity rankings without a real reason and reliable data.
+   237→   237→
+   238→   238→### Page 3 — Category Overview
+   239→   239→
+   240→   240→Route example: `/components/color`
+   241→   241→
+   242→   242→Purpose: Explain a component category and provide a focused index of its members.
+   243→   243→
+   244→   244→[What is a Design System? A 2026 Guide With Best Practice Examples | Untitled UI](https://images.openai.com/static-rsc-4/-pSM0BCRlYloPHbOQTg1XS_HUhRaSUwyWMc6e78oYYKEiDB1gbR4nyLUZvStbGh3nUOdie95_EAhc0GfFybMYZbd2OKQKzsUcoGcwHGYVBuNCxOyTd7NnbRxB4VnmCh8eNB8sRT-yD60md86-YUV3_nBDSTgMjftzFdqYIJWywk?purpose=inline)
+   245→   245→
+   246→   246→[untitledui.com](https://www.untitledui.com/blog/what-is-a-design-system?utm_source=chatgpt.com)
+   247→   247→
+   248→   248→Page sections
+   249→   249→
+   250→   250→1. Breadcrumb navigation.
+   251→   251→2. Category title and description.
+   252→   252→3. Category-specific introduction and usage context.
+   253→   253→4. Component gallery.
+   254→   254→5. Related components or relevant documentation.
+   255→   255→6. Contribution or request guidance when appropriate.
+   256→   256→
+   257→   257→For the initial Color category, the page should introduce the category and showcase the Color Wheel Picker as its first component.
+   258→   258→
+   259→   259→The category structure must support additional color controls later without requiring a redesign of the entire site.
+   260→   260→
+   261→   261→### Page 4 — Component Details and Playground
+   262→   262→
+   263→   263→Route: `/components/color/color-wheel`
+   264→   264→
+   265→   265→This is the platform's most important page because it represents the main differentiator: a component library built around actual application interactions.
+   266→   266→
+   267→   267→[Slint 1.8 Released with New Property Changed Callbacks, Timer, and Swipe Gesture — Slint Blog](https://images.openai.com/static-rsc-4/TTCAdeDO91ddDGEl2tN-SzvVhCWixMfG38h2Z1ju7549wZ0D8v5jEKG6mTyeAItSrcmrIqbOxmKDveq9W4qdFVFNJgUAyjP8tnuLd9VJom0-Ln89zOrEyrEEiaQ0GnKIWUiXp9IwnSpVWDYzjObYTpF-9cUAehz8IksvZuR2Fag?purpose=inline)
+   268→   268→
+   269→   269→[slint.dev](https://slint.dev/blog/slint-1.8-released?utm_source=chatgpt.com)
+   270→   270→
+   271→   271→#### Page layout
+   272→   272→
+   273→   273→BREADCRUMBS
+   274→   274→
+   275→   275→Home / Components / Color / Color Wheel
+   276→   276→
+   277→   277→## Color Wheel Picker
+   278→   278→
+   279→   279→An interactive color-selection component with configurable inner geometry.
+   280→   280→
+   281→   281→Vanilla JS
+   282→   282→
+   283→   283→Interactive
+   284→   284→
+   285→   285→Configurable
+   286→   286→
+   287→   287→Live Preview
+   288→   288→
+   289→   289→Reset
+   290→   290→
+   291→   291→[Color picker – Hugo Daniel](https://images.openai.com/static-rsc-4/AfQdLPO5HWCLKb0h3YANbWxtF9DDcyc4UJLkOjleXbrzpUR99P2JLw62UogmPY3HJwQ0QoqpjNPFmM6nRaV5EubJGZP5cK4Te0mKT3NriJ2LKGZ32t5UvKxIAE3CwSXq2Gk0chOHMvX9tw33PDWVZZAo-achqgLeDAocveyn_VM?purpose=inline)
+   292→   292→
+   293→   293→Selected color
+   294→   294→
+   295→   295→\#4287F5
+   296→   296→
+   297→   297→Properties
+   298→   298→
+   299→   299→Shape
+   300→   300→
+   301→   301→Triangle
+   302→   302→
+   303→   303→Square
+   304→   304→
+   305→   305→Disk
+   306→   306→
+   307→   307→None
+   308→   308→
+   309→   309→Inner size
+   310→   310→
+   311→   311→180 px
+   312→   312→
+   313→   313→Implementation
+   314→   314→
+   315→   315→Preview
+   316→   316→
+   317→   317→HTML
+   318→   318→
+   319→   319→JavaScript
+   320→   320→
+   321→   321→CSS
+   322→   322→
+   323→   323→Installation instructions and code examples appear here.
+   324→   324→
+   325→   325→The layout above illustrates the intended page regions. The preview and controls represent the eventual working playground, not an implemented color picker.
+   326→   326→
+   327→   327→#### Required page regions
+   328→   328→
+   329→   329→A. Component header
+   330→   330→
+   331→   331→- Component name and concise description.
+   332→   332→- Category breadcrumb.
+   333→   333→- Component status.
+   334→   334→- Links to source code and contribution information, when available.
+   335→   335→
+   336→   336→B. Live preview
+   337→   337→
+   338→   338→- Render the actual vanilla JavaScript component.
+   339→   339→- Allow direct manipulation.
+   340→   340→- Provide a reset-to-default action.
+   341→   341→- Support preview resizing where relevant.
+   342→   342→- Display selected output values when useful.
+   343→   343→
+   344→   344→C. Interactive property inspector
+   345→   345→
+   346→   346→For the Color Wheel Picker:
+   347→   347→
+   348→   348→- Inner shape selector: triangle, square, disk, none.
+   349→   349→- Inner shape size control.
+   350→   350→- Wheel thickness and spacing controls, if exposed by the component API.
+   351→   351→- Current hue and color values.
+   352→   352→- Additional controls only when supported by the component.
+   353→   353→
+   354→   354→Changing a property must update the actual preview immediately. The inspector must not simulate configuration using independent decorative elements.
+   355→   355→
+   356→   356→D. Output and color information
+   357→   357→
+   358→   358→- Display the current color in HEX.
+   359→   359→- Offer RGB, HSV, and HSL representations.
+   360→   360→- Provide a copy action for individual values.
+   361→   361→- Keep values synchronized with direct interaction.
+   362→   362→
+   363→   363→E. Implementation tabs
+   364→   364→
+   365→   365→- Preview.
+   366→   366→- HTML markup.
+   367→   367→- JavaScript initialization and configuration.
+   368→   368→- CSS and customization.
+   369→   369→- Optional framework integration examples.
+   370→   370→
+   371→   371→The source examples must use the real public API and must not imply that Next.js or React is required to run the component.
+   372→   372→
+   373→   373→F. Documentation content
+   374→   374→
+   375→   375→- Overview and use cases.
+   376→   376→- Installation.
+   377→   377→- Basic usage.
+   378→   378→- Configuration properties.
+   379→   379→- Events and public methods.
+   380→   380→- Accessibility and keyboard behavior.
+   381→   381→- Examples and known limitations.
+   382→   382→
+   383→   383→Interaction rule: Changes made in the playground should be reflected in the preview and generated code. If a configuration is unsupported, the interface should explain why rather than displaying code that does not work.
+   384→   384→
+   385→   385→### Page 5 — Documentation Landing
+   386→   386→
+   387→   387→Route: `/docs`
+   388→   388→
+   389→   389→Purpose: Give developers a clear entry point to learn the library's architecture and usage conventions.
+   390→   390→
+   391→   391→Sections:
+   392→   392→
+   393→   393→- Introduction and core principles.
+   394→   394→- Installation and first component.
+   395→   395→- How the component API works.
+   396→   396→- Component styling and theming.
+   397→   397→- Component lifecycle and cleanup.
+   398→   398→- Navigation to API reference and examples.
+   399→   399→
+   400→   400→The landing page should guide a first-time user through one short successful integration rather than presenting a large collection of disconnected documentation links.
+   401→   401→
+   402→   402→### Page 6 — Installation
+   403→   403→
+   404→   404→Route: `/docs/installation`
+   405→   405→
+   406→   406→Purpose: Explain how to obtain and integrate the vanilla JavaScript library.
+   407→   407→
+   408→   408→Required content:
+   409→   409→
+   410→   410→- Supported distribution methods.
+   411→   411→- Installation or package import instructions.
+   412→   412→- Required CSS inclusion.
+   413→   413→- Minimal HTML example.
+   414→   414→- Initialization and configuration.
+   415→   415→- Versioning and updates.
+   416→   416→- Troubleshooting common setup errors.
+   417→   417→
+   418→   418→The exact package name and distribution commands should be specified only after the project defines its package and release strategy.
+   419→   419→
+   420→   420→### Page 7 — Concepts and Theming
+   421→   421→
+   422→   422→Routes: `/docs/concepts` and `/docs/theming`
+   423→   423→
+   424→   424→Concepts page
+   425→   425→
+   426→   426→Explain component initialization, configuration, events, state synchronization, lifecycle cleanup, and framework interoperability.
+   427→   427→
+   428→   428→Theming page
+   429→   429→
+   430→   430→Explain design tokens, CSS custom properties, sizing, color schemes, and supported customization points. Include live examples demonstrating how styles change without modifying the component's underlying behavior.
+   431→   431→
+   432→   432→### Page 8 — Examples
+   433→   433→
+   434→   434→Routes: `/examples` and `/examples/[slug]`
+   435→   435→
+   436→   436→Purpose: Demonstrate how individual components fit into realistic application interfaces.
+   437→   437→
+   438→   438→Example categories could include:
+   439→   439→
+   440→   440→- Creative software tools.
+   441→   441→- Property inspectors.
+   442→   442→- Settings panels.
+   443→   443→- Developer utilities.
+   444→   444→- Productivity applications.
+   445→   445→
+   446→   446→Each example should explain which components it uses, what can be interacted with, and how the relevant implementation can be reproduced.
+   447→   447→
+   448→   448→Examples should remain secondary to the core component documentation until the library contains enough components to support compelling combinations.
+   449→   449→
+   450→   450→### Page 9 — Changelog and Contribution
+   451→   451→
+   452→   452→Routes: `/changelog` and `/contributing`
+   453→   453→
+   454→   454→Changelog
+   455→   455→
+   456→   456→- Version and release date.
+   457→   457→- Added components and features.
+   458→   458→- API changes.
+   459→   459→- Fixes and improvements.
+   460→   460→- Migration notes for breaking changes.
+   461→   461→
+   462→   462→Contribution
+   463→   463→
+   464→   464→- Component design standards.
+   465→   465→- Development and testing requirements.
+   466→   466→- Accessibility expectations.
+   467→   467→- Documentation requirements.
+   468→   468→- Bug reports and feature requests.
+   469→   469→- Contribution workflow.
+   470→   470→
+   471→   471→These pages should reflect actual project practices, not promise governance, releases, or guarantees that have not yet been established.
+   472→   472→
+   473→   473→## 6. Global Interaction Specifications
+   474→   474→
+   475→   475→| Interaction           | Expected behavior                                            |
+   476→   476→| --------------------- | ------------------------------------------------------------ |
+   477→   477→| Global search         | Search component names, categories, docs, and examples       |
+   478→   478→| Sidebar navigation    | Navigate between sections and preserve the active page state |
+   479→   479→| Breadcrumbs           | Navigate to parent sections                                  |
+   480→   480→| Theme toggle          | Change the site's theme consistently                         |
+   481→   481→| Preview controls      | Update the actual component instance                         |
+   482→   482→| Code tabs             | Show the corresponding implementation example                |
+   483→   483→| Copy controls         | Copy the associated value or code snippet                    |
+   484→   484→| Reset preview         | Restore documented default settings                          |
+   485→   485→| Section anchors       | Navigate directly to documentation sections                  |
+   486→   486→| Browser navigation    | Back and forward actions restore the correct route           |
+   487→   487→| Responsive navigation | Open and close mobile navigation without losing context      |
+   488→   488→
+   489→   489→Interactive controls must have visible focus states, appropriate disabled states, clear labels, and meaningful feedback.
+   490→   490→
+   491→   491→## 7. Search and Discovery
+   492→   492→
+   493→   493→The search experience should be global rather than limited to the currently visible category.
+   494→   494→
+   495→   495→Searchable content:
+   496→   496→
+   497→   497→- Component names and aliases.
+   498→   498→- Categories.
+   499→   499→- Component descriptions.
+   500→   500→- API methods and configuration properties.
+   501→   501→- Documentation headings.
+   502→   502→- Example names and use cases.
+   503→   503→
+   504→   504→Expected behavior:
+   505→   505→
+   506→   506→1. Open search from the header or a keyboard shortcut.
+   507→   507→2. Enter a query.
+   508→   508→3. Display grouped results by content type.
+   509→   509→4. Highlight matching terms when practical.
+   510→   510→5. Navigate to the selected result.
+   511→   511→6. Preserve the previous page when the user returns from a result.
+   512→   512→
+   513→   513→Keyboard shortcuts should be documented and must not conflict with browser or assistive-technology conventions.
+   514→   514→
+   515→   515→## 8. Routing and User Flows
+   516→   516→
+   517→   517→\#chatgpt-mermaid-\_r_3i4\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;fill:rgb(237, 237, 237);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_3i4\_ .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_3i4\_ .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_3i4\_ .error-icon{fill:rgb(48, 48, 48);}#chatgpt-mermaid-\_r_3i4\_ .error-text{fill:rgb(237, 237, 237);stroke:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_3i4\_ .edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_3i4\_ .edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_3i4\_ .edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_3i4\_ .edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_3i4\_ .edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_3i4\_ .edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_3i4\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_3i4\_ .marker.cross{stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_3i4\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;}#chatgpt-mermaid-\_r_3i4\_ p{margin:0;}#chatgpt-mermaid-\_r_3i4\_ .label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_3i4\_ .cluster-label text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_3i4\_ .cluster-label span{color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_3i4\_ .cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_3i4\_ .label text,#chatgpt-mermaid-\_r_3i4\_ span{fill:rgb(237, 237, 237);color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_3i4\_ .node rect,#chatgpt-mermaid-\_r_3i4\_ .node circle,#chatgpt-mermaid-\_r_3i4\_ .node ellipse,#chatgpt-mermaid-\_r_3i4\_ .node polygon,#chatgpt-mermaid-\_r_3i4\_ .node path{fill:rgb(52, 24, 11);stroke:rgb(172, 79, 35);stroke-width:1px;}#chatgpt-mermaid-\_r_3i4\_ .rough-node .label text,#chatgpt-mermaid-\_r_3i4\_ .node .label text,#chatgpt-mermaid-\_r_3i4\_ .image-shape .label,#chatgpt-mermaid-\_r_3i4\_ .icon-shape .label{text-anchor:middle;}#chatgpt-mermaid-\_r_3i4\_ .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_3i4\_ .rough-node .label,#chatgpt-mermaid-\_r_3i4\_ .node .label,#chatgpt-mermaid-\_r_3i4\_ .image-shape .label,#chatgpt-mermaid-\_r_3i4\_ .icon-shape .label{text-align:center;}#chatgpt-mermaid-\_r_3i4\_ .node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_3i4\_ .root .anchor path{fill:rgb(175, 175, 175)!important;stroke-width:0;stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_3i4\_ .arrowheadPath{fill:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_3i4\_ .edgePath .path{stroke:rgb(175, 175, 175);stroke-width:1px;}#chatgpt-mermaid-\_r_3i4\_ .flowchart-link{stroke:rgb(175, 175, 175);fill:none;}#chatgpt-mermaid-\_r_3i4\_ .edgeLabel{background-color:rgb(0, 0, 0);text-align:center;}#chatgpt-mermaid-\_r_3i4\_ .edgeLabel p{background-color:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_3i4\_ .edgeLabel rect{opacity:0.5;background-color:rgb(0, 0, 0);fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_3i4\_ .labelBkg{background-color:rgba(0, 0, 0, 0.5);}#chatgpt-mermaid-\_r_3i4\_ .cluster rect{fill:rgb(48, 48, 48);stroke:rgba(255, 255, 255, 0.15);stroke-width:1px;}#chatgpt-mermaid-\_r_3i4\_ .cluster text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_3i4\_ .cluster span{color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_3i4\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:12px;background:rgb(48, 48, 48);border:1px solid rgba(255, 255, 255, 0.15);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_3i4\_ .flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_3i4\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_3i4\_ .icon-shape,#chatgpt-mermaid-\_r_3i4\_ .image-shape{background-color:rgb(0, 0, 0);text-align:center;}#chatgpt-mermaid-\_r_3i4\_ .icon-shape p,#chatgpt-mermaid-\_r_3i4\_ .image-shape p{background-color:rgb(0, 0, 0);padding:2px;}#chatgpt-mermaid-\_r_3i4\_ .icon-shape .label rect,#chatgpt-mermaid-\_r_3i4\_ .image-shape .label rect{opacity:0.5;background-color:rgb(0, 0, 0);fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_3i4\_ .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_3i4\_ .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_3i4\_ .node .neo-node{stroke:rgb(172, 79, 35);}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_3i4\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_3i4\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].node .neo-line path{stroke:rgb(172, 79, 35);filter:none;}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_3i4\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].node circle .state-start{fill:#000000;}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].icon-shape .icon{fill:url(#chatgpt-mermaid-\_r_3i4\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_3i4\_ [data-look="neo"].icon-shape .icon-neo path{stroke:url(#chatgpt-mermaid-\_r_3i4\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_3i4\_ .node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(255, 183, 144);}#chatgpt-mermaid-\_r_3i4\_ .edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(255, 183, 144);}#chatgpt-mermaid-\_r_3i4\_ .node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_3i4\_ .edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_3i4\_ .edgeLabel .label rect{opacity:1;rx:13px;ry:13px;fill:rgb(40, 17, 5);stroke:rgb(92, 56, 31);stroke-width:1px;}#chatgpt-mermaid-\_r_3i4\_ .node rect,#chatgpt-mermaid-\_r_3i4\_ .node circle,#chatgpt-mermaid-\_r_3i4\_ .node ellipse,#chatgpt-mermaid-\_r_3i4\_ .node polygon,#chatgpt-mermaid-\_r_3i4\_ .node path{fill:rgb(74, 34, 6);stroke:rgba(255, 255, 255, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_3i4\_ .node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_3i4\_ .node.mermaid-decision .label-container{fill:rgb(40, 17, 5);stroke:rgb(92, 56, 31);stroke-dasharray:2,2;}#chatgpt-mermaid-\_r_3i4\_ .edgePaths .flowchart-link{stroke:rgb(175, 175, 175);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_3i4\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_3i4\_ :root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";}HomeComponent DirectoryDocumentationExamplesCategory OverviewComponent DetailsLive PlaygroundConfigure ComponentInspect Generated CodeRead API ReferenceIntegrate into ApplicationInstallationFirst ComponentExample Details
+   518→   518→
+   519→   519→### Primary developer journey
+   520→   520→
+   521→   521→1. Discover the library on Home.
+   522→   522→2. Open Components.
+   523→   523→3. Select a category.
+   524→   524→4. Open a component.
+   525→   525→5. Experiment with the live preview.
+   526→   526→6. Change properties to understand the component.
+   527→   527→7. Inspect the generated configuration and code.
+   528→   528→8. Read the API documentation.
+   529→   529→9. Copy the integration example and use it in an application.
+   530→   530→
+   531→   531→### Secondary journeys
+   532→   532→
+   533→   533→- Experienced developer: Search directly for a method or component property, then jump to its reference.
+   534→   534→- Visual explorer: Browse examples, open a component used in an example, and inspect its configuration.
+   535→   535→- Contributor: Discover a component, review its implementation requirements, and navigate to contribution guidance.
+   536→   536→
+   537→   537→All journeys should work without requiring user registration.
+   538→   538→
+   539→   539→## 9. Shared Design and Content Rules
+   540→   540→
+   541→   541→- Use consistent page headers, breadcrumbs, section headings, and documentation conventions.
+   542→   542→- Prioritize readable technical content and usable interactive previews.
+   543→   543→- Keep component demonstrations visually neutral enough to distinguish the component from the website's branding.
+   544→   544→- Use consistent spacing, typography, icon sizing, borders, and interaction states.
+   545→   545→- Provide light and dark themes if supported by the component library's design goals.
+   546→   546→- Avoid unnecessary dashboards, accounts, social features, or community systems in the initial release.
+   547→   547→- Treat the component API and actual behavior as the source of truth for the playground and documentation.
+   548→   548→
+   549→   549→## 10. Recommended Delivery Phases
+   550→   550→
+   551→   551→1. Phase 1 — Platform foundation
+   552→   552→
+   553→   553→   Establish navigation, global shell, component directory, category pages, documentation structure, and routing conventions.
+   554→   554→2. Phase 2 — Component documentation engine
+   555→   555→
+   556→   556→   Establish reusable component page layouts, live preview containers, property inspectors, code tabs, and API documentation sections.
+   557→   557→3. Phase 3 — First integrated component
+   558→   558→
+   559→   559→   Integrate the Color Wheel Picker and connect its real configuration API to the playground, output display, and code examples.
+   560→   560→4. Phase 4 — Developer experience
+   561→   561→
+   562→   562→   Add global search, responsive navigation, theming documentation, keyboard support, and copy-to-clipboard behavior.
+   563→   563→5. Phase 5 — Examples and project resources
+   564→   564→
+   565→   565→   Add realistic application examples, contribution guidance, and release documentation.
+   566→   566→
+   567→   567→## 11. Acceptance Criteria
+   568→   568→
+   569→   569→The platform's initial structure is ready when:
+   570→   570→
+   571→   571→- Every primary section has a defined purpose and route.
+   572→   572→- Components are discoverable through both category browsing and global search.
+   573→   573→- Each component has a consistent documentation and playground layout.
+   574→   574→- The live preview can be controlled through its documented properties.
+   575→   575→- Code examples correspond to the actual vanilla JavaScript API.
+   576→   576→- Documentation clearly distinguishes the platform's framework from the component implementation.
+   577→   577→- Navigation, breadcrumbs, browser history, and responsive layouts work consistently.
+   578→   578→- The initial Color Wheel Picker can be discovered, tested, understood, and integrated without requiring a developer account.

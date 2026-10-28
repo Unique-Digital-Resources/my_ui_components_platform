@@ -1,0 +1,1625 @@
+     1→/**
+     2→ * KanbanBoard — a reusable Kanban board component (vanilla TypeScript).
+     3→ *
+     4→ * Spec reference: §14 Minimum viable specification.
+     5→ *
+     6→ *   - Render configurable columns and ordered cards.
+     7→ *   - Accept generic item records with stable identifiers.
+     8→ *   - Support horizontal scrolling and responsive column sizing.
+     9→ *   - Display optional card content and metadata.
+    10→ *   - Add, select, and move cards when enabled.
+    11→ *   - Support drag-and-drop and a non-drag move alternative.
+    12→ *   - Support reordering within and between columns.
+    13→ *   - Handle empty columns and invalid drop targets.
+    14→ *   - Define editable, read-only, and disabled behavior.
+    15→ *   - Expose configurable card and column styles.
+    16→ *   - Emit consistent selection, move, reorder, and rejection events.
+    17→ *   - Support keyboard navigation and accessible controls.
+    18→ *
+    19→ * Architecture: single-file DOM-based renderer with scoped CSS (`.kanban-` prefix).
+    20→ * Drag-and-drop uses the HTML5 Drag-and-Drop API. Item ordering is by array
+    21→ * position within each column's items list.
+    22→ *
+    23→ * The board owns a local copy of items and columns; the host application is
+    24→ * notified of changes through events and may persist the resulting data.
+    25→ */
+    26→
+    27→// ---- Public types ----
+    28→
+    29→export type KanbanMode = "editable" | "read_only";
+    30→export type KanbanLayout = "horizontal" | "vertical";
+    31→export type KanbanCardLayout = "compact" | "standard" | "detailed";
+    32→export type KanbanPriority = "low" | "medium" | "high";
+    33→
+    34→export interface KanbanItem {
+    35→  id: string;
+    36→  columnId: string;
+    37→  title: string;
+    38→  description?: string;
+    39→  labels?: string[];
+    40→  priority?: KanbanPriority;
+    41→  assignee?: string;
+    42→  [key: string]: unknown;
+    43→}
+    44→
+    45→export interface KanbanColumn {
+    46→  id: string;
+    47→  title: string;
+    48→  color?: string;
+    49→  collapsed?: boolean;
+    50→  itemLimit?: number;
+    51→  allowAddItem?: boolean;
+    52→}
+    53→
+    54→export interface KanbanOptions {
+    55→  items?: KanbanItem[];
+    56→  columns?: KanbanColumn[];
+    57→  mode?: KanbanMode;
+    58→  layout?: KanbanLayout;
+    59→  cardLayout?: KanbanCardLayout;
+    60→  dragEnabled?: boolean;
+    61→  reorderWithinColumn?: boolean;
+    62→  moveBetweenColumns?: boolean;
+    63→  showCardBorder?: boolean;
+    64→  showItemCount?: boolean;
+    65→  selectable?: boolean;
+    66→  columnWidth?: number;
+    67→  cardGap?: number;
+    68→  columnGap?: number;
+    69→  allowEmptyColumns?: boolean;
+    70→  showDropPreview?: boolean;
+    71→}
+    72→
+    73→export interface KanbanEventPayload {
+    74→  type?: string;
+    75→  itemId?: string | null;
+    76→  previousItemId?: string | null;
+    77→  itemIds?: string[];
+    78→  previousItemIds?: string[];
+    79→  columnId?: string | null;
+    80→  previousColumnId?: string | null;
+    81→  targetColumnId?: string | null;
+    82→  sourceColumnId?: string | null;
+    83→  position?: number;
+    84→  oldPosition?: number;
+    85→  newPosition?: number;
+    86→  item?: KanbanItem | null;
+    87→  changes?: Partial<KanbanItem>;
+    88→  reason?: string;
+    89→  source?: "pointer" | "keyboard" | "programmatic";
+    90→  targetPosition?: number;
+    91→}
+    92→
+    93→export type KanbanHandler = (payload: KanbanEventPayload) => void;
+    94→
+    95→// ---- Constants ----
+    96→
+    97→const STYLE_ID = "kanban-styles";
+    98→
+    99→const PRIORITY_LABELS: Record<KanbanPriority, string> = {
+   100→  low: "Low",
+   101→  medium: "Medium",
+   102→  high: "High",
+   103→};
+   104→
+   105→// ---- Style injection (scoped CSS, .kanban- prefix) ----
+   106→
+   107→function injectStyles(): void {
+   108→  if (typeof document === "undefined") return;
+   109→  if (document.getElementById(STYLE_ID)) return;
+   110→  const el = document.createElement("style");
+   111→  el.id = STYLE_ID;
+   112→  el.textContent = `
+   113→.kanban-board {
+   114→  --kb-bg: #101014;
+   115→  --kb-surface: #211A30;
+   116→  --kb-surface-2: #2A2238;
+   117→  --kb-surface-3: #342348;
+   118→  --kb-border: #383343;
+   119→  --kb-text: #F4F1FF;
+   120→  --kb-muted: #B8B2CA;
+   121→  --kb-accent: #D9FF66;
+   122→  --kb-accent-hover: #C8F34F;
+   123→  --kb-danger: #FF858B;
+   124→  --kb-warn: #FFD36B;
+   125→  --kb-ok: #8FE3A5;
+   126→  --kb-radius: 8px;
+   127→  font-family: inherit;
+   128→  color: var(--kb-text);
+   129→  background: var(--kb-bg);
+   130→  border: 1px solid var(--kb-border);
+   131→  border-radius: var(--kb-radius);
+   132→  display: flex;
+   133→  flex-direction: column;
+   134→  min-height: 0;
+   135→  height: 100%;
+   136→  width: 100%;
+   137→  overflow: hidden;
+   138→  position: relative;
+   139→  box-sizing: border-box;
+   140→}
+   141→.kanban-board * { box-sizing: border-box; }
+   142→.kanban-board.kanban-disabled { opacity: 0.55; pointer-events: none; }
+   143→.kanban-board.kanban-readonly .kanban-card { cursor: default; }
+   144→
+   145→.kanban-board.kanban-layout-horizontal .kanban-columns {
+   146→  flex-direction: row;
+   147→}
+   148→.kanban-board.kanban-layout-vertical .kanban-columns {
+   149→  flex-direction: column;
+   150→}
+   151→
+   152→.kanban-columns {
+   153→  flex: 1 1 auto;
+   154→  min-height: 0;
+   155→  display: flex;
+   156→  gap: var(--kb-col-gap, 12px);
+   157→  padding: 12px;
+   158→  overflow: auto;
+   159→  scrollbar-width: thin;
+   160→}
+   161→
+   162→.kanban-column {
+   163→  display: flex;
+   164→  flex-direction: column;
+   165→  flex: 0 0 var(--kb-col-w, 280px);
+   166→  min-width: 220px;
+   167→  min-height: 0;
+   168→  background: var(--kb-surface);
+   169→  border: 1px solid var(--kb-border);
+   170→  border-radius: var(--kb-radius);
+   171→  transition: border-color 120ms ease, background 120ms ease;
+   172→}
+   173→.kanban-board.kanban-layout-vertical .kanban-column {
+   174→  flex: 0 0 auto;
+   175→  width: 100%;
+   176→  min-height: 120px;
+   177→  max-height: 50%;
+   178→}
+   179→.kanban-column.kanban-drop-target {
+   180→  border-color: var(--kb-accent);
+   181→  background: color-mix(in srgb, var(--kb-accent) 8%, var(--kb-surface));
+   182→}
+   183→.kanban-column.kanban-drop-invalid {
+   184→  border-color: var(--kb-danger);
+   185→  background: color-mix(in srgb, var(--kb-danger) 8%, var(--kb-surface));
+   186→}
+   187→.kanban-column.kanban-collapsed {
+   188→  flex: 0 0 44px;
+   189→  min-width: 44px;
+   190→}
+   191→.kanban-column.kanban-collapsed .kanban-column-body,
+   192→.kanban-column.kanban-collapsed .kanban-column-footer {
+   193→  display: none;
+   194→}
+   195→
+   196→.kanban-column-header {
+   197→  display: flex;
+   198→  align-items: center;
+   199→  gap: 8px;
+   200→  padding: 10px 12px;
+   201→  border-bottom: 1px solid var(--kb-border);
+   202→  user-select: none;
+   203→}
+   204→.kanban-column-color {
+   205→  width: 8px;
+   206→  height: 8px;
+   207→  border-radius: 999px;
+   208→  background: var(--kb-muted);
+   209→  flex: 0 0 auto;
+   210→}
+   211→.kanban-column-title {
+   212→  flex: 1 1 auto;
+   213→  font-size: 12px;
+   214→  font-weight: 600;
+   215→  color: var(--kb-text);
+   216→  letter-spacing: 0.02em;
+   217→  text-transform: uppercase;
+   218→  white-space: nowrap;
+   219→  overflow: hidden;
+   220→  text-overflow: ellipsis;
+   221→}
+   222→.kanban-column-count {
+   223→  font-family: var(--font-mono, ui-monospace, monospace);
+   224→  font-size: 11px;
+   225→  color: var(--kb-muted);
+   226→  padding: 1px 6px;
+   227→  border-radius: 999px;
+   228→  background: var(--kb-surface-2);
+   229→  flex: 0 0 auto;
+   230→}
+   231→.kanban-column-limit {
+   232→  color: var(--kb-danger);
+   233→}
+   234→.kanban-icon-btn {
+   235→  display: inline-flex;
+   236→  align-items: center;
+   237→  justify-content: center;
+   238→  width: 22px;
+   239→  height: 22px;
+   240→  border: none;
+   241→  background: transparent;
+   242→  color: var(--kb-muted);
+   243→  border-radius: 4px;
+   244→  cursor: pointer;
+   245→  padding: 0;
+   246→  flex: 0 0 auto;
+   247→  transition: background 120ms ease, color 120ms ease;
+   248→}
+   249→.kanban-icon-btn:hover { background: var(--kb-surface-3); color: var(--kb-text); }
+   250→.kanban-icon-btn:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+   251→.kanban-icon-btn:disabled { opacity: 0.3; cursor: default; }
+   252→.kanban-icon-btn svg { width: 14px; height: 14px; }
+   253→
+   254→.kanban-column-body {
+   255→  flex: 1 1 auto;
+   256→  min-height: 0;
+   257→  overflow-y: auto;
+   258→  overflow-x: hidden;
+   259→  padding: var(--kb-card-pad, 8px);
+   260→  display: flex;
+   261→  flex-direction: column;
+   262→  gap: var(--kb-card-gap, 8px);
+   263→  scrollbar-width: thin;
+   264→}
+   265→.kanban-board.kanban-layout-vertical .kanban-column-body {
+   266→  flex-direction: row;
+   267→  overflow-x: auto;
+   268→  overflow-y: hidden;
+   269→  align-items: stretch;
+   270→}
+   271→.kanban-board.kanban-layout-vertical .kanban-card {
+   272→  flex: 0 0 220px;
+   273→  min-width: 220px;
+   274→}
+   275→
+   276→.kanban-card {
+   277→  display: flex;
+   278→  flex-direction: column;
+   279→  gap: 6px;
+   280→  padding: 10px 12px;
+   281→  background: var(--kb-surface-2);
+   282→  border: 1px solid var(--kb-border);
+   283→  border-radius: 6px;
+   284→  cursor: grab;
+   285→  outline: none;
+   286→  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+   287→  position: relative;
+   288→}
+   289→.kanban-board.kanban-card-border-false .kanban-card {
+   290→  border-color: transparent;
+   291→}
+   292→.kanban-card:hover { background: var(--kb-surface-3); }
+   293→.kanban-card:focus-visible {
+   294→  border-color: var(--kb-accent);
+   295→  box-shadow: 0 0 0 2px color-mix(in srgb, var(--kb-accent) 40%, transparent);
+   296→}
+   297→.kanban-card.kanban-selected {
+   298→  border-color: var(--kb-accent);
+   299→  background: color-mix(in srgb, var(--kb-accent) 10%, var(--kb-surface-2));
+   300→}
+   301→.kanban-card.kanban-dragging {
+   302→  opacity: 0.45;
+   303→  cursor: grabbing;
+   304→}
+   305→.kanban-card.kanban-readonly-card { cursor: default; }
+   306→.kanban-card.kanban-disabled-card { opacity: 0.55; cursor: not-allowed; }
+   307→
+   308→.kanban-card-priority {
+   309→  display: flex;
+   310→  align-items: center;
+   311→  gap: 6px;
+   312→  font-size: 10px;
+   313→  font-weight: 600;
+   314→  color: var(--kb-muted);
+   315→  text-transform: uppercase;
+   316→  letter-spacing: 0.06em;
+   317→}
+   318→.kanban-priority-dot {
+   319→  width: 7px;
+   320→  height: 7px;
+   321→  border-radius: 999px;
+   322→  flex: 0 0 auto;
+   323→}
+   324→.kanban-priority-low { background: var(--kb-ok); }
+   325→.kanban-priority-medium { background: var(--kb-warn); }
+   326→.kanban-priority-high { background: var(--kb-danger); }
+   327→
+   328→.kanban-card-title {
+   329→  font-size: 13px;
+   330→  font-weight: 600;
+   331→  color: var(--kb-text);
+   332→  line-height: 1.35;
+   333→  word-break: break-word;
+   334→}
+   335→.kanban-card-desc {
+   336→  font-size: 11.5px;
+   337→  color: var(--kb-muted);
+   338→  line-height: 1.4;
+   339→  word-break: break-word;
+   340→  display: -webkit-box;
+   341→  -webkit-line-clamp: 2;
+   342→  -webkit-box-orient: vertical;
+   343→  overflow: hidden;
+   344→}
+   345→.kanban-card-labels {
+   346→  display: flex;
+   347→  flex-wrap: wrap;
+   348→  gap: 4px;
+   349→}
+   350→.kanban-card-label {
+   351→  font-family: var(--font-mono, ui-monospace, monospace);
+   352→  font-size: 10px;
+   353→  padding: 1px 6px;
+   354→  border-radius: 4px;
+   355→  background: var(--kb-surface-3);
+   356→  color: var(--kb-text);
+   357→  border: 1px solid var(--kb-border);
+   358→}
+   359→.kanban-card-footer {
+   360→  display: flex;
+   361→  align-items: center;
+   362→  justify-content: space-between;
+   363→  gap: 6px;
+   364→  margin-top: 2px;
+   365→}
+   366→.kanban-card-assignee {
+   367→  display: inline-flex;
+   368→  align-items: center;
+   369→  justify-content: center;
+   370→  width: 22px;
+   371→  height: 22px;
+   372→  border-radius: 999px;
+   373→  background: var(--kb-surface-3);
+   374→  color: var(--kb-text);
+   375→  font-size: 10px;
+   376→  font-weight: 600;
+   377→  border: 1px solid var(--kb-border);
+   378→}
+   379→.kanban-card-move-btn {
+   380→  display: inline-flex;
+   381→  align-items: center;
+   382→  gap: 4px;
+   383→  background: transparent;
+   384→  border: 1px solid var(--kb-border);
+   385→  color: var(--kb-muted);
+   386→  font-size: 10px;
+   387→  border-radius: 4px;
+   388→  padding: 2px 6px;
+   389→  cursor: pointer;
+   390→}
+   391→.kanban-card-move-btn:hover { color: var(--kb-text); background: var(--kb-surface-3); }
+   392→.kanban-card-move-btn:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+   393→.kanban-card-move-btn svg { width: 11px; height: 11px; }
+   394→
+   395→.kanban-card-compact { padding: 6px 10px; gap: 2px; }
+   396→.kanban-card-compact .kanban-card-desc,
+   397→.kanban-card-compact .kanban-card-labels,
+   398→.kanban-card-compact .kanban-card-footer { display: none; }
+   399→.kanban-card-detailed .kanban-card-desc {
+   400→  -webkit-line-clamp: 4;
+   401→}
+   402→
+   403→.kanban-drop-indicator {
+   404→  height: 3px;
+   405→  background: var(--kb-accent);
+   406→  border-radius: 999px;
+   407→  margin: 0 4px;
+   408→  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kb-accent) 40%, transparent);
+   409→  flex: 0 0 3px;
+   410→  animation: kanban-pulse 1.2s ease-in-out infinite;
+   411→}
+   412→.kanban-board.kanban-layout-vertical .kanban-drop-indicator {
+   413→  height: auto;
+   414→  width: 3px;
+   415→  min-width: 3px;
+   416→  margin: 4px 0;
+   417→}
+   418→@keyframes kanban-pulse {
+   419→  0%, 100% { opacity: 1; }
+   420→  50% { opacity: 0.55; }
+   421→}
+   422→@media (prefers-reduced-motion: reduce) {
+   423→  .kanban-drop-indicator { animation: none; }
+   424→  .kanban-card, .kanban-column { transition: none; }
+   425→}
+   426→
+   427→.kanban-column-footer {
+   428→  padding: 6px 8px 8px;
+   429→}
+   430→.kanban-add-btn {
+   431→  display: inline-flex;
+   432→  align-items: center;
+   433→  justify-content: center;
+   434→  gap: 6px;
+   435→  width: 100%;
+   436→  background: transparent;
+   437→  border: 1px dashed var(--kb-border);
+   438→  color: var(--kb-muted);
+   439→  font-size: 12px;
+   440→  padding: 6px 8px;
+   441→  border-radius: 6px;
+   442→  cursor: pointer;
+   443→}
+   444→.kanban-add-btn:hover { color: var(--kb-text); border-color: var(--kb-accent); background: color-mix(in srgb, var(--kb-accent) 6%, transparent); }
+   445→.kanban-add-btn:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+   446→.kanban-add-btn svg { width: 12px; height: 12px; }
+   447→
+   448→.kanban-empty {
+   449→  display: flex;
+   450→  align-items: center;
+   451→  justify-content: center;
+   452→  text-align: center;
+   453→  font-size: 11px;
+   454→  color: var(--kb-muted);
+   455→  padding: 16px 8px;
+   456→  border: 1px dashed var(--kb-border);
+   457→  border-radius: 6px;
+   458→  min-height: 60px;
+   459→}
+   460→.kanban-empty-tight {
+   461→  padding: 10px 6px;
+   462→  min-height: 40px;
+   463→}
+   464→
+   465→/* Move-to popover */
+   466→.kanban-move-popover {
+   467→  position: fixed;
+   468→  z-index: 999;
+   469→  min-width: 180px;
+   470→  background: var(--kb-surface);
+   471→  border: 1px solid var(--kb-border);
+   472→  border-radius: 8px;
+   473→  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.6);
+   474→  padding: 4px;
+   475→  display: flex;
+   476→  flex-direction: column;
+   477→  gap: 1px;
+   478→}
+   479→.kanban-move-popover-title {
+   480→  font-family: var(--font-mono, ui-monospace, monospace);
+   481→  font-size: 10px;
+   482→  color: var(--kb-muted);
+   483→  text-transform: uppercase;
+   484→  letter-spacing: 0.08em;
+   485→  padding: 4px 8px;
+   486→}
+   487→.kanban-move-option {
+   488→  display: flex;
+   489→  align-items: center;
+   490→  gap: 8px;
+   491→  padding: 6px 8px;
+   492→  font-size: 12px;
+   493→  color: var(--kb-text);
+   494→  background: transparent;
+   495→  border: none;
+   496→  border-radius: 4px;
+   497→  cursor: pointer;
+   498→  text-align: left;
+   499→  width: 100%;
+   500→}
+   501→.kanban-move-option:hover, .kanban-move-option.kanban-active {
+   502→  background: var(--kb-surface-3);
+   503→}
+   504→.kanban-move-option:disabled { opacity: 0.4; cursor: default; }
+   505→.kanban-move-option .kanban-column-color { width: 8px; height: 8px; }
+   506→`;
+   507→  document.head.appendChild(el);
+   508→}
+   509→
+   510→// ---- Icon helpers (inline SVG strings) ----
+   511→
+   512→const ICON_PLUS = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>`;
+   513→const ICON_CHEVRON_LEFT = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>`;
+   514→const ICON_CHEVRON_DOWN = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l5 5 5-5"/></svg>`;
+   515→const ICON_MOVE = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h10M8 3l5 5-5 5"/></svg>`;
+   516→const ICON_TRASH = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h10M6.5 4V2.5h3V4M5 4l.7 9h4.6L11 4"/></svg>`;
+   517→
+   518→// ---- Utilities ----
+   519→
+   520→function uid(prefix: string): string {
+   521→  return `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36).slice(-4)}`;
+   522→}
+   523→
+   524→function initials(name: string): string {
+   525→  if (!name) return "?";
+   526→  const parts = name.trim().split(/\s+/);
+   527→  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+   528→  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+   529→}
+   530→
+   531→function clamp(n: number, min: number, max: number): number {
+   532→  return Math.max(min, Math.min(max, n));
+   533→}
+   534→
+   535→// ---- Component ----
+   536→
+   537→export class KanbanBoard {
+   538→  private container: HTMLElement;
+   539→  private root!: HTMLDivElement;
+   540→  private opts: Required<KanbanOptions>;
+   541→  private columns: KanbanColumn[];
+   542→  private items: KanbanItem[];
+   543→  private selectedItemId: string | null = null;
+   544→  private listeners = new Map<string, Set<KanbanHandler>>();
+   545→  private cardEls = new Map<string, HTMLElement>();
+   546→  private columnEls = new Map<string, HTMLElement>();
+   547→  private _destroyed = false;
+   548→
+   549→  // Drag state
+   550→  private dragItemId: string | null = null;
+   551→  private dragSourceColumnId: string | null = null;
+   552→  private dragTargetColumnId: string | null = null;
+   553→  private dragTargetPosition: number | null = null;
+   554→  private dragHappened = false;
+   555→
+   556→  // Popover state
+   557→  private popoverEl: HTMLDivElement | null = null;
+   558→  private popoverItemId: string | null = null;
+   559→
+   560→  constructor(container: HTMLElement, options: KanbanOptions = {}) {
+   561→    this.container = container;
+   562→    injectStyles();
+   563→    this.opts = {
+   564→      items: options.items ?? [],
+   565→      columns: options.columns ?? [],
+   566→      mode: options.mode ?? "editable",
+   567→      layout: options.layout ?? "horizontal",
+   568→      cardLayout: options.cardLayout ?? "standard",
+   569→      dragEnabled: options.dragEnabled ?? true,
+   570→      reorderWithinColumn: options.reorderWithinColumn ?? true,
+   571→      moveBetweenColumns: options.moveBetweenColumns ?? true,
+   572→      showCardBorder: options.showCardBorder ?? true,
+   573→      showItemCount: options.showItemCount ?? true,
+   574→      selectable: options.selectable ?? true,
+   575→      columnWidth: options.columnWidth ?? 280,
+   576→      cardGap: options.cardGap ?? 8,
+   577→      columnGap: options.columnGap ?? 12,
+   578→      allowEmptyColumns: options.allowEmptyColumns ?? true,
+   579→      showDropPreview: options.showDropPreview ?? true,
+   580→    };
+   581→    // Deep-ish copy: clone items and columns so external mutations don't surprise us
+   582→    this.items = (this.opts.items as KanbanItem[]).map((it) => ({
+   583→      ...it,
+   584→      labels: it.labels ? [...it.labels] : undefined,
+   585→    }));
+   586→    this.columns = (this.opts.columns as KanbanColumn[]).map((c) => ({ ...c }));
+   587→    this.render();
+   588→  }
+   589→
+   590→  // ---- Rendering ----
+   591→
+   592→  private render(): void {
+   593→    if (this._destroyed) return;
+   594→    this.cardEls.clear();
+   595→    this.columnEls.clear();
+   596→
+   597→    const root = document.createElement("div");
+   598→    root.className = "kanban-board";
+   599→    root.classList.add(`kanban-layout-${this.opts.layout}`);
+   600→    if (this.opts.mode === "read_only") root.classList.add("kanban-readonly");
+   601→    if (!this.opts.showCardBorder) root.classList.add("kanban-card-border-false");
+   602→    root.style.setProperty("--kb-col-w", `${this.opts.columnWidth}px`);
+   603→    root.style.setProperty("--kb-card-gap", `${this.opts.cardGap}px`);
+   604→    root.style.setProperty("--kb-col-gap", `${this.opts.columnGap}px`);
+   605→
+   606→    const cols = document.createElement("div");
+   607→    cols.className = "kanban-columns";
+   608→    cols.setAttribute("role", "list");
+   609→
+   610→    for (const col of this.columns) {
+   611→      const colEl = this.renderColumn(col);
+   612→      cols.appendChild(colEl);
+   613→      this.columnEls.set(col.id, colEl);
+   614→    }
+   615→
+   616→    root.appendChild(cols);
+   617→    // Replace any previous root
+   618→    this.container.innerHTML = "";
+   619→    this.container.appendChild(root);
+   620→    this.root = root;
+   621→  }
+   622→
+   623→  private renderColumn(col: KanbanColumn): HTMLElement {
+   624→    const el = document.createElement("section");
+   625→    el.className = "kanban-column";
+   626→    el.setAttribute("data-column-id", col.id);
+   627→    el.setAttribute("role", "group");
+   628→    el.setAttribute("aria-label", col.title);
+   629→    if (col.collapsed) el.classList.add("kanban-collapsed");
+   630→
+   631→    const color = col.color ?? "#B8B2CA";
+   632→
+   633→    // Header
+   634→    const header = document.createElement("div");
+   635→    header.className = "kanban-column-header";
+   636→    header.addEventListener("click", (e) => {
+   637→      const target = e.target as HTMLElement;
+   638→      if (target.closest(".kanban-icon-btn")) return;
+   639→      this.emit("column_selected", {
+   640→        columnId: col.id,
+   641→        previousColumnId: null,
+   642→        source: "pointer",
+   643→      });
+   644→    });
+   645→
+   646→    const colorDot = document.createElement("span");
+   647→    colorDot.className = "kanban-column-color";
+   648→    colorDot.style.background = color;
+   649→    header.appendChild(colorDot);
+   650→
+   651→    const title = document.createElement("span");
+   652→    title.className = "kanban-column-title";
+   653→    title.textContent = col.title;
+   654→    header.appendChild(title);
+   655→
+   656→    if (this.opts.showItemCount) {
+   657→      const itemsInCol = this.orderedColumnItems(col.id);
+   658→      const count = document.createElement("span");
+   659→      count.className = "kanban-column-count";
+   660→      count.textContent = `${itemsInCol.length}${col.itemLimit ? "/" + col.itemLimit : ""}`;
+   661→      if (col.itemLimit && itemsInCol.length >= col.itemLimit) {
+   662→        count.classList.add("kanban-column-limit");
+   663→      }
+   664→      header.appendChild(count);
+   665→    }
+   666→
+   667→    if (this.opts.mode === "editable") {
+   668→      const collapseBtn = document.createElement("button");
+   669→      collapseBtn.type = "button";
+   670→      collapseBtn.className = "kanban-icon-btn";
+   671→      collapseBtn.setAttribute(
+   672→        "aria-label",
+   673→        col.collapsed ? `Expand ${col.title}` : `Collapse ${col.title}`,
+   674→      );
+   675→      collapseBtn.innerHTML = col.collapsed ? ICON_CHEVRON_LEFT : ICON_CHEVRON_DOWN;
+   676→      collapseBtn.addEventListener("click", (e) => {
+   677→        e.stopPropagation();
+   678→        if (col.collapsed) this.expandColumn(col.id);
+   679→        else this.collapseColumn(col.id);
+   680→      });
+   681→      header.appendChild(collapseBtn);
+   682→    }
+   683→
+   684→    el.appendChild(header);
+   685→
+   686→    // Body (cards)
+   687→    const body = document.createElement("div");
+   688→    body.className = "kanban-column-body";
+   689→    body.setAttribute("role", "list");
+   690→    body.setAttribute("aria-label", `${col.title} cards`);
+   691→
+   692→    const itemsInCol = this.orderedColumnItems(col.id);
+   693→
+   694→    if (itemsInCol.length === 0) {
+   695→      if (this.opts.allowEmptyColumns) {
+   696→        const empty = document.createElement("div");
+   697→        empty.className = "kanban-empty";
+   698→        if (this.opts.cardLayout === "compact") empty.classList.add("kanban-empty-tight");
+   699→        empty.textContent = this.opts.mode === "read_only" ? "No items" : "Drop cards here";
+   700→        body.appendChild(empty);
+   701→      }
+   702→    } else {
+   703→      for (const item of itemsInCol) {
+   704→        const cardEl = this.renderCard(item, col);
+   705→        body.appendChild(cardEl);
+   706→        this.cardEls.set(item.id, cardEl);
+   707→      }
+   708→    }
+   709→
+   710→    // Drop zone wiring (entire column body)
+   711→    this.attachColumnDropHandlers(body, col.id);
+   712→
+   713→    el.appendChild(body);
+   714→
+   715→    // Footer (Add item button)
+   716→    if (this.opts.mode === "editable" && col.allowAddItem !== false) {
+   717→      const footer = document.createElement("div");
+   718→      footer.className = "kanban-column-footer";
+   719→      const addBtn = document.createElement("button");
+   720→      addBtn.type = "button";
+   721→      addBtn.className = "kanban-add-btn";
+   722→      addBtn.setAttribute("aria-label", `Add item to ${col.title}`);
+   723→      addBtn.innerHTML = `${ICON_PLUS}<span>Add item</span>`;
+   724→      addBtn.addEventListener("click", () => {
+   725→        this.emit("item_create_requested", { columnId: col.id, source: "pointer" });
+   726→      });
+   727→      footer.appendChild(addBtn);
+   728→      el.appendChild(footer);
+   729→    }
+   730→
+   731→    return el;
+   732→  }
+   733→
+   734→  private renderCard(item: KanbanItem, _col: KanbanColumn): HTMLElement {
+   735→    const el = document.createElement("div");
+   736→    el.className = "kanban-card";
+   737→    el.classList.add(`kanban-card-${this.opts.cardLayout}`);
+   738→    el.setAttribute("data-item-id", item.id);
+   739→    el.setAttribute("role", "button");
+   740→    el.setAttribute("tabindex", "0");
+   741→    el.setAttribute(
+   742→      "aria-label",
+   743→      `${item.title}${item.priority ? `, priority ${PRIORITY_LABELS[item.priority]}` : ""}${item.assignee ? `, assigned to ${item.assignee}` : ""}`,
+   744→    );
+   745→    if (this.selectedItemId === item.id) el.classList.add("kanban-selected");
+   746→    if (this.opts.mode === "read_only") el.classList.add("kanban-readonly-card");
+   747→
+   748→    // Priority row
+   749→    if (item.priority) {
+   750→      const pr = document.createElement("div");
+   751→      pr.className = "kanban-card-priority";
+   752→      const dot = document.createElement("span");
+   753→      dot.className = `kanban-priority-dot kanban-priority-${item.priority}`;
+   754→      pr.appendChild(dot);
+   755→      const lbl = document.createElement("span");
+   756→      lbl.textContent = PRIORITY_LABELS[item.priority];
+   757→      pr.appendChild(lbl);
+   758→      el.appendChild(pr);
+   759→    }
+   760→
+   761→    // Title
+   762→    const title = document.createElement("div");
+   763→    title.className = "kanban-card-title";
+   764→    title.textContent = item.title;
+   765→    el.appendChild(title);
+   766→
+   767→    // Description
+   768→    if (item.description && this.opts.cardLayout !== "compact") {
+   769→      const desc = document.createElement("div");
+   770→      desc.className = "kanban-card-desc";
+   771→      desc.textContent = item.description;
+   772→      el.appendChild(desc);
+   773→    }
+   774→
+   775→    // Labels
+   776→    if (item.labels && item.labels.length > 0 && this.opts.cardLayout !== "compact") {
+   777→      const labels = document.createElement("div");
+   778→      labels.className = "kanban-card-labels";
+   779→      for (const l of item.labels.slice(0, 4)) {
+   780→        const chip = document.createElement("span");
+   781→        chip.className = "kanban-card-label";
+   782→        chip.textContent = l;
+   783→        labels.appendChild(chip);
+   784→      }
+   785→      if (item.labels.length > 4) {
+   786→        const more = document.createElement("span");
+   787→        more.className = "kanban-card-label";
+   788→        more.textContent = `+${item.labels.length - 4}`;
+   789→        labels.appendChild(more);
+   790→      }
+   791→      el.appendChild(labels);
+   792→    }
+   793→
+   794→    // Footer (assignee + move button)
+   795→    const hasFooter = item.assignee || (this.opts.mode === "editable" && this.opts.moveBetweenColumns);
+   796→    if (hasFooter && this.opts.cardLayout !== "compact") {
+   797→      const footer = document.createElement("div");
+   798→      footer.className = "kanban-card-footer";
+   799→      if (item.assignee) {
+   800→        const av = document.createElement("span");
+   801→        av.className = "kanban-card-assignee";
+   802→        av.textContent = initials(item.assignee);
+   803→        av.setAttribute("title", item.assignee);
+   804→        footer.appendChild(av);
+   805→      }
+   806→      if (this.opts.mode === "editable" && this.opts.moveBetweenColumns) {
+   807→        const moveBtn = document.createElement("button");
+   808→        moveBtn.type = "button";
+   809→        moveBtn.className = "kanban-card-move-btn";
+   810→        moveBtn.setAttribute("aria-label", `Move ${item.title} to another column`);
+   811→        moveBtn.innerHTML = `${ICON_MOVE}<span>Move</span>`;
+   812→        moveBtn.addEventListener("click", (e) => {
+   813→          e.stopPropagation();
+   814→          this.openMovePopover(item.id, moveBtn);
+   815→        });
+   816→        footer.appendChild(moveBtn);
+   817→      }
+   818→      el.appendChild(footer);
+   819→    }
+   820→
+   821→    // Drag handlers
+   822→    if (this.opts.dragEnabled && this.opts.mode === "editable") {
+   823→      el.setAttribute("draggable", "true");
+   824→      el.addEventListener("dragstart", (e) => this.onCardDragStart(e, item));
+   825→      el.addEventListener("dragend", (e) => this.onCardDragEnd(e, item));
+   826→    }
+   827→
+   828→    // Click handler
+   829→    el.addEventListener("click", (e) => {
+   830→      const target = e.target as HTMLElement;
+   831→      if (target.closest(".kanban-card-move-btn")) return;
+   832→      if (this.opts.selectable) {
+   833→        this.selectItem(item.id, "pointer");
+   834→      }
+   835→    });
+   836→
+   837→    // Double click → activate (open details)
+   838→    el.addEventListener("dblclick", () => {
+   839→      this.emit("item_activated", { itemId: item.id, source: "pointer" });
+   840→    });
+   841→
+   842→    // Keyboard handler
+   843→    el.addEventListener("keydown", (e) => this.onCardKeyDown(e, item));
+   844→
+   845→    return el;
+   846→  }
+   847→
+   848→  // ---- Helpers ----
+   849→
+   850→  private orderedColumnItems(columnId: string): KanbanItem[] {
+   851→    // Items are stored in their display order (array order). Filter by column.
+   852→    return this.items.filter((it) => it.columnId === columnId);
+   853→  }
+   854→
+   855→  private findItem(itemId: string): KanbanItem | undefined {
+   856→    return this.items.find((it) => it.id === itemId);
+   857→  }
+   858→
+   859→  private findColumn(columnId: string): KanbanColumn | undefined {
+   860→    return this.columns.find((c) => c.id === columnId);
+   861→  }
+   862→
+   863→  private indexOfItem(itemId: string): number {
+   864→    return this.items.findIndex((it) => it.id === itemId);
+   865→  }
+   866→
+   867→  private canDropOnColumn(columnId: string): { ok: boolean; reason?: string } {
+   868→    const col = this.findColumn(columnId);
+   869→    if (!col) return { ok: false, reason: "invalid_target" };
+   870→    if (col.collapsed) return { ok: false, reason: "invalid_target" };
+   871→    if (col.itemLimit) {
+   872→      const count = this.orderedColumnItems(columnId).length;
+   873→      // If the dragged item is already in this column, it doesn't add to count
+   874→      const isSameColumn = this.dragSourceColumnId === columnId;
+   875→      const effectiveCount = isSameColumn ? count : count + 1;
+   876→      if (effectiveCount > col.itemLimit) return { ok: false, reason: "column_limit" };
+   877→    }
+   878→    return { ok: true };
+   879→  }
+   880→
+   881→  // ---- Selection ----
+   882→
+   883→  selectItem(itemId: string | null, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+   884→    if (this._destroyed) return;
+   885→    if (!this.opts.selectable) return;
+   886→    const prev = this.selectedItemId;
+   887→    if (itemId !== null && !this.findItem(itemId)) return;
+   888→    this.selectedItemId = itemId;
+   889→    // Update DOM classes
+   890→    this.cardEls.forEach((el, id) => {
+   891→      el.classList.toggle("kanban-selected", id === itemId);
+   892→    });
+   893→    if (prev !== itemId) {
+   894→      this.emit("item_selected", { itemId, previousItemId: prev, source });
+   895→      this.emit("selection_changed", {
+   896→        itemIds: itemId ? [itemId] : [],
+   897→        previousItemIds: prev ? [prev] : [],
+   898→        source,
+   899→      });
+   900→    }
+   901→  }
+   902→
+   903→  clearSelection(): void {
+   904→    this.selectItem(null, "programmatic");
+   905→  }
+   906→
+   907→  getSelectedItem(): string | null {
+   908→    return this.selectedItemId;
+   909→  }
+   910→
+   911→  // ---- Move / reorder ----
+   912→
+   913→  /**
+   914→   * Move an item to a (possibly different) column at a given position.
+   915→   * position is the index within the target column's item list; out-of-range
+   916→   * values are clamped to the end.
+   917→   */
+   918→  moveItem(
+   919→    itemId: string,
+   920→    targetColumnId: string,
+   921→    position: number,
+   922→    source: "pointer" | "keyboard" | "programmatic" = "programmatic",
+   923→  ): void {
+   924→    if (this._destroyed) return;
+   925→    if (this.opts.mode === "read_only") {
+   926→      this.emit("item_move_rejected", { itemId, targetColumnId, position, reason: "read_only", source });
+   927→      return;
+   928→    }
+   929→    const item = this.findItem(itemId);
+   930→    if (!item) {
+   931→      this.emit("item_move_rejected", { itemId, targetColumnId, position, reason: "invalid_item", source });
+   932→      return;
+   933→    }
+   934→    const targetCol = this.findColumn(targetColumnId);
+   935→    if (!targetCol) {
+   936→      this.emit("item_move_rejected", { itemId, targetColumnId, position, reason: "invalid_target", source });
+   937→      return;
+   938→    }
+   939→    if (targetCol.collapsed) {
+   940→      this.emit("item_move_rejected", { itemId, targetColumnId, position, reason: "invalid_target", source });
+   941→      return;
+   942→    }
+   943→    // Validate cross-column policy
+   944→    const sameColumn = item.columnId === targetColumnId;
+   945→    if (!sameColumn && !this.opts.moveBetweenColumns) {
+   946→      this.emit("item_move_rejected", { itemId, targetColumnId, position, reason: "cross_column_disabled", source });
+   947→      return;
+   948→    }
+   949→    if (sameColumn && !this.opts.reorderWithinColumn) {
+   950→      const currentPos = this.orderedColumnItems(targetColumnId).findIndex((it) => it.id === itemId);
+   951→      if (position !== currentPos) {
+   952→        this.emit("item_move_rejected", { itemId, targetColumnId, position, reason: "reorder_disabled", source });
+   953→        return;
+   954→      }
+   955→    }
+   956→    // Item limit check
+   957→    if (targetCol.itemLimit) {
+   958→      const count = this.orderedColumnItems(targetColumnId).length;
+   959→      const effectiveCount = sameColumn ? count : count + 1;
+   960→      if (effectiveCount > targetCol.itemLimit) {
+   961→        this.emit("item_move_rejected", { itemId, targetColumnId, position, reason: "column_limit", source });
+   962→        return;
+   963→      }
+   964→    }
+   965→
+   966→    const oldColumnId = item.columnId;
+   967→    const oldPosition = this.orderedColumnItems(oldColumnId).findIndex((it) => it.id === itemId);
+   968→
+   969→    // Remove the item from the master list, then re-insert at the right spot.
+   970→    const idx = this.indexOfItem(itemId);
+   971→    if (idx < 0) return;
+   972→    this.items.splice(idx, 1);
+   973→
+   974→    // Compute target position in the master list. We need to insert after
+   975→    // `position` items in the target column's current list (after removal).
+   976→    const targetList = this.orderedColumnItems(targetColumnId);
+   977→    const clampedPos = clamp(position, 0, targetList.length);
+   978→    let insertAt: number;
+   979→    if (clampedPos === 0) {
+   980→      // Insert before the first item in target column, or at start if empty
+   981→      if (targetList.length === 0) {
+   982→        insertAt = this.items.length; // append
+   983→      } else {
+   984→        const firstTarget = targetList[0];
+   985→        insertAt = this.items.findIndex((it) => it.id === firstTarget.id);
+   986→        if (insertAt < 0) insertAt = this.items.length;
+   987→      }
+   988→    } else {
+   989→      const ref = targetList[clampedPos - 1];
+   990→      const refIdx = this.items.findIndex((it) => it.id === ref.id);
+   991→      insertAt = refIdx < 0 ? this.items.length : refIdx + 1;
+   992→    }
+   993→
+   994→    const movedItem: KanbanItem = { ...item, columnId: targetColumnId };
+   995→    this.items.splice(insertAt, 0, movedItem);
+   996→
+   997→    this.render();
+   998→    this.emit("item_moved", {
+   999→      itemId,
+  1000→      sourceColumnId: oldColumnId,
+  1001→      targetColumnId,
+  1002→      oldPosition,
+  1003→      newPosition: clampedPos,
+  1004→      source,
+  1005→    });
+  1006→    if (oldColumnId !== targetColumnId) {
+  1007→      this.emit("item_reordered", {
+  1008→        itemId,
+  1009→        columnId: targetColumnId,
+  1010→        oldPosition,
+  1011→        newPosition: clampedPos,
+  1012→        source,
+  1013→      });
+  1014→    }
+  1015→  }
+  1016→
+  1017→  reorderItem(itemId: string, position: number, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+  1018→    if (this._destroyed) return;
+  1019→    const item = this.findItem(itemId);
+  1020→    if (!item) return;
+  1021→    const oldPosition = this.orderedColumnItems(item.columnId).findIndex((it) => it.id === itemId);
+  1022→    this.moveItem(itemId, item.columnId, position, source);
+  1023→    this.emit("item_reordered", {
+  1024→      itemId,
+  1025→      columnId: item.columnId,
+  1026→      oldPosition,
+  1027→      newPosition: position,
+  1028→      source,
+  1029→    });
+  1030→  }
+  1031→
+  1032→  // ---- CRUD ----
+  1033→
+  1034→  createItem(columnId: string, item: Partial<KanbanItem>): string {
+  1035→    if (this._destroyed) return "";
+  1036→    const col = this.findColumn(columnId);
+  1037→    if (!col) {
+  1038→      this.emit("item_move_rejected", { itemId: null, targetColumnId: columnId, reason: "invalid_target", source: "programmatic" });
+  1039→      return "";
+  1040→    }
+  1041→    const id = item.id ?? uid("item");
+  1042→    const newItem: KanbanItem = {
+  1043→      id,
+  1044→      columnId,
+  1045→      title: item.title ?? "Untitled",
+  1046→      description: item.description,
+  1047→      labels: item.labels ? [...item.labels] : undefined,
+  1048→      priority: item.priority,
+  1049→      assignee: item.assignee,
+  1050→    };
+  1051→    // Validate limit
+  1052→    if (col.itemLimit) {
+  1053→      const count = this.orderedColumnItems(columnId).length;
+  1054→      if (count >= col.itemLimit) {
+  1055→        this.emit("item_move_rejected", { itemId: id, targetColumnId: columnId, reason: "column_limit", source: "programmatic" });
+  1056→        return id;
+  1057→      }
+  1058→    }
+  1059→    this.items.push(newItem);
+  1060→    this.render();
+  1061→    return id;
+  1062→  }
+  1063→
+  1064→  updateItem(itemId: string, changes: Partial<KanbanItem>): void {
+  1065→    if (this._destroyed) return;
+  1066→    const idx = this.indexOfItem(itemId);
+  1067→    if (idx < 0) return;
+  1068→    const prev = this.items[idx];
+  1069→    this.items[idx] = { ...prev, ...changes, id: prev.id };
+  1070→    this.render();
+  1071→  }
+  1072→
+  1073→  removeItem(itemId: string): void {
+  1074→    if (this._destroyed) return;
+  1075→    const idx = this.indexOfItem(itemId);
+  1076→    if (idx < 0) return;
+  1077→    this.items.splice(idx, 1);
+  1078→    if (this.selectedItemId === itemId) this.selectedItemId = null;
+  1079→    this.render();
+  1080→  }
+  1081→
+  1082→  // ---- Column collapse ----
+  1083→
+  1084→  collapseColumn(columnId: string): void {
+  1085→    if (this._destroyed) return;
+  1086→    const col = this.findColumn(columnId);
+  1087→    if (!col) return;
+  1088→    col.collapsed = true;
+  1089→    this.render();
+  1090→  }
+  1091→
+  1092→  expandColumn(columnId: string): void {
+  1093→    if (this._destroyed) return;
+  1094→    const col = this.findColumn(columnId);
+  1095→    if (!col) return;
+  1096→    col.collapsed = false;
+  1097→    this.render();
+  1098→  }
+  1099→
+  1100→  // ---- Data setters ----
+  1101→
+  1102→  setItems(items: KanbanItem[]): void {
+  1103→    if (this._destroyed) return;
+  1104→    this.items = items.map((it) => ({
+  1105→      ...it,
+  1106→      labels: it.labels ? [...it.labels] : undefined,
+  1107→    }));
+  1108→    if (this.selectedItemId && !this.findItem(this.selectedItemId)) {
+  1109→      this.selectedItemId = null;
+  1110→    }
+  1111→    this.render();
+  1112→  }
+  1113→
+  1114→  setColumns(columns: KanbanColumn[]): void {
+  1115→    if (this._destroyed) return;
+  1116→    this.columns = columns.map((c) => ({ ...c }));
+  1117→    // Drop items whose column no longer exists
+  1118→    const validIds = new Set(this.columns.map((c) => c.id));
+  1119→    this.items = this.items.filter((it) => validIds.has(it.columnId));
+  1120→    this.render();
+  1121→  }
+  1122→
+  1123→  getItems(): KanbanItem[] {
+  1124→    return this.items.map((it) => ({
+  1125→      ...it,
+  1126→      labels: it.labels ? [...it.labels] : undefined,
+  1127→    }));
+  1128→  }
+  1129→
+  1130→  getColumns(): KanbanColumn[] {
+  1131→    return this.columns.map((c) => ({ ...c }));
+  1132→  }
+  1133→
+  1134→  // ---- Property setter ----
+  1135→
+  1136→  setProperty(name: string, value: unknown): void {
+  1137→    if (this._destroyed) return;
+  1138→    switch (name) {
+  1139→      case "mode":
+  1140→        this.opts.mode = value as KanbanMode;
+  1141→        break;
+  1142→      case "layout":
+  1143→        this.opts.layout = value as KanbanLayout;
+  1144→        break;
+  1145→      case "cardLayout":
+  1146→        this.opts.cardLayout = value as KanbanCardLayout;
+  1147→        break;
+  1148→      case "dragEnabled":
+  1149→        this.opts.dragEnabled = !!value;
+  1150→        break;
+  1151→      case "reorderWithinColumn":
+  1152→        this.opts.reorderWithinColumn = !!value;
+  1153→        break;
+  1154→      case "moveBetweenColumns":
+  1155→        this.opts.moveBetweenColumns = !!value;
+  1156→        break;
+  1157→      case "showCardBorder":
+  1158→        this.opts.showCardBorder = !!value;
+  1159→        break;
+  1160→      case "showItemCount":
+  1161→        this.opts.showItemCount = !!value;
+  1162→        break;
+  1163→      case "selectable":
+  1164→        this.opts.selectable = !!value;
+  1165→        break;
+  1166→      case "columnWidth":
+  1167→        this.opts.columnWidth = Number(value);
+  1168→        break;
+  1169→      case "cardGap":
+  1170→        this.opts.cardGap = Number(value);
+  1171→        break;
+  1172→      case "columnGap":
+  1173→        this.opts.columnGap = Number(value);
+  1174→        break;
+  1175→      case "allowEmptyColumns":
+  1176→        this.opts.allowEmptyColumns = !!value;
+  1177→        break;
+  1178→      case "showDropPreview":
+  1179→        this.opts.showDropPreview = !!value;
+  1180→        break;
+  1181→      case "items":
+  1182→        this.setItems(value as KanbanItem[]);
+  1183→        return;
+  1184→      case "columns":
+  1185→        this.setColumns(value as KanbanColumn[]);
+  1186→        return;
+  1187→      default:
+  1188→        return;
+  1189→    }
+  1190→    this.render();
+  1191→  }
+  1192→
+  1193→  // ---- Drag-and-drop handlers ----
+  1194→
+  1195→  private onCardDragStart(e: DragEvent, item: KanbanItem): void {
+  1196→    if (!this.opts.dragEnabled || this.opts.mode === "read_only") {
+  1197→      e.preventDefault();
+  1198→      return;
+  1199→    }
+  1200→    this.dragItemId = item.id;
+  1201→    this.dragSourceColumnId = item.columnId;
+  1202→    this.dragHappened = false;
+  1203→    if (e.dataTransfer) {
+  1204→      e.dataTransfer.effectAllowed = "move";
+  1205→      // Some browsers require setData to actually start a drag
+  1206→      try { e.dataTransfer.setData("text/plain", item.id); } catch { /* ignore */ }
+  1207→    }
+  1208→    const cardEl = this.cardEls.get(item.id);
+  1209→    if (cardEl) cardEl.classList.add("kanban-dragging");
+  1210→    this.emit("drag_started", { itemId: item.id, sourceColumnId: item.columnId, source: "pointer" });
+  1211→  }
+  1212→
+  1213→  private onCardDragEnd(_e: DragEvent, item: KanbanItem): void {
+  1214→    const cardEl = this.cardEls.get(item.id);
+  1215→    if (cardEl) cardEl.classList.remove("kanban-dragging");
+  1216→    if (!this.dragHappened) {
+  1217→      this.emit("drag_cancelled", { itemId: item.id, sourceColumnId: item.columnId, source: "pointer" });
+  1218→    }
+  1219→    this.clearDropPreview();
+  1220→    this.dragItemId = null;
+  1221→    this.dragSourceColumnId = null;
+  1222→    this.dragTargetColumnId = null;
+  1223→    this.dragTargetPosition = null;
+  1224→    this.dragHappened = false;
+  1225→  }
+  1226→
+  1227→  private attachColumnDropHandlers(body: HTMLElement, columnId: string): void {
+  1228→    body.addEventListener("dragenter", (e) => {
+  1229→      if (!this.dragItemId) return;
+  1230→      e.preventDefault();
+  1231→      this.updateDropTarget(columnId, e);
+  1232→    });
+  1233→    body.addEventListener("dragover", (e) => {
+  1234→      if (!this.dragItemId) return;
+  1235→      e.preventDefault();
+  1236→      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  1237→      this.updateDropTarget(columnId, e);
+  1238→    });
+  1239→    body.addEventListener("dragleave", (e) => {
+  1240→      if (!this.dragItemId) return;
+  1241→      // Only clear if we're leaving the column body entirely (not entering a child)
+  1242→      const related = e.relatedTarget as Node | null;
+  1243→      if (related && body.contains(related)) return;
+  1244→      if (this.dragTargetColumnId === columnId) {
+  1245→        this.clearDropPreview();
+  1246→        this.dragTargetColumnId = null;
+  1247→        this.dragTargetPosition = null;
+  1248→      }
+  1249→    });
+  1250→    body.addEventListener("drop", (e) => {
+  1251→      if (!this.dragItemId) return;
+  1252→      e.preventDefault();
+  1253→      e.stopPropagation();
+  1254→      this.dragHappened = true;
+  1255→      const targetCol = this.dragTargetColumnId ?? columnId;
+  1256→      const targetPos = this.dragTargetPosition ?? this.orderedColumnItems(targetCol).length;
+  1257→      const itemId = this.dragItemId;
+  1258→      const sourceColumnId = this.dragSourceColumnId;
+  1259→      this.clearDropPreview();
+  1260→      // Validate
+  1261→      const validation = this.canDropOnColumn(targetCol);
+  1262→      if (!validation.ok) {
+  1263→        this.emit("item_move_rejected", {
+  1264→          itemId,
+  1265→          sourceColumnId,
+  1266→          targetColumnId: targetCol,
+  1267→          position: targetPos,
+  1268→          reason: validation.reason,
+  1269→          source: "pointer",
+  1270→        });
+  1271→        this.dragItemId = null;
+  1272→        this.dragSourceColumnId = null;
+  1273→        this.dragTargetColumnId = null;
+  1274→        this.dragTargetPosition = null;
+  1275→        return;
+  1276→      }
+  1277→      this.moveItem(itemId, targetCol, targetPos, "pointer");
+  1278→      this.dragItemId = null;
+  1279→      this.dragSourceColumnId = null;
+  1280→      this.dragTargetColumnId = null;
+  1281→      this.dragTargetPosition = null;
+  1282→    });
+  1283→  }
+  1284→
+  1285→  private updateDropTarget(columnId: string, e: DragEvent): void {
+  1286→    const validation = this.canDropOnColumn(columnId);
+  1287→    // Update column highlight
+  1288→    this.columnEls.forEach((el, id) => {
+  1289→      el.classList.remove("kanban-drop-target", "kanban-drop-invalid");
+  1290→      if (id === columnId) {
+  1291→        if (validation.ok) el.classList.add("kanban-drop-target");
+  1292→        else el.classList.add("kanban-drop-invalid");
+  1293→      }
+  1294→    });
+  1295→
+  1296→    const prevTarget = this.dragTargetColumnId;
+  1297→    const prevPos = this.dragTargetPosition;
+  1298→    this.dragTargetColumnId = columnId;
+  1299→
+  1300→    // Compute position
+  1301→    const pos = this.computeDropPosition(e, columnId);
+  1302→    this.dragTargetPosition = pos;
+  1303→
+  1304→    if (prevTarget !== columnId || prevPos !== pos) {
+  1305→      this.emit("drop_target_changed", {
+  1306→        itemId: this.dragItemId,
+  1307→        targetColumnId: columnId,
+  1308→        targetPosition: pos,
+  1309→        source: "pointer",
+  1310→      });
+  1311→    }
+  1312→
+  1313→    if (this.opts.showDropPreview && validation.ok) {
+  1314→      this.renderDropPreview(columnId, pos);
+  1315→    } else {
+  1316→      this.clearDropPreview();
+  1317→    }
+  1318→  }
+  1319→
+  1320→  private computeDropPosition(e: DragEvent, columnId: string): number {
+  1321→    const body = this.columnEls.get(columnId)?.querySelector(".kanban-column-body") as HTMLElement | null;
+  1322→    if (!body) return 0;
+  1323→    const cards = Array.from(body.querySelectorAll(".kanban-card:not(.kanban-dragging)")) as HTMLElement[];
+  1324→    if (cards.length === 0) return 0;
+  1325→    const isVertical = this.opts.layout === "vertical";
+  1326→    const refPos = isVertical ? e.clientX : e.clientY;
+  1327→    for (let i = 0; i < cards.length; i++) {
+  1328→      const rect = cards[i].getBoundingClientRect();
+  1329→      const mid = isVertical ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+  1330→      if (refPos < mid) return i;
+  1331→    }
+  1332→    return cards.length;
+  1333→  }
+  1334→
+  1335→  private renderDropPreview(columnId: string, position: number): void {
+  1336→    this.clearDropPreview();
+  1337→    const body = this.columnEls.get(columnId)?.querySelector(".kanban-column-body") as HTMLElement | null;
+  1338→    if (!body) return;
+  1339→    // Remove the empty-state placeholder so the indicator has a clear spot
+  1340→    const empty = body.querySelector(".kanban-empty");
+  1341→    if (empty) empty.remove();
+  1342→
+  1343→    const indicator = document.createElement("div");
+  1344→    indicator.className = "kanban-drop-indicator";
+  1345→    indicator.setAttribute("aria-hidden", "true");
+  1346→
+  1347→    const cards = Array.from(body.querySelectorAll(".kanban-card:not(.kanban-dragging)")) as HTMLElement[];
+  1348→    if (position === 0) {
+  1349→      body.insertBefore(indicator, body.firstChild);
+  1350→    } else if (position >= cards.length) {
+  1351→      body.appendChild(indicator);
+  1352→    } else {
+  1353→      body.insertBefore(indicator, cards[position]);
+  1354→    }
+  1355→  }
+  1356→
+  1357→  private clearDropPreview(): void {
+  1358→    if (!this.root) return;
+  1359→    const indicators = this.root.querySelectorAll(".kanban-drop-indicator");
+  1360→    indicators.forEach((el) => el.remove());
+  1361→    this.columnEls.forEach((el) => el.classList.remove("kanban-drop-target", "kanban-drop-invalid"));
+  1362→    // Re-add empty state if a column was emptied visually
+  1363→    for (const col of this.columns) {
+  1364→      const body = this.columnEls.get(col.id)?.querySelector(".kanban-column-body") as HTMLElement | null;
+  1365→      if (!body) continue;
+  1366→      const hasCards = body.querySelector(".kanban-card:not(.kanban-dragging)");
+  1367→      const hasEmpty = body.querySelector(".kanban-empty");
+  1368→      if (!hasCards && !hasEmpty && this.opts.allowEmptyColumns) {
+  1369→        const empty = document.createElement("div");
+  1370→        empty.className = "kanban-empty";
+  1371→        if (this.opts.cardLayout === "compact") empty.classList.add("kanban-empty-tight");
+  1372→        empty.textContent = this.opts.mode === "read_only" ? "No items" : "Drop cards here";
+  1373→        body.appendChild(empty);
+  1374→      }
+  1375→    }
+  1376→  }
+  1377→
+  1378→  // ---- Keyboard ----
+  1379→
+  1380→  private onCardKeyDown(e: KeyboardEvent, item: KanbanItem): void {
+  1381→    // Don't intercept typing in inputs
+  1382→    const target = e.target as HTMLElement;
+  1383→    if (target.closest("input, textarea, select")) return;
+  1384→
+  1385→    switch (e.key) {
+  1386→      case "Enter": {
+  1387→        e.preventDefault();
+  1388→        this.emit("item_activated", { itemId: item.id, source: "keyboard" });
+  1389→        break;
+  1390→      }
+  1391→      case " ": {
+  1392→        e.preventDefault();
+  1393→        if (this.opts.selectable) {
+  1394→          this.selectItem(item.id, "keyboard");
+  1395→        }
+  1396→        break;
+  1397→      }
+  1398→      case "m":
+  1399→      case "M": {
+  1400→        if (this.opts.mode !== "editable" || !this.opts.moveBetweenColumns) return;
+  1401→        e.preventDefault();
+  1402→        const cardEl = this.cardEls.get(item.id);
+  1403→        if (cardEl) this.openMovePopover(item.id, cardEl);
+  1404→        break;
+  1405→      }
+  1406→      case "ArrowUp": {
+  1407→        if (this.opts.mode !== "editable" || !this.opts.reorderWithinColumn) return;
+  1408→        e.preventDefault();
+  1409→        const list = this.orderedColumnItems(item.columnId);
+  1410→        const i = list.findIndex((it) => it.id === item.id);
+  1411→        if (i > 0) {
+  1412→          this.moveItem(item.id, item.columnId, i - 1, "keyboard");
+  1413→          requestAnimationFrame(() => this.cardEls.get(item.id)?.focus());
+  1414→        }
+  1415→        break;
+  1416→      }
+  1417→      case "ArrowDown": {
+  1418→        if (this.opts.mode !== "editable" || !this.opts.reorderWithinColumn) return;
+  1419→        e.preventDefault();
+  1420→        const list = this.orderedColumnItems(item.columnId);
+  1421→        const i = list.findIndex((it) => it.id === item.id);
+  1422→        if (i < list.length - 1) {
+  1423→          this.moveItem(item.id, item.columnId, i + 1, "keyboard");
+  1424→          requestAnimationFrame(() => this.cardEls.get(item.id)?.focus());
+  1425→        }
+  1426→        break;
+  1427→      }
+  1428→      case "ArrowRight": {
+  1429→        if (this.opts.mode !== "editable" || !this.opts.moveBetweenColumns) return;
+  1430→        e.preventDefault();
+  1431→        const i = this.columns.findIndex((c) => c.id === item.columnId);
+  1432→        for (let k = i + 1; k < this.columns.length; k++) {
+  1433→          const nextCol = this.columns[k];
+  1434→          if (!nextCol.collapsed) {
+  1435→            this.moveItem(item.id, nextCol.id, this.orderedColumnItems(nextCol.id).length, "keyboard");
+  1436→            requestAnimationFrame(() => this.cardEls.get(item.id)?.focus());
+  1437→            break;
+  1438→          }
+  1439→        }
+  1440→        break;
+  1441→      }
+  1442→      case "ArrowLeft": {
+  1443→        if (this.opts.mode !== "editable" || !this.opts.moveBetweenColumns) return;
+  1444→        e.preventDefault();
+  1445→        const i = this.columns.findIndex((c) => c.id === item.columnId);
+  1446→        for (let k = i - 1; k >= 0; k--) {
+  1447→          const prevCol = this.columns[k];
+  1448→          if (!prevCol.collapsed) {
+  1449→            this.moveItem(item.id, prevCol.id, this.orderedColumnItems(prevCol.id).length, "keyboard");
+  1450→            requestAnimationFrame(() => this.cardEls.get(item.id)?.focus());
+  1451→            break;
+  1452→          }
+  1453→        }
+  1454→        break;
+  1455→      }
+  1456→      case "Delete":
+  1457→      case "Backspace": {
+  1458→        if (this.opts.mode !== "editable") return;
+  1459→        e.preventDefault();
+  1460→        this.emit("item_delete_requested", { itemId: item.id, source: "keyboard" });
+  1461→        break;
+  1462→      }
+  1463→      case "Escape": {
+  1464→        e.preventDefault();
+  1465→        this.closePopover();
+  1466→        this.clearSelection();
+  1467→        break;
+  1468→      }
+  1469→    }
+  1470→  }
+  1471→
+  1472→  // ---- Move-to popover (accessible alternative to drag) ----
+  1473→
+  1474→  private openMovePopover(itemId: string, anchor: HTMLElement): void {
+  1475→    this.closePopover();
+  1476→    const item = this.findItem(itemId);
+  1477→    if (!item) return;
+  1478→    this.popoverItemId = itemId;
+  1479→
+  1480→    const pop = document.createElement("div");
+  1481→    pop.className = "kanban-move-popover";
+  1482→    pop.setAttribute("role", "menu");
+  1483→    pop.setAttribute("aria-label", "Move to column");
+  1484→
+  1485→    const title = document.createElement("div");
+  1486→    title.className = "kanban-move-popover-title";
+  1487→    title.textContent = "Move to column";
+  1488→    pop.appendChild(title);
+  1489→
+  1490→    for (const col of this.columns) {
+  1491→      const opt = document.createElement("button");
+  1492→      opt.type = "button";
+  1493→      opt.className = "kanban-move-option";
+  1494→      opt.setAttribute("role", "menuitem");
+  1495→      if (col.id === item.columnId) {
+  1496→        opt.classList.add("kanban-active");
+  1497→        opt.setAttribute("aria-current", "true");
+  1498→      }
+  1499→      const dot = document.createElement("span");
+  1500→      dot.className = "kanban-column-color";
+  1501→      dot.style.background = col.color ?? "#B8B2CA";
+  1502→      opt.appendChild(dot);
+  1503→      const label = document.createElement("span");
+  1504→      label.textContent = col.title + (col.id === item.columnId ? " (current)" : "");
+  1505→      opt.appendChild(label);
+  1506→      if (col.id === item.columnId) {
+  1507→        opt.disabled = true;
+  1508→      } else if (col.collapsed) {
+  1509→        opt.disabled = true;
+  1510→      } else {
+  1511→        opt.addEventListener("click", () => {
+  1512→          const newPos = this.orderedColumnItems(col.id).length;
+  1513→          this.moveItem(itemId, col.id, newPos, "keyboard");
+  1514→          this.closePopover();
+  1515→          requestAnimationFrame(() => this.cardEls.get(itemId)?.focus());
+  1516→        });
+  1517→      }
+  1518→      pop.appendChild(opt);
+  1519→    }
+  1520→
+  1521→    // Delete option
+  1522→    const sep = document.createElement("div");
+  1523→    sep.style.cssText = "height:1px;background:var(--kb-border);margin:4px 0;";
+  1524→    pop.appendChild(sep);
+  1525→    const del = document.createElement("button");
+  1526→    del.type = "button";
+  1527→    del.className = "kanban-move-option";
+  1528→    del.setAttribute("role", "menuitem");
+  1529→    del.style.color = "var(--kb-danger)";
+  1530→    del.innerHTML = `${ICON_TRASH}<span>Request delete</span>`;
+  1531→    del.addEventListener("click", () => {
+  1532→      this.emit("item_delete_requested", { itemId, source: "keyboard" });
+  1533→      this.closePopover();
+  1534→    });
+  1535→    pop.appendChild(del);
+  1536→
+  1537→    // Position
+  1538→    document.body.appendChild(pop);
+  1539→    const rect = anchor.getBoundingClientRect();
+  1540→    const popRect = pop.getBoundingClientRect();
+  1541→    let top = rect.bottom + 4;
+  1542→    let left = rect.left;
+  1543→    if (left + popRect.width > window.innerWidth - 8) {
+  1544→      left = window.innerWidth - popRect.width - 8;
+  1545→    }
+  1546→    if (top + popRect.height > window.innerHeight - 8) {
+  1547→      top = rect.top - popRect.height - 4;
+  1548→    }
+  1549→    pop.style.top = `${Math.max(8, top)}px`;
+  1550→    pop.style.left = `${Math.max(8, left)}px`;
+  1551→
+  1552→    this.popoverEl = pop;
+  1553→
+  1554→    // Click outside to close
+  1555→    setTimeout(() => {
+  1556→      const onDocClick = (ev: MouseEvent) => {
+  1557→        if (!this.popoverEl) return;
+  1558→        if (!this.popoverEl.contains(ev.target as Node) && !anchor.contains(ev.target as Node)) {
+  1559→          this.closePopover();
+  1560→          document.removeEventListener("click", onDocClick, true);
+  1561→          document.removeEventListener("keydown", onKey, true);
+  1562→        }
+  1563→      };
+  1564→      const onKey = (ev: KeyboardEvent) => {
+  1565→        if (ev.key === "Escape") {
+  1566→          this.closePopover();
+  1567→          document.removeEventListener("click", onDocClick, true);
+  1568→          document.removeEventListener("keydown", onKey, true);
+  1569→          requestAnimationFrame(() => this.cardEls.get(itemId)?.focus());
+  1570→        }
+  1571→      };
+  1572→      document.addEventListener("click", onDocClick, true);
+  1573→      document.addEventListener("keydown", onKey, true);
+  1574→    }, 0);
+  1575→  }
+  1576→
+  1577→  private closePopover(): void {
+  1578→    if (this.popoverEl) {
+  1579→      this.popoverEl.remove();
+  1580→      this.popoverEl = null;
+  1581→    }
+  1582→    this.popoverItemId = null;
+  1583→  }
+  1584→
+  1585→  // ---- Events ----
+  1586→
+  1587→  on(event: string, handler: KanbanHandler): void {
+  1588→    if (this._destroyed) return;
+  1589→    let set = this.listeners.get(event);
+  1590→    if (!set) {
+  1591→      set = new Set();
+  1592→      this.listeners.set(event, set);
+  1593→    }
+  1594→    set.add(handler);
+  1595→  }
+  1596→
+  1597→  off(event: string, handler: KanbanHandler): void {
+  1598→    const set = this.listeners.get(event);
+  1599→    if (set) set.delete(handler);
+  1600→  }
+  1601→
+  1602→  private emit(event: string, payload: KanbanEventPayload): void {
+  1603→    const set = this.listeners.get(event);
+  1604→    if (!set) return;
+  1605→    const fullPayload: KanbanEventPayload = { type: event, ...payload };
+  1606→    set.forEach((h) => {
+  1607→      try { h(fullPayload); } catch { /* swallow handler errors */ }
+  1608→    });
+  1609→  }
+  1610→
+  1611→  // ---- Lifecycle ----
+  1612→
+  1613→  destroy(): void {
+  1614→    if (this._destroyed) return;
+  1615→    this._destroyed = true;
+  1616→    this.closePopover();
+  1617→    this.listeners.clear();
+  1618→    this.cardEls.clear();
+  1619→    this.columnEls.clear();
+  1620→    if (this.root && this.root.parentNode) {
+  1621→      this.root.parentNode.removeChild(this.root);
+  1622→    }
+  1623→  }
+  1624→}
+  1625→

@@ -1,0 +1,1006 @@
+     1→# Calendar Component — Design & Behavior Specification
+     2→
+     3→## 1. Component Definition
+     4→
+     5→- **Component name:** Calendar
+     6→- **Category:** Date & Time / Navigation / Selection
+     7→- **Component type:** Interactive data-selection and date-navigation component
+     8→- **Primary purpose:** Display a calendar view of dates and allow users to navigate between periods, inspect date information, and optionally select one or more dates.
+     9→- **Secondary purposes:**
+    10→  - Display events, appointments, tasks, holidays, or availability.
+    11→  - Support date-range selection.
+    12→  - Support scheduling and time-management interfaces.
+    13→  - Provide a date-oriented overview of information.
+    14→
+    15→### 1.1 Core Responsibilities
+    16→
+    17→The Calendar component should manage:
+    18→
+    19→1. Calendar presentation and layout.
+    20→2. Navigation between dates and calendar periods.
+    21→3. Date selection, if enabled.
+    22→4. Date-related interaction and keyboard navigation.
+    23→5. Date availability and disabled-date behavior.
+    24→6. Display of date annotations and events.
+    25→7. Communication of user interactions through events and signals.
+    26→8. Synchronization between its internal view state and externally controlled properties.
+    27→
+    28→### 1.2 Non-Responsibilities
+    29→
+    30→The base Calendar component should not inherently be responsible for:
+    31→
+    32→- Persisting dates or events to a database.
+    33→- Fetching remote event data.
+    34→- Creating or modifying appointments in an external system.
+    35→- Sending notifications.
+    36→- Applying business-specific booking rules.
+    37→- Managing time zones for an entire application.
+    38→- Performing network requests.
+    39→
+    40→These responsibilities may be supplied by external services, data adapters, plugins, or higher-level components.
+    41→
+    42→---
+    43→
+    44→## 2. Component Variants
+    45→
+    46→The Calendar should support different usage modes without requiring entirely separate implementations.
+    47→
+    48→| Variant | Purpose |
+    49→|---|---|
+    50→| Date Picker Calendar | Select a date for a form or other input. |
+    51→| Date Range Calendar | Select a start and end date. |
+    52→| Multi-Date Calendar | Select multiple independent dates. |
+    53→| Event Calendar | Display events associated with dates. |
+    54→| Availability Calendar | Show available, unavailable, or partially available dates. |
+    55→| Read-Only Calendar | Display dates and annotations without modifying selections. |
+    56→| Inline Calendar | Remain embedded inside the surrounding layout. |
+    57→| Popup Calendar | Appear inside a popover, dropdown, or dialog. |
+    58→| Mini Calendar | Provide compact date navigation or an overview. |
+    59→| Multi-Month Calendar | Display two or more consecutive months simultaneously. |
+    60→
+    61→A variant should be treated as a configuration or composition of capabilities whenever possible, rather than a fundamentally different component.
+    62→
+    63→### 2.1 Selection Modes
+    64→
+    65→- `none`: No date selection.
+    66→- `single`: Select one date.
+    67→- `range`: Select a start date and an end date.
+    68→- `multiple`: Select multiple independent dates.
+    69→
+    70→The selection mode determines the expected value type and interaction behavior.
+    71→
+    72→---
+    73→
+    74→## 3. Data Model
+    75→
+    76→The component should distinguish between calendar dates, timestamps, and date ranges.
+    77→
+    78→### 3.1 Date Value
+    79→
+    80→A date-only value represents a calendar day, without an inherent time or time zone.
+    81→
+    82→Recommended conceptual type:
+    83→
+    84→`CalendarDate = { year, month, day }`
+    85→
+    86→Where:
+    87→
+    88→- `year`: Integer.
+    89→- `month`: Integer from 1 to 12.
+    90→- `day`: Integer valid for the specified month and year.
+    91→
+    92→A standardized serialized representation such as `YYYY-MM-DD` is also suitable.
+    93→
+    94→### 3.2 Date-Time Value
+    95→
+    96→A date-time value represents a specific time.
+    97→
+    98→Conceptual type:
+    99→
+   100→`DateTime = { date, time, timeZone? }`
+   101→
+   102→Use a date-time value only when the component actually needs time information, such as an event calendar or scheduling interface.
+   103→
+   104→Do not silently convert a date-only selection into a timestamp at midnight in an unspecified time zone.
+   105→
+   106→### 3.3 Date Range
+   107→
+   108→Conceptual type:
+   109→
+   110→`DateRange = { startDate, endDate }`
+   111→
+   112→Specify whether the range is inclusive or exclusive. For ordinary calendar selection, inclusive start and end dates are generally the most intuitive.
+   113→
+   114→A range may temporarily contain only a start date while the user is selecting its end.
+   115→
+   116→### 3.4 Event Data
+   117→
+   118→Conceptual type:
+   119→
+   120→`CalendarEvent = { id, title, start, end, allDay?, color?, metadata? }`
+   121→
+   122→Optional additional fields:
+   123→
+   124→- `description`
+   125→- `location`
+   126→- `status`
+   127→- `category`
+   128→- `priority`
+   129→- `url`
+   130→- `recurrence`
+   131→- `displayStyle`
+   132→
+   133→Event identity should be stable. Do not use an event's title or array position as its permanent identity.
+   134→
+   135→### 3.5 Separation of Data and Presentation
+   136→
+   137→Keep these concepts separate:
+   138→
+   139→- **Date data:** The actual calendar date.
+   140→- **Selection data:** The currently selected date or dates.
+   141→- **View data:** The month, year, or period being displayed.
+   142→- **Annotation data:** Holidays, availability, markers, and other date metadata.
+   143→- **Event data:** Events associated with dates or time intervals.
+   144→- **Presentation data:** Colors, labels, icons, typography, and layout.
+   145→
+   146→Changing the displayed month must not automatically change the selected date.
+   147→
+   148→---
+   149→
+   150→## 4. Visual Structure and Layout
+   151→
+   152→### 4.1 Standard Monthly Calendar
+   153→
+   154→A typical monthly calendar contains the following regions:
+   155→
+   156→1. **Header**
+   157→   - Current month and year.
+   158→   - Previous-period navigation.
+   159→   - Next-period navigation.
+   160→   - Optional today button.
+   161→   - Optional month/year selection controls.
+   162→
+   163→2. **Weekday Header**
+   164→   - Seven weekday labels.
+   165→   - Optional abbreviated, narrow, or full weekday names.
+   166→   - Optional week numbers.
+   167→
+   168→3. **Calendar Grid**
+   169→   - Seven weekday columns.
+   170→   - Usually four, five, or six week rows.
+   171→   - Date cells positioned according to the selected calendar system and week-start convention.
+   172→
+   173→4. **Optional Footer**
+   174→   - Today or Clear actions.
+   175→   - Selection summary.
+   176→   - Confirm or Cancel actions.
+   177→   - Time-zone or calendar-system information where appropriate.
+   178→
+   179→### 4.2 Layout Principles
+   180→
+   181→- Use a stable seven-column grid for conventional weekly calendars.
+   182→- Keep weekday headers aligned with their corresponding date columns.
+   183→- Use consistent cell dimensions when possible.
+   184→- Allow the grid to accommodate four to six weeks without clipping dates.
+   185→- Keep navigation controls visually distinct from date cells.
+   186→- Avoid moving the overall layout unnecessarily when changing months.
+   187→- Make date cells large enough for reliable pointer and touch interaction.
+   188→- Keep visual indicators understandable without relying on color alone.
+   189→- Use flexible dimensions so the component works in narrow panels and large displays.
+   190→
+   191→### 4.3 Date Cell Anatomy
+   192→
+   193→A date cell may contain:
+   194→
+   195→- Day number.
+   196→- Selection indicator.
+   197→- Today indicator.
+   198→- Disabled or unavailable indicator.
+   199→- Event marker or event count.
+   200→- Availability indicator.
+   201→- Range-start or range-end decoration.
+   202→- Range-interior background.
+   203→- Optional custom content.
+   204→
+   205→Not every date cell should display every possible indicator. Establish a visual priority order so overlapping states remain legible.
+   206→
+   207→### 4.4 Layout Options
+   208→
+   209→- `width`
+   210→- `height`
+   211→- `minWidth`
+   212→- `minHeight`
+   213→- `maxWidth`
+   214→- `maxHeight`
+   215→- `cellSize`
+   216→- `cellWidth`
+   217→- `cellHeight`
+   218→- `gridGap`
+   219→- `headerHeight`
+   220→- `weekdayHeaderHeight`
+   221→- `padding`
+   222→- `horizontalAlignment`
+   223→- `verticalAlignment`
+   224→- `responsiveMode`
+   225→- `overflowBehavior`
+   226→- `showWeekNumbers`
+   227→- `showAdjacentMonthDates`
+   228→
+   229→Properties should only be exposed where they represent meaningful customization. Derived dimensions should remain automatic by default.
+   230→
+   231→---
+   232→
+   233→## 5. Calendar Calculation and Date Display
+   234→
+   235→### 5.1 Month Calculation
+   236→
+   237→The component must correctly determine:
+   238→
+   239→- Number of days in the displayed month.
+   240→- Weekday of the first day.
+   241→- Weekday of the last day.
+   242→- Number of required calendar rows.
+   243→- Dates belonging to the preceding and following months that appear in the grid.
+   244→
+   245→Never assume every month has the same number of days or that every month occupies exactly five weeks.
+   246→
+   247→### 5.2 Week Start
+   248→
+   249→Support configurable week-start conventions:
+   250→
+   251→- Locale-derived default.
+   252→- Sunday.
+   253→- Monday.
+   254→- Saturday.
+   255→- Any other explicitly supported weekday.
+   256→
+   257→Changing the week start should rearrange the grid, not change the identity or value of any date.
+   258→
+   259→### 5.3 Adjacent-Month Dates
+   260→
+   261→Dates outside the displayed month may be handled in three ways:
+   262→
+   263→- `show`: Display them normally or with subdued styling.
+   264→- `hide`: Leave their cells empty.
+   265→- `disabled`: Display them but prevent normal selection.
+   266→
+   267→If adjacent-month dates are interactive, selecting one should follow a clearly defined policy: select the date and optionally navigate to its month, or navigate first and require another selection.
+   268→
+   269→### 5.4 Locale and Calendar System
+   270→
+   271→Support, where implemented:
+   272→
+   273→- Locale-sensitive month and weekday names.
+   274→- Localized date formatting.
+   275→- Locale-specific first day of week.
+   276→- Configurable month and weekday abbreviations.
+   277→- Twelve-month Gregorian calendar.
+   278→- Alternative calendar systems through an explicit calendar-system adapter.
+   279→
+   280→Do not assume that changing the displayed language automatically changes the underlying calendar system.
+   281→
+   282→### 5.5 Leap Years and Calendar Validity
+   283→
+   284→Calendar arithmetic must correctly handle:
+   285→
+   286→- Leap years.
+   287→- February's varying length.
+   288→- Different month lengths.
+   289→- Year transitions.
+   290→- Dates near supported minimum and maximum years.
+   291→
+   292→Date validation should use a proper date implementation or a well-defined calendar calculation algorithm.
+   293→
+   294→---
+   295→
+   296→## 6. Interactions
+   297→
+   298→### 6.1 Navigation
+   299→
+   300→Users may navigate through:
+   301→
+   302→- Previous month.
+   303→- Next month.
+   304→- Previous year.
+   305→- Next year.
+   306→- Today.
+   307→- Direct month selection.
+   308→- Direct year selection.
+   309→- Keyboard shortcuts, when enabled.
+   310→- Swipe gestures, when supported.
+   311→
+   312→Navigation changes the displayed period. It must not modify the selected date unless an explicit operation says otherwise.
+   313→
+   314→### 6.2 Single-Date Selection
+   315→
+   316→Recommended behavior:
+   317→
+   318→1. User activates a selectable date.
+   319→2. The component validates that the date is permitted.
+   320→3. The selected value is updated.
+   321→4. The component refreshes selection styling.
+   322→5. A selection event is emitted.
+   323→6. A containing date picker may optionally close.
+   324→
+   325→Clicking the currently selected date should follow a documented policy: keep it selected or clear it when deselection is explicitly enabled.
+   326→
+   327→### 6.3 Range Selection
+   328→
+   329→Recommended default interaction:
+   330→
+   331→1. First activation establishes the start date.
+   332→2. The component enters a pending-range state.
+   333→3. Hover or keyboard focus previews the potential range.
+   334→4. Second activation establishes the end date.
+   335→5. The component validates the range.
+   336→6. The completed range is emitted.
+   337→
+   338→Additional rules:
+   339→
+   340→- Define whether the end date may precede the start date.
+   341→- If reversed selection is permitted, normalize the final range or preserve selection direction according to a documented policy.
+   342→- Define whether unavailable dates invalidate the range or may be skipped.
+   343→- Define whether the user can restart selection by choosing a new start date.
+   344→- Support minimum and maximum range lengths when applicable.
+   345→- Keep incomplete ranges distinct from completed ranges.
+   346→
+   347→### 6.4 Multiple-Date Selection
+   348→
+   349→Recommended behavior:
+   350→
+   351→- Activating an unselected date adds it.
+   352→- Activating a selected date removes it when deselection is enabled.
+   353→- Enforce optional minimum and maximum selection counts.
+   354→- Prevent duplicates.
+   355→- Define deterministic ordering for the selected values.
+   356→- Clearly distinguish selected dates from focused dates.
+   357→
+   358→### 6.5 Event Interaction
+   359→
+   360→For event-enabled calendars, users may:
+   361→
+   362→- Inspect an event.
+   363→- Open event details.
+   364→- Activate an event link.
+   365→- Create an event through an explicitly enabled action.
+   366→- Move or resize events when editing is supported.
+   367→
+   368→Dragging, resizing, and event creation should be optional capabilities rather than mandatory behaviors of the base Calendar.
+   369→
+   370→### 6.6 Pointer and Touch
+   371→
+   372→- Provide a reliable activation area for each date.
+   373→- Avoid requiring precision clicks on tiny day numbers.
+   374→- Support touch without hover-dependent functionality.
+   375→- Prevent a drag gesture from accidentally selecting dates when dragging is intended for another action.
+   376→- Provide clear feedback for disabled dates.
+   377→
+   378→### 6.7 Keyboard Interaction
+   379→
+   380→Recommended keyboard behavior:
+   381→
+   382→- `ArrowLeft` / `ArrowRight`: Move focus by one day.
+   383→- `ArrowUp` / `ArrowDown`: Move focus by one week.
+   384→- `Home` / `End`: Move to the beginning or end of the current week, according to the documented convention.
+   385→- `PageUp` / `PageDown`: Navigate to the previous or next month.
+   386→- `Shift + PageUp` / `Shift + PageDown`: Optionally navigate by year.
+   387→- `Enter` / `Space`: Activate the focused date.
+   388→- `Escape`: Cancel pending selection or close a popup, depending on context.
+   389→- `Tab` / `Shift + Tab`: Move between the Calendar and other interactive controls.
+   390→
+   391→When changing months, preserve a sensible focus target, usually the same day if valid, or the nearest valid date.
+   392→
+   393→Keyboard shortcuts must not interfere with standard browser, operating-system, or assistive-technology behavior unnecessarily.
+   394→
+   395→---
+   396→
+   397→## 7. Events and Signals
+   398→
+   399→Events should describe what happened. Commands should request an operation. State changes should describe the resulting condition.
+   400→
+   401→These are distinct concepts and should not be conflated.
+   402→
+   403→### 7.1 Navigation Events
+   404→
+   405→| Event | Meaning | Suggested payload |
+   406→|---|---|---|
+   407→| `view_changed` | Displayed period changed | `previousView`, `currentView` |
+   408→| `month_changed` | Displayed month changed | `year`, `month` |
+   409→| `year_changed` | Displayed year changed | `year` |
+   410→| `today_requested` | User requested navigation to today | `todayDate` |
+   411→
+   412→A month change may also cause a year change. Avoid emitting redundant events unless consumers need them.
+   413→
+   414→### 7.2 Selection Events
+   415→
+   416→| Event | Meaning | Suggested payload |
+   417→|---|---|---|
+   418→| `date_selected` | A date was selected | `date`, `previousValue`, `source` |
+   419→| `date_deselected` | A selected date was removed | `date`, `previousValue`, `source` |
+   420→| `selection_changed` | Selection value changed | `previousValue`, `value`, `mode` |
+   421→| `range_started` | A range selection began | `startDate` |
+   422→| `range_preview_changed` | A pending range preview changed | `startDate`, `previewEndDate` |
+   423→| `range_completed` | A range was completed | `startDate`, `endDate` |
+   424→| `selection_cleared` | Selection was cleared | `previousValue` |
+   425→| `selection_rejected` | An attempted selection was rejected | `date`, `reason` |
+   426→
+   427→`selection_changed` should be the general-purpose event for consumers that only care about the resulting selection. More specific events may provide additional semantic information.
+   428→
+   429→### 7.3 Focus and Interaction Events
+   430→
+   431→| Event | Meaning |
+   432→|---|---|
+   433→| `date_focused` | Keyboard or programmatic focus moved to a date |
+   434→| `date_activated` | A date received an activation action |
+   435→| `date_hovered` | Pointer entered a date cell, if hover reporting is enabled |
+   436→| `event_activated` | A displayed event was activated |
+   437→| `calendar_opened` | A popup Calendar opened |
+   438→| `calendar_closed` | A popup Calendar closed |
+   439→
+   440→Do not emit high-frequency hover events by default if consumers do not need them.
+   441→
+   442→### 7.4 Availability and Validation Events
+   443→
+   444→| Event | Meaning |
+   445→|---|---|
+   446→| `availability_requested` | External availability data is needed |
+   447→| `availability_changed` | Availability data was updated |
+   448→| `validation_failed` | A validation rule rejected an operation |
+   449→| `data_changed` | The displayed annotation or event data changed |
+   450→
+   451→The base component may emit these events, but fetching availability and resolving validation policies can remain external responsibilities.
+   452→
+   453→### 7.5 Event Payload Conventions
+   454→
+   455→Each event should have:
+   456→
+   457→- A stable event name.
+   458→- A clearly documented payload type.
+   459→- A consistent date representation.
+   460→- A source identifier such as `pointer`, `keyboard`, `programmatic`, or `api`, when useful.
+   461→- A documented emission timing.
+   462→- A defined relationship to the resulting state.
+   463→
+   464→Prefer emitting selection-change events after the new selection has been committed to the component's state.
+   465→
+   466→Do not emit user-interaction events when an external property update merely synchronizes the component, unless a separate synchronization event is explicitly designed.
+   467→
+   468→---
+   469→
+   470→## 8. Commands and Operations
+   471→
+   472→Commands express requested actions. They may be invoked through code, UI actions, keyboard shortcuts, automation, or another component.
+   473→
+   474→### 8.1 Navigation Commands
+   475→
+   476→- `go_to_date(date)`
+   477→- `go_to_today()`
+   478→- `go_to_previous_month()`
+   479→- `go_to_next_month()`
+   480→- `go_to_previous_year()`
+   481→- `go_to_next_year()`
+   482→- `set_view(year, month)`
+   483→- `set_view_mode(mode)`
+   484→
+   485→### 8.2 Selection Commands
+   486→
+   487→- `select_date(date)`
+   488→- `deselect_date(date)`
+   489→- `select_range(startDate, endDate)`
+   490→- `clear_selection()`
+   491→- `set_selection(value)`
+   492→- `focus_date(date)`
+   493→
+   494→Commands should use the same validation rules as equivalent user interactions.
+   495→
+   496→### 8.3 Data Commands
+   497→
+   498→- `set_events(events)`
+   499→- `add_event(event)`
+   500→- `update_event(eventId, changes)`
+   501→- `remove_event(eventId)`
+   502→- `set_disabled_dates(dates)`
+   503→- `set_availability(data)`
+   504→- `refresh_calendar()`
+   505→
+   506→These are optional operations for variants that support events or availability.
+   507→
+   508→### 8.4 Command Results
+   509→
+   510→A command may:
+   511→
+   512→- Succeed.
+   513→- Be rejected because of validation.
+   514→- Be ignored because it produces no change.
+   515→- Fail because required data is missing.
+   516→- Be unsupported in the current variant.
+   517→
+   518→Document which result applies to each command. For asynchronous data operations, provide an explicit completion or failure mechanism rather than assuming immediate success.
+   519→
+   520→---
+   521→
+   522→## 9. States
+   523→
+   524→The Calendar should distinguish persistent state, derived state, transient interaction state, and lifecycle state.
+   525→
+   526→### 9.1 Persistent or Externally Controlled State
+   527→
+   528→- `selectedValue`
+   529→- `displayedYear`
+   530→- `displayedMonth`
+   531→- `viewMode`
+   532→- `selectionMode`
+   533→- `events`
+   534→- `availabilityData`
+   535→
+   536→These values may be controlled by a parent component or managed internally.
+   537→
+   538→### 9.2 Transient Interaction State
+   539→
+   540→- `focusedDate`
+   541→- `hoveredDate`
+   542→- `pendingRangeStart`
+   543→- `rangePreviewEnd`
+   544→- `activePointerInteraction`
+   545→- `isPopupOpen`
+   546→
+   547→Transient state should not be serialized or persisted unless the application explicitly requires it.
+   548→
+   549→### 9.3 Derived State
+   550→
+   551→- `isToday`
+   552→- `isSelected`
+   553→- `isRangeStart`
+   554→- `isRangeEnd`
+   555→- `isInSelectedRange`
+   556→- `isDisabled`
+   557→- `isOutsideCurrentMonth`
+   558→- `hasEvents`
+   559→- `availabilityStatus`
+   560→- `isFocused`
+   561→
+   562→Derived state should be calculated from the date, selection, current view, configuration, and data. Avoid maintaining redundant copies of values that can be derived reliably.
+   563→
+   564→### 9.4 Lifecycle State
+   565→
+   566→- `uninitialized`
+   567→- `ready`
+   568→- `loading` (only when data loading is part of the component contract)
+   569→- `error` (when required data cannot be resolved)
+   570→- `disposed`
+   571→
+   572→Not every implementation needs every lifecycle state.
+   573→
+   574→### 9.5 State Transition Rules
+   575→
+   576→Examples:
+   577→
+   578→- `ready` + next-month command → `ready` with an updated view.
+   579→- `ready` + first range selection → pending range.
+   580→- Pending range + valid second selection → completed range.
+   581→- Pending range + Escape → pending range canceled.
+   582→- Ready + invalid selection attempt → selection unchanged, with optional rejection event.
+   583→- Popup open + Escape → popup closes according to its dismissal policy.
+   584→
+   585→Invalid operations should not silently corrupt the current selection.
+   586→
+   587→---
+   588→
+   589→## 10. Properties
+   590→
+   591→Properties define the component's configurable behavior and appearance. Use a consistent property schema throughout the library.
+   592→
+   593→### 10.1 Core Properties
+   594→
+   595→| Property | Type | Default / Rule |
+   596→|---|---|---|
+   597→| `selectionMode` | Enum | `single` for a date picker; otherwise variant-dependent |
+   598→| `selectedValue` | Date, range, list, or null | Empty selection by default |
+   599→| `viewDate` | Date | Current date, unless externally specified |
+   600→| `displayedMonth` | Integer | Derived from `viewDate` |
+   601→| `displayedYear` | Integer | Derived from `viewDate` |
+   602→| `weekStartsOn` | Weekday or locale | Locale-derived |
+   603→| `locale` | Locale identifier | Environment or application default |
+   604→| `calendarSystem` | Identifier | Gregorian by default |
+   605→| `minDate` | Date or null | No lower bound |
+   606→| `maxDate` | Date or null | No upper bound |
+   607→| `disabledDates` | Date list or rule | Empty |
+   608→| `readOnly` | Boolean | `false` |
+   609→| `disabled` | Boolean | `false` |
+   610→| `showTodayButton` | Boolean | Variant-dependent |
+   611→| `showAdjacentMonthDates` | Boolean | `true` |
+   612→| `showWeekNumbers` | Boolean | `false` |
+   613→| `autoNavigateOnSelection` | Boolean | Variant-dependent |
+   614→| `allowDeselection` | Boolean | `false` for single selection by default |
+   615→| `closeOnSelection` | Boolean | Popup-specific |
+   616→| `required` | Boolean | `false` |
+   617→
+   618→### 10.2 Selection Constraints
+   619→
+   620→- `minSelectionCount`
+   621→- `maxSelectionCount`
+   622→- `minRangeLength`
+   623→- `maxRangeLength`
+   624→- `allowReverseRange`
+   625→- `allowIncompleteRange`
+   626→- `rangeDisabledDatePolicy`
+   627→- `selectionValidationMode`
+   628→
+   629→Selection constraints should be optional and documented independently.
+   630→
+   631→### 10.3 Display Properties
+   632→
+   633→- `viewMode`: `month`, `year`, `decade`, or another supported overview.
+   634→- `monthLabelFormat`
+   635→- `weekdayLabelFormat`
+   636→- `dayNumberFormat`
+   637→- `headerFormat`
+   638→- `showNavigation`
+   639→- `showMonthYearHeader`
+   640→- `showClearButton`
+   641→- `showConfirmButton`
+   642→- `showEventIndicators`
+   643→- `maxVisibleEventsPerDay`
+   644→- `overflowIndicator`
+   645→- `firstWeekNumberRule`
+   646→
+   647→A month/year chooser is different from the normal monthly date grid. Switching views must not accidentally change the selected date.
+   648→
+   649→### 10.4 Accessibility Properties
+   650→
+   651→- `accessibleLabel`
+   652→- `accessibleDescription`
+   653→- `announceViewChanges`
+   654→- `keyboardNavigationEnabled`
+   655→- `focusManagementMode`
+   656→- `reducedMotionBehavior`
+   657→
+   658→These properties should supplement, not replace, the implementation's accessibility semantics.
+   659→
+   660→### 10.5 Styling Properties
+   661→
+   662→- `theme`
+   663→- `size`
+   664→- `density`
+   665→- `background`
+   666→- `foreground`
+   667→- `border`
+   668→- `borderRadius`
+   669→- `selectedDateStyle`
+   670→- `todayStyle`
+   671→- `disabledDateStyle`
+   672→- `rangeStyle`
+   673→- `eventIndicatorStyle`
+   674→- `typography`
+   675→- `spacing`
+   676→- `focusRingStyle`
+   677→
+   678→Prefer semantic style tokens over separate arbitrary colors for every visual state.
+   679→
+   680→---
+   681→
+   682→## 11. Options and Configuration Commands
+   683→
+   684→Properties describe individual settings. Options provide named configurations, presets, or groups of settings.
+   685→
+   686→For example:
+   687→
+   688→- `set_option("compact")`
+   689→- `set_option("large-touch-targets")`
+   690→- `set_option("week-start", "monday")`
+   691→- `set_option("show-adjacent-dates", false)`
+   692→- `set_option("navigation", "month-and-year")`
+   693→- `set_option("selection-mode", "range")`
+   694→
+   695→### 11.1 Recommended Presets
+   696→
+   697→**Date Picker**
+   698→- Single-date selection.
+   699→- Today button optionally enabled.
+   700→- No event display.
+   701→- Selection may close the popup.
+   702→
+   703→**Scheduling**
+   704→- Date-range selection.
+   705→- Availability indicators.
+   706→- Disabled-date support.
+   707→- Minimum and maximum range constraints.
+   708→
+   709→**Event Overview**
+   710→- No selection by default.
+   711→- Event markers enabled.
+   712→- Event activation enabled.
+   713→- Navigation enabled.
+   714→
+   715→**Compact**
+   716→- Reduced spacing.
+   717→- Abbreviated weekday labels.
+   718→- Minimal header.
+   719→- No unnecessary footer.
+   720→
+   721→**Read-Only**
+   722→- Selection interactions disabled.
+   723→- Navigation optionally retained.
+   724→- Event and annotation display enabled.
+   725→
+   726→### 11.2 Configuration Precedence
+   727→
+   728→Define a predictable precedence order:
+   729→
+   730→1. Component invariants and validation rules.
+   731→2. Explicit property values.
+   732→3. Named preset defaults.
+   733→4. Component defaults.
+   734→5. Environment or locale defaults where applicable.
+   735→
+   736→A preset should configure defaults, not silently override explicitly assigned properties.
+   737→
+   738→If a preset is changed after initialization, specify whether it updates only unspecified properties or resets all properties associated with that preset.
+   739→
+   740→---
+   741→
+   742→## 12. Controlled and Uncontrolled Behavior
+   743→
+   744→Support both common integration patterns.
+   745→
+   746→### 12.1 Controlled Mode
+   747→
+   748→The parent provides the selection value and updates it in response to emitted events.
+   749→
+   750→- The Calendar proposes changes.
+   751→- The parent decides whether to accept them.
+   752→- The displayed selection follows the supplied value.
+   753→- Rejected changes do not leave the component in a conflicting internal state.
+   754→
+   755→### 12.2 Uncontrolled Mode
+   756→
+   757→The Calendar owns the selection state.
+   758→
+   759→- User interaction updates the internal value.
+   760→- Events notify external consumers.
+   761→- The parent can still reset or replace the value through an explicit command or property update.
+   762→
+   763→### 12.3 General Rule
+   764→
+   765→Avoid ambiguous ownership. Do not allow the component and its parent to independently modify the same value without a defined synchronization policy.
+   766→
+   767→The same principle applies to the displayed month, selected range, and event data.
+   768→
+   769→---
+   770→
+   771→## 13. Validation and Edge Cases
+   772→
+   773→The component should explicitly handle the following cases.
+   774→
+   775→### Date Validity
+   776→
+   777→- Invalid month or day values.
+   778→- Leap-day selection in non-leap years.
+   779→- Minimum and maximum date boundaries.
+   780→- Year transitions.
+   781→- Empty or missing date values.
+   782→
+   783→### Selection
+   784→
+   785→- Selecting a disabled date.
+   786→- Selecting outside configured date limits.
+   787→- Re-selecting an already selected date.
+   788→- Deselecting the final required date.
+   789→- Exceeding maximum selection count.
+   790→- Selecting an invalid or incomplete range.
+   791→- Selecting ranges containing unavailable dates.
+   792→
+   793→### Navigation
+   794→
+   795→- Navigating beyond supported date limits.
+   796→- Switching to a month with fewer days than the current day.
+   797→- Changing locale or week-start configuration.
+   798→- Receiving an external view change while a range is pending.
+   799→
+   800→When navigating from January 31 to February, define whether the internal navigation anchor is clamped to February's last day or preserved independently so that navigating back returns to January 31. Either policy can work if applied consistently.
+   801→
+   802→### Data
+   803→
+   804→- Duplicate event identifiers.
+   805→- Events spanning multiple days.
+   806→- Events crossing month boundaries.
+   807→- Missing event titles.
+   808→- Overlapping events.
+   809→- Delayed availability data.
+   810→- Stale asynchronous responses.
+   811→
+   812→The component should not silently reinterpret invalid input in ways that change the user's intended date.
+   813→
+   814→---
+   815→
+   816→## 14. Accessibility
+   817→
+   818→- Use semantic buttons or equivalent accessible controls for interactive dates.
+   819→- Provide a meaningful accessible name for the Calendar.
+   820→- Expose the full date, not just the day number.
+   821→- Communicate selected, disabled, focused, and current-date states.
+   822→- Ensure keyboard navigation works without requiring a pointer.
+   823→- Use visible focus indicators.
+   824→- Maintain adequate contrast.
+   825→- Avoid relying on color alone for selection, availability, or event status.
+   826→- Support screen-reader announcements when the displayed month or year changes.
+   827→- Keep keyboard focus predictable when navigating between months.
+   828→- Avoid placing every date in the normal tab sequence if a roving-focus grid pattern is used.
+   829→- Provide accessible names for previous and next navigation controls.
+   830→- Ensure popup opening, closing, and focus restoration are consistent.
+   831→
+   832→Use established accessibility patterns for date-picker grids, adapting them to the host UI framework.
+   833→
+   834→---
+   835→
+   836→## 15. Performance and Rendering
+   837→
+   838→- Recalculate the date grid only when relevant inputs change.
+   839→- Avoid rerendering every date cell for unrelated changes.
+   840→- Cache expensive event-to-date mappings where appropriate.
+   841→- Keep stable date and event identities.
+   842→- Avoid unnecessary allocation of complex date objects during frequent hover updates.
+   843→- Use virtualization for very large timeline or agenda variants, not automatically for a simple monthly grid.
+   844→- Separate calendar calculation from visual rendering.
+   845→- Avoid coupling date arithmetic to animation or styling code.
+   846→
+   847→A conventional month grid is small; prioritize correctness and maintainability before adding complex performance optimizations.
+   848→
+   849→---
+   850→
+   851→## 16. Internationalization and Time Zones
+   852→
+   853→- Keep date-only values independent of time zones.
+   854→- Use locale-aware labels and formatting.
+   855→- Define how the first day of the week is determined.
+   856→- Distinguish calendar-system changes from language changes.
+   857→- Define a time zone explicitly for event calendars involving timestamps.
+   858→- Handle events crossing midnight or daylight-saving transitions.
+   859→- Avoid interpreting a date-only value as a UTC timestamp without an explicit conversion rule.
+   860→
+   861→For global scheduling systems, the application should own the canonical event-time policy while the Calendar displays dates according to the intended user or event time zone.
+   862→
+   863→---
+   864→
+   865→## 17. Testing Requirements
+   866→
+   867→### Functional Tests
+   868→
+   869→- Navigate between months and years.
+   870→- Select and deselect dates.
+   871→- Select and clear ranges.
+   872→- Select multiple dates.
+   873→- Enforce minimum and maximum constraints.
+   874→- Navigate across year boundaries.
+   875→- Handle leap years correctly.
+   876→- Handle minimum and maximum date boundaries.
+   877→- Display adjacent-month dates correctly.
+   878→
+   879→### State Tests
+   880→
+   881→- Controlled values remain synchronized.
+   882→- Uncontrolled values update correctly.
+   883→- View changes do not unexpectedly change selection.
+   884→- Pending ranges can be canceled.
+   885→- Disabled dates remain unselectable.
+   886→- External property updates produce predictable results.
+   887→
+   888→### Event Tests
+   889→
+   890→- Correct events are emitted for user actions.
+   891→- Event payloads contain valid date values.
+   892→- Programmatic synchronization does not generate misleading user-action events.
+   893→- Rejected selections do not emit successful selection-change events.
+   894→- Event ordering is consistent and documented.
+   895→
+   896→### Accessibility Tests
+   897→
+   898→- Complete keyboard operation.
+   899→- Focus preservation across month navigation.
+   900→- Correct accessible names and selected states.
+   901→- Screen-reader announcements.
+   902→- Visible focus indicators.
+   903→- Touch-target usability.
+   904→
+   905→### Internationalization Tests
+   906→
+   907→- Different week-start conventions.
+   908→- Different locales.
+   909→- Leap-day behavior.
+   910→- Alternative calendar adapters, if supported.
+   911→- Time-zone and daylight-saving behavior for event variants.
+   912→
+   913→---
+   914→
+   915→## 18. Recommended Implementation Architecture
+   916→
+   917→Separate the component into independent responsibilities.
+   918→
+   919→### A. Calendar Engine
+   920→
+   921→Responsible for:
+   922→
+   923→- Date arithmetic.
+   924→- Month and year calculations.
+   925→- Grid generation.
+   926→- Week-start rules.
+   927→- Range calculations.
+   928→- Date validation.
+   929→
+   930→### B. Calendar State Controller
+   931→
+   932→Responsible for:
+   933→
+   934→- Current view.
+   935→- Selection state.
+   936→- Focus state.
+   937→- Pending range selection.
+   938→- Controlled/uncontrolled synchronization.
+   939→- Command handling.
+   940→
+   941→### C. Calendar Renderer
+   942→
+   943→Responsible for:
+   944→
+   945→- Header and navigation controls.
+   946→- Weekday labels.
+   947→- Date cells.
+   948→- Selection and availability styling.
+   949→- Event indicators.
+   950→- Responsive layout.
+   951→
+   952→### D. Interaction Controller
+   953→
+   954→Responsible for:
+   955→
+   956→- Pointer and touch actions.
+   957→- Keyboard navigation.
+   958→- Selection gestures.
+   959→- Focus management.
+   960→- Popup behavior where applicable.
+   961→
+   962→### E. Data Adapter
+   963→
+   964→Optional, responsible for:
+   965→
+   966→- Event data.
+   967→- Availability data.
+   968→- Holiday data.
+   969→- External date restrictions.
+   970→- Asynchronous updates.
+   971→
+   972→### F. Event and Signal Interface
+   973→
+   974→Responsible for:
+   975→
+   976→- Publishing documented events.
+   977→- Handling command requests.
+   978→- Maintaining event payload consistency.
+   979→- Distinguishing user interactions from external synchronization.
+   980→
+   981→These responsibilities may be implemented as classes, functions, modules, services, or other structures depending on the host language.
+   982→
+   983→---
+   984→
+   985→## 19. Recommended Default Contract
+   986→
+   987→For a general-purpose Calendar component, the default implementation should provide:
+   988→
+   989→- Monthly grid.
+   990→- Previous and next month navigation.
+   991→- Today indicator.
+   992→- Locale-aware weekday labels.
+   993→- Configurable week start.
+   994→- Single-date selection as an optional mode.
+   995→- Minimum and maximum date support.
+   996→- Disabled dates.
+   997→- Keyboard navigation.
+   998→- Controlled and uncontrolled selection.
+   999→- Stable events and command names.
+  1000→- Accessible date cells.
+  1001→- Responsive layout.
+  1002→- Correct leap-year and month-boundary handling.
+  1003→
+  1004→Range selection, multiple selection, event rendering, availability management, month/year chooser views, and popup behavior should be optional capabilities.
+  1005→
+  1006→**Core principle:** The Calendar should own date presentation and interaction mechanics, while the application owns business meaning, persistence, and domain-specific rules. The component should remain predictable when configured, reusable across languages, and composable with date pickers, scheduling systems, event viewers, and other UI components.

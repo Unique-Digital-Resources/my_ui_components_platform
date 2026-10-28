@@ -1,0 +1,425 @@
+- Horizontal mode: dual-thumb slider with lemon-green selected range, two distinguishable thumbs (min with "−", max with "+"), active thumb (min by default) has lemon ring.
+- Markers mode (horizontal): tick marks below the track, numeric labels (0, 10, 20... 100) visible, no overlap or clipping.
+- Vertical mode: track is taller than wide, lemon-green range visible between thumbs, tick marks and labels to the LEFT of the track, high-value thumb at top, low-value at bottom.
+- Snapping: set step=5, valueMin=33 → snapped to 35 on blur.
+- Clamping: set valueMax=10 (below valueMin=35) → clamped up to 35 (the moving thumb wins).
+- Canvas drag: dragged max thumb past min thumb → stopped at valueMin (couldn't cross). Dragging also updated the inspector inputs in real time.
+- Keyboard: ArrowRight increased active thumb by 1 (verified both min and max after Tab cycle). Home jumped active thumb to range min. End jumped active thumb to the opposite bound.
+- Reset: returns to defaults (min=0, max=100, valueMin=25, valueMax=75, step=0, showMarkers=false, orientation=horizontal, thickness=8, length=320).
+- Code panel: JavaScript/HTML/CSS/API tabs all functional; code is live-synced with the playground state.
+
+Files created:
+- `src/lib/components/periodic-range/periodic-range.ts` (vanilla JS class, ~900 lines)
+- `src/lib/components/periodic-range/index.ts` (barrel exports)
+- `src/components/periodic-range/periodic-range-react.tsx` (React wrapper)
+- `src/components/periodic-range/periodic-range-playground.tsx` (playground view, ~960 lines)
+
+Files modified:
+- `src/lib/platform/content.ts` (added periodic-range metadata in inputs category)
+- `src/store/navigation.ts` (refactored routeLabel/breadcrumbs to use categoryLabel; added slug→name mappings for all current components)
+- `src/app/page.tsx` (added route handler for component/inputs/periodic-range)
+
+Stage Summary:
+- New PeriodicRange component established: dual-thumb range slider with snapping, markers, and orientation control. First component in the Inputs category.
+- VLM-verified across all major interaction modes (drag, keyboard, snapping, clamping, orientation, markers).
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 23 (summary)
+Agent: main
+Task: Build 3 new input components — Custom Button, Periodic Range, Toggle Group
+
+Work Log:
+- **CustomButton** (built by subagent): A versatile DOM-based button with configurable text, icon (18 built-in SVG icons or image URLs), 4 icon positions (left/right/top/bottom), 4 variants (primary/secondary/outline/ghost), 3 sizes (sm/md/lg), disabled/fullWidth options. Scoped CSS, full imperative API, React wrapper, and complete playground with click counter, property inspector, and code panel.
+- **PeriodicRange** (built by subagent): A dual-thumb canvas-based range slider with min/max thumbs that can't cross, optional snapping to step increments, optional tick-mark markers at intervals, horizontal/vertical orientation, and configurable thickness/length. Full imperative API, React wrapper, and playground with output values.
+- **ToggleGroup** (built by subagent): A group of toggle buttons with single-select/multiselect modes, closable buttons (embedded X), drag-to-reorder via pointer events, and dynamic add/remove. Self-contained (doesn't import CustomButton but matches its visual style). Playground features a Figma/Godot-style nested properties panel where each button's properties (label, icon, selected) are editable inline within the group's inspector, plus an "Add button" action.
+- All 3 components added to content.ts in the "inputs" category, with routing in page.tsx, and sidebar labels in navigation.ts.
+- All verified: CustomButton renders with `.custom-button-root` element, PeriodicRange renders with canvas, ToggleGroup renders with `.toggle-group` element.
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- 3 new input components established: Custom Button, Periodic Range, Toggle Group.
+- ToggleGroup features the nested component properties panel pattern (like Figma/Godot) where child component properties are editable inline within the parent inspector.
+- All appear in sidebar under Inputs → [component name] and in the Components directory.
+
+---
+Task ID: 2+3
+Agent: main
+Task: Build SmartContextMenu + SmartTooltip (Layout category) — vanilla JS classes, React wrappers, playgrounds, content metadata, navigation labels, routing.
+
+Work Log:
+- Read `/home/z/my-project/worklog.md` (Tasks 1–23 plus all in-flight component tasks) and the existing `commands` module (`src/lib/commands/{index,registry,shortcuts}.ts`), `content.ts`, `navigation.ts`, `page.tsx`, `globals.css`, and the ToggleGroup/CustomButton/PeriodicRange components to lock the design system (Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66), the navigation model, the content metadata schema, and the established playground conventions (PageContainer, Breadcrumbs + PageOverline + H1 + intro, .panel/.eyebrow/.bg-grid tokens, lemon-only accent, CodeBlock + CopyableValue, toast from sonner, instanceRef forwarding, change-driven state mirroring, code-tab generation, sticky on-this-page nav).
+- **Vanilla JS SmartContextMenu** (`src/lib/components/smart-context-menu/smart-context-menu.ts`):
+  - DOM-overlay context menu that renders command items from the shared command registry (`commandRegistry.byIds`).
+  - Constructor: `new SmartContextMenu(container, options)` where `options.bounds` is the clipping element. If the container is `position: static`, it's overridden to `relative` (restored on destroy) so the absolutely-positioned menu resolves against it.
+  - `show(x, y)` (viewport coords): makes the menu measurable (opacity 0, left/top 0), measures natural width/height via `getBoundingClientRect()`, then computes placement by translating `x, y` to container-relative coords (`relX = x - cr.left`, `relY = y - cr.top`). Horizontal: if `relX + menuW > bounds.right - cr.left - GAP`, flips left (`relX - menuW`); if that still overflows left, clamps to `bounds.left - cr.left + GAP`. Same logic vertically: flip up, then clamp to `bounds.top`. Reveals via `requestAnimationFrame` + `.smart-context-menu--visible` class with a scale-fade transition.
+  - `hide()`: removes `--visible`, fires the `hide` event, and after the 140ms transition sets `display: none` (so the next show() can re-measure cleanly).
+  - Each item renders the command's icon (built-in Lucide-style SVG set covering every icon referenced by `registerBuiltinCommands`: search, x, rotate-ccw, triangle, square, circle, circle-slash, refresh-cw, droplet, sun, contrast, blend, divide, shuffle, brush, copy, clipboard — plus extras), label, and kbd shortcut (one `<kbd>` per `shortcutParts()` part). Disabled commands get `.smart-context-menu__item--disabled` + `aria-disabled="true"` + native `disabled` on the inner button (blocks click and removes from tab order). Icon-less items reserve the icon slot with an empty spacer so labels align.
+  - Items auto-group with `<li class="smart-context-menu__separator" role="separator">` between different `cmd.category` values, so multi-category menus read naturally.
+  - Keyboard: Arrow Up/Down moves the active item (skips disabled), Enter/Space selects the active item, Escape closes, Tab/Shift+Tab cycles the active item. Active item gets `.smart-context-menu__item--active` (lemon accent) and tries to focus itself. Pointerenter on an item also updates the active index for keyboard continuity.
+  - Click-outside (pointerdown on document, capture phase, with menuEl.contains check) hides. Window `blur` hides too.
+  - `setCommandIds(ids)`: re-renders the items and, if visible, resets the active item to the first enabled.
+  - `setTitle(title)`: lazily creates/removes the header element; updates the text on existing headers.
+  - Events: `select` (carries commandId), `hide` (no payload). Public API uses overloads (`on(event: "select", handler: (commandId: string) => void)` and `on(event: "hide", handler: () => void)`). Custom `ContextMenuHandler = (data: any) => void` type used for `off` to satisfy `@typescript-eslint/no-unsafe-function-type` while preserving the spec's `Function`-like signature (same pattern as ToggleGroup).
+  - ARIA: menu has `role="menu"` + `aria-hidden` toggle; items have `role="menuitem"`; disabled items set `aria-disabled`. Shortcut badge has `aria-label="Shortcut: …"` (uses `formatShortcut`).
+  - Scoped CSS injected once per document (`<style id="smart-context-menu-styles">`) with `.smart-context-menu-` prefix. No canvas, no external deps. All visual tokens come from the platform's CSS variables (--popover, --popover-foreground, --border, --accent, --muted-foreground, --brand-lemon).
+  - `destroy()` is idempotent: removes document listeners, clears the handler map, restores the container's original `position` if we overrode it, removes the menu DOM, sets a `destroyed` flag.
+- **Barrel exports** (`src/lib/components/smart-context-menu/index.ts`): re-exports the class + the `SmartContextMenuOptions` type.
+- **React wrapper** (`src/components/smart-context-menu/smart-context-menu-react.tsx`): renders a `<div>` that serves as BOTH the menu's container and the bounds element. Creates the instance once on mount (empty deps, initial props captured via refs so the create-once effect stays empty). Forwards `commandIds` (compared via `commandIdsKey = commandIds.join(",")` so setCommandIds only fires when the contents actually change) and `title` prop changes via the imperative API. Callbacks (`onSelect`, `onHide`) kept in refs so the create-once effect can stay empty. Exposes the instance via `instanceRef` for imperative `show(x, y)` calls.
+- **Playground** (`src/components/smart-context-menu/smart-context-menu-playground.tsx`): full playground with:
+  - **Live canvas** (the `.panel`'s inner `<SmartContextMenuReact>` div, which is also the bounds/container). Right-click anywhere in the panel opens the menu at the cursor (via `onContextMenu` → `instanceRef.current.show(e.clientX, e.clientY)`). Also five "open at" buttons (center + four corners with 8px padding) so users without a right-click can exercise the menu and so the smart positioning is visible at each edge.
+  - **Output section**: `CopyableValue` chips for `lastSelected` and the command's human label, plus a hint about Escape/click-outside/Arrow-key interactions.
+  - **Property inspector**: title text input (live-updates the header via `setTitle`); a "Commands" multi-select grouped by category, where each registered command is a checkbox row showing the command label + ID and a per-category "selected/total" badge. Selecting/deselecting immediately calls `setCommandIds` on the instance.
+  - `registerBuiltinCommands()` called in a mount effect; a `registryVersion` state bumps to trigger a re-read of `commandRegistry.list()` for the inspector dropdown.
+  - Code panel (JavaScript / HTML / CSS / API tabs) with live-synced code generation (the JS tab shows the actual `commandIds` array, title, and last-selected comment).
+  - Documentation section: Overview, When to use, When not to use, Properties table (3 rows), Methods list (8 entries), Events list (2 entries), Smart positioning explanation (5-step ordered list), Accessibility notes (5 bullets), sticky on-this-page nav — all driven by the content.ts metadata.
+- **Vanilla JS SmartTooltip** (`src/lib/components/smart-tooltip/smart-tooltip.ts`):
+  - DOM-overlay tooltip that renders a command's label, description, and kbd shortcut from the shared command registry (`commandRegistry.get`).
+  - Constructor: `new SmartTooltip(container, options)` where `options.bounds` is the clipping element and `options.commandId` + `options.position` configure the content/placement. Container is made `position: relative` if static (restored on destroy).
+  - `attachTo(target)`: removes listeners from the previous target (if any) and adds `mouseenter`/`mouseleave`/`focus`/`blur` to the new target. `mouseenter`/`focus` → `show()` + emit `show`; `mouseleave`/`blur` → `hide()` + emit `hide`. Calling `attachTo` on the same target is a no-op.
+  - `detach()`: removes listeners from the current target and hides.
+  - `show()`: makes the tooltip measurable (opacity 0, left/top 0), measures natural width/height, then computes placement:
+    1. Compute target rect (viewport) → container-relative coords (`tx = tr.left - cr.left`, etc.).
+    2. Bounds in container-relative coords (with EDGE_PAD=4): `bLeft, bTop, bRight, bBottom`.
+    3. For the requested `position` (top/bottom/left/right), compute the natural left/top (centered along the target on the cross-axis, offset by GAP=8 on the main axis).
+    4. If the requested side overflows (e.g. `top < bTop` for "top"), flip to the opposite side and recompute.
+    5. Clamp the non-primary axis so the tooltip stays inside the bounds: `left = max(bLeft, min(p.left, bRight - ttW))` (and same for top).
+    6. Apply left/top and reveal via `requestAnimationFrame` + `.smart-tooltip--visible` (scale-fade transition).
+  - `hide()`: removes `--visible`, fires `hide` event, after 140ms sets `display: none`.
+  - `setCommandId(id)`: re-renders the tooltip content (icon, label, description, shortcut). If visible, re-positions.
+  - `setPosition(pos)`: updates the preferred position; if visible, re-positions (which may flip).
+  - Content rendering: header row (icon + bold label), optional description (muted, 11px), shortcut badge (one `<kbd>` per part, lemon-tinted border + text). Empty-state for unknown command IDs.
+  - Built-in icon set (same set as SmartContextMenu) so every command icon renders.
+  - Scoped CSS injected once per document (`<style id="smart-tooltip-styles">`) with `.smart-tooltip-` prefix. `--tt-accent` token = `--brand-lemon` for icon + shortcut text.
+  - `destroy()`: detaches, removes the tooltip DOM, restores the container's position, clears listeners.
+- **Barrel exports** (`src/lib/components/smart-tooltip/index.ts`): re-exports the class + `SmartTooltipOptions` + `SmartTooltipPosition` types.
+- **React wrapper** (`src/components/smart-tooltip/smart-tooltip-react.tsx`): renders a `<div>` as container+bounds. Creates the instance once on mount; forwards `commandId` and `position` prop changes via the imperative API. Exposes the instance via `instanceRef` for `attachTo`/`show`/`hide` calls.
+- **Playground** (`src/components/smart-tooltip/smart-tooltip-playground.tsx`): full playground with:
+  - **Live canvas** (the bounds/container div) containing 5 hoverable buttons absolutely positioned at TL/TR/Center/BL/BR. Each button has its own `SmartTooltip` instance (5 total) — created in a mount effect that iterates `targetRefs.current`, calls `new SmartTooltip(container, { bounds: container, commandId, position })`, then `inst.attachTo(target)` and `inst.on("show", ...)`. This avoids the single-target limitation of `attachTo` while keeping the API honest.
+  - Per-target `commandId` is stored in component state (`targets` array) — the `setTargetCommandId` callback updates both the state and the instance's `setCommandId`. The `targetsRef` mirrors the state for the create-once effect's `onShow` closure (which reads the latest commandId at hover time).
+  - **Output section**: `CopyableValue` chips for `lastHovered` and the command's human label.
+  - **Property inspector**: 4-way position segmented control (Top/Bottom/Left/Right with ArrowUp/Down/Left/Right icons) that calls `setPosition` on ALL tooltip instances via a position-prop-change effect; a "Inspector-bound command" `<select>` dropdown of all registered commands, with an "Apply to center target" button that calls `setTargetCommandId(2, …)`; and a per-target command binding section where each of the 5 targets has its own `<select>` to bind a different command — so users can see different tooltips on different buttons in the same canvas.
+  - `registerBuiltinCommands()` called on mount; `registryVersion` bump triggers re-read.
+  - Code panel (JavaScript / HTML / CSS / API tabs) with live-synced code (the JS tab shows the actual 5-target array with their bound commandIds and the current preferred position).
+  - Documentation section: Overview, When to use, When not to use, Properties table (3 rows), Methods list (8 entries), Events list (2 entries), Smart positioning explanation (6-step ordered list), Accessibility notes (4 bullets), sticky on-this-page nav — all driven by the content.ts metadata.
+- **Content metadata** (`src/lib/platform/content.ts`): added both `smart-context-menu` and `smart-tooltip` to the `components` array in the `layout` category (which already existed). Each has full properties, methods, events, defaults, whenToUse, whenNotToUse, capabilities, and tags.
+- **Navigation labels** (`src/store/navigation.ts`): extended the `routeLabel` switch's `component` case to map `smart-context-menu` → "Smart Context Menu" and `smart-tooltip` → "Smart Tooltip". The existing `categoryLabel("layout")` → "Layout" already handled the category segment.
+- **Routing** (`src/app/page.tsx`): added imports for `SmartContextMenuPlayground` and `SmartTooltipPlayground`, plus two route handlers under `case "component"` for `component/layout/smart-context-menu` and `component/layout/smart-tooltip`.
+- **Lint**: `bun run lint` — 0 errors, 0 warnings. Initial run had 8 warnings for unused `eslint-disable-next-line` directives (the project's React Compiler config doesn't flag the empty-deps pattern as exhaustively as the disable comments assumed); `bun run lint --fix` removed them. Hand-cleaned the resulting blank lines for readability. No `react-hooks/exhaustive-deps` errors thanks to the refs-for-callbacks pattern established by ToggleGroup.
+
+Stage Summary:
+- Two new Layout-category components established: SmartContextMenu (right-click menu with smart flip/clamp positioning, command-registry-driven items, kbd shortcuts, keyboard nav, click-outside close) and SmartTooltip (hover/focus tooltip with smart side-flip + clamp positioning, command-registry-driven content).
+- Both render items from the shared command registry via `commandRegistry.byIds` / `commandRegistry.get` and use `formatShortcut` + `shortcutParts` for the kbd badges.
+- Both playgrounds call `registerBuiltinCommands()` on mount.
+- Both appear in the sidebar (Layout → Smart Context Menu / Smart Tooltip) and in the Components directory under the Layout category, since the Sidebar dynamically builds groups from `categories` + `components` in content.ts.
+- `bun run lint` — 0 errors, 0 warnings.
+- Files created:
+  - `src/lib/components/smart-context-menu/smart-context-menu.ts` (vanilla JS class, ~670 lines)
+  - `src/lib/components/smart-context-menu/index.ts` (barrel exports)
+  - `src/components/smart-context-menu/smart-context-menu-react.tsx` (React wrapper)
+  - `src/components/smart-context-menu/smart-context-menu-playground.tsx` (playground view)
+  - `src/lib/components/smart-tooltip/smart-tooltip.ts` (vanilla JS class, ~480 lines)
+  - `src/lib/components/smart-tooltip/index.ts` (barrel exports)
+  - `src/components/smart-tooltip/smart-tooltip-react.tsx` (React wrapper)
+  - `src/components/smart-tooltip/smart-tooltip-playground.tsx` (playground view)
+- Files modified:
+  - `src/lib/platform/content.ts` (added smart-context-menu + smart-tooltip metadata in the layout category)
+  - `src/store/navigation.ts` (added smart-context-menu + smart-tooltip slug → label mappings in `routeLabel`)
+  - `src/app/page.tsx` (added route handlers for `component/layout/smart-context-menu` and `component/layout/smart-tooltip`)
+
+---
+Task ID: 24 (summary)
+Agent: main
+Task: Build commands registry + shortcuts utility + SmartContextMenu + SmartTooltip
+
+Work Log:
+- **Commands registry** (`src/lib/commands/registry.ts`): A singleton `CommandRegistry` class that stores commands by ID. Each command has `{ id, label, shortcut?, icon?, category?, description?, disabled? }`. Provides `register`, `get`, `list`, `byCategory`, `byIds`, `unregister`. Convenience functions `defineCommand` and `defineCommands`.
+- **Shortcuts utility** (`src/lib/commands/shortcuts.ts`): 
+  - `formatShortcut(shortcut)` — human-readable string like "⇧R" or "⌘⇧R"
+  - `shortcutParts(shortcut)` — array of parts for kbd rendering
+  - `eventMatchesShortcut(event, shortcut)` — check if a KeyboardEvent matches
+  - `findCommandForEvent(event, commandIds?)` — find the matching command
+  - `ShortcutHandler` class — global keydown listener that fires callbacks when registered shortcuts are pressed, optionally scoped to a set of command IDs
+- **Built-in commands** (`src/lib/commands/index.ts`): `registerBuiltinCommands()` registers ~20 platform commands across categories: Global (search, escape), Color Wheel (reset, shapes 1-4, toggle rotate), Color Range (modes 1-4), Color Circle (harmonies 1-5), Edit (copy, paste, duplicate). Fixed a missing import (`defineCommands` wasn't imported in the `registerBuiltinCommands` function).
+- **SmartContextMenu** (`src/lib/components/smart-context-menu/`): A context menu overlay that renders command items from the registry. Smart positioning: auto-flips left/up and clamps to the bounds container so it never overflows the live canvas area. Each item shows icon, label, and kbd shortcut. Arrow-key navigation, Enter selects, Escape/click-outside hides. Category separators between different command categories.
+- **SmartTooltip** (`src/lib/components/smart-tooltip/`): A tooltip overlay that renders a command's label, description, and kbd shortcut. Attaches to a target element (mouseenter/focus → show, mouseleave/blur → hide). Smart positioning: flips to opposite side if it would overflow the bounds container.
+- **React wrappers + playgrounds** for both: Each playground calls `registerBuiltinCommands()` on mount, features a live-canvas bounds container (right-click for menu, hoverable buttons for tooltip), property inspector with command/position selectors, output section, code panel, and documentation.
+- **Fixed two bugs**: (1) `defineCommands` was used in `registerBuiltinCommands` without being imported; (2) `SmartTooltip` was imported as `import type` but used as a value in the tooltip playground.
+- Both components appear in the sidebar under **Layout → Smart Context Menu / Smart Tooltip**.
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- Commands registry + shortcuts utility established as a standalone module (not a component).
+- SmartContextMenu and SmartTooltip render command items with kbd shortcuts, with smart positioning bounded by a container element.
+- Both playgrounds load and render correctly.
+
+---
+Task ID: 2
+Agent: board-subagent
+Task: Build the React wrapper + playground for the Board component (vanilla JS Board class already complete at src/lib/components/board/board.ts)
+
+Work Log:
+- Read `/home/z/my-project/worklog.md` (Tasks 1–24) to lock the design system (Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66), the navigation model, the content metadata schema, and the established playground conventions (PageContainer, Breadcrumbs + PageOverline + H1 + intro, .panel/.eyebrow tokens, lemon-only accent, CodeBlock + CopyableValue, toast from sonner, instanceRef forwarding, change-driven state mirroring, code-tab generation, sticky on-this-page nav).
+- Read `src/lib/components/board/board.ts` (844 lines) to lock the Board's public API: constructor(container, options), addItem/removeItem/getItems/getSelectedIds/getSelectedItems/selectItem/clearSelection, setGridMode/setGridSize/setSubGridDivisions/setSnapToGrid/setSnapToItems, getView/setView/zoomToFit/zoomToFitSelection, align(AlignType)/distribute(DistributeType), getLocalLattice/getGlobalLattice, on/off("selection"|"change"|"view"), destroy. Confirmed the Board renders its own <canvas> inside the container and adds a `.board-root` class (position: relative; overflow: hidden).
+- Read `src/lib/commands/{index,shortcuts}.ts` to confirm `registerBuiltinCommands()` already defines all 14 board.* commands (align-left/center-h/right/top/center-v/bottom, distribute-h/v, fit-all/fit-selection, add-circle/rect/triangle, delete-selected) and that `ShortcutHandler(scopedIds?)` + `formatShortcut(shortcut)` are the public API.
+- Read the existing SmartTooltip wrapper/playground pair to mirror the established patterns (instanceRef forwarding, refs-for-callbacks so create-once effect stays empty, change-driven state mirroring, code-tab generation, documentation section with sticky on-this-page nav).
+
+- **React wrapper** (`src/components/board/board-react.tsx`):
+  - Renders a `<div ref={containerRef} className={className} style={style} data-board-container="">` that serves as the Board's container. The Board class adds `.board-root` on mount.
+  - Props: `gridMode`, `gridSize`, `subGridDivisions`, `snapToGrid`, `snapToItems`, `background` (initial-only), `className`, `style`, `onSelection`, `onChange`, `onView`, `instanceRef`. Defaults match the Board's own defaults (dots / 40 / 4 / false / false).
+  - Captures initial props in `initialPropsRef` so the create-once effect can stay empty (matches the ToggleGroup pattern).
+  - Keeps the latest callbacks in refs (`onSelectionRef`, `onChangeRef`, `onViewRef`) updated via per-prop effects (`React.useEffect(() => { ref.current = cb; }, [cb])`) — NOT during render — to satisfy the React Compiler's "no ref writes during render" rule (the SmartTooltip wrapper used the older `ref.current = cb` during render which now errors under the compiler).
+  - Creates the Board instance once on mount (empty deps), subscribes to selection/change/view events with stable handler functions that dispatch through the refs, and unsubscribes + destroys on cleanup.
+  - Forwards gridMode/gridSize/subGridDivisions/snapToGrid/snapToItems prop changes via five separate effects that call the imperative setters.
+
+- **Playground** (`src/components/board/board-playground.tsx`):
+  - **Page header**: Breadcrumbs, PageOverline ("Components / Layout"), H1, longDescription intro, tags + status badge — all driven by `getComponent("board")!`.
+  - **Live canvas panel** (left, `min-h-[640px]`): a `.panel` containing the toolbar, the Board canvas (`h-[520px]`), and the output section.
+    - **Toolbar** (two rows, border-b):
+      - Row 1: Add Circle / Add Rectangle / Add Triangle (primary lemon buttons), Delete (danger), Fit All / Fit Selection, Reset (right-aligned). Each button has a `title` with the keyboard shortcut.
+      - Row 2: Align row of 6 icon buttons (AlignStartVertical / AlignCenterHorizontal / AlignEndVertical / AlignStartHorizontal / AlignCenterVertical / AlignEndHorizontal) + Distribute row of 2 icon buttons (AlignHorizontalDistributeCenter / AlignVerticalDistributeCenter). Each icon button has `aria-label` and a `title` showing the formatted shortcut.
+    - **Board canvas**: a `relative h-[520px]` wrapper (`liveAreaRef`) containing the `<BoardReact className="absolute inset-0" instanceRef={boardRef} ...>`. A small hint pill at the bottom describes the pointer interactions.
+    - **Output section** (border-t): a sticky-header table of all items showing id (lemon), type, x/y, w×h, rotation, and color (with a swatch). Selected rows are highlighted with `bg-brand-lemon/10`. Empty state prompts the user to add shapes or press 1/2/3.
+  - **Property inspector** (right, `.panel`):
+    - Grid mode: 3-way segmented (None / Dots / Lines) with lemon-purple-strong active state.
+    - Grid size: shadcn `Slider` (10–100, step 2), live value display.
+    - Sub-grid divisions: `Slider` (1–8, step 1).
+    - Snap to grid / Snap to items: `Switch` toggles with descriptions.
+    - Selection info: big lemon count + CopyableValue chips for each selected id.
+    - View info: 3-column grid showing zoom (2dp × suffix), panX, panY — updates live as the user pans/zooms.
+    - Keyboard shortcuts help: a `Keyboard` icon header + a list of all 14 board commands with their formatted shortcut in a lemon kbd badge.
+  - **Code panel** (4 tabs: JavaScript / HTML / CSS / API):
+    - JavaScript: live-synced to the current grid/snap state, shows how to construct the Board, add a shape near the view center, wire the ShortcutHandler to all 14 board commands, and subscribe to events.
+    - HTML: a minimal `<div id="board" style="height: 520px">` host.
+    - CSS: documents that the Board's background comes from the `background` option (not CSS), shows the focus-visible ring override, and the container sizing contract.
+    - API: the full TypeScript type surface (ShapeType, GridMode, AlignType, DistributeType, BoardItem, BoardView, BoardOptions, Board class with all 23 methods).
+  - **Documentation section**: Overview, When to use it, When not to use it, Properties and defaults table (6 rows), Methods list (21 entries), Events list (3 entries), Keyboard shortcuts table (14 rows driven by `commandRegistry.byIds(BOARD_COMMAND_IDS)`), Local vs global lattices explanation, Accessibility notes (5 bullets), sticky on-this-page nav.
+  - **State mirroring**: `items` / `selectedIds` / `view` are mirrored from the Board via the onSelection / onChange / onView callbacks. The onChange callback reads `boardRef.current?.getItems()` to refresh the items array. Toolbar actions (addShape, deleteSelected, align, distribute) also call `setItems`/`setSelectedIds` directly so the UI updates immediately.
+  - **Starter items**: a mount effect seeds 3 items (rect/circle/triangle in lemon/lavender/pink) so the canvas isn't empty on first load. The reset() function clears all items and re-seeds the same 3.
+  - **addShape placement**: computes the view center in board coords as `((w/2 - panX)/zoom, (h/2 - panY)/zoom)` using the liveAreaRef's clientWidth/Height, then adds a random offset of ±70 board units. Shape size is 90×90, rotation 0, color picked randomly from a 5-color palette (lemon, lavender, pink, mint, amber — no indigo/blue).
+  - **Action handler pattern**: all six actions (addShape, deleteSelected, fitAll, fitSelection, align, distribute) are stored in an `actionsRef` that's updated via a render-scoped `React.useEffect` (no deps → runs after every render). The toolbar calls thin wrappers `(type) => actionsRef.current.addShape(type)`. The ShortcutHandler effect has empty deps and dispatches through `actionsRef.current`, so it's created once on mount and never re-attaches. This avoids the React Compiler's "existing memoization could not be preserved" error that `useCallback(fn, [])` with setState calls triggers.
+
+- **Content metadata** (`src/lib/platform/content.ts`): added a `board` entry to the `components` array in the `layout` category with full properties (6), methods (21), events (3), defaults, whenToUse (5), whenNotToUse (4), capabilities (7), and tags. The `getComponent("board")` lookup drives both the playground header and the documentation section.
+- **Navigation labels** (`src/store/navigation.ts`): extended the `routeLabel` switch's `component` case to map `board` → "Board". The existing `categoryLabel("layout")` → "Layout" already handled the category segment.
+- **Routing** (`src/app/page.tsx`): added the `BoardPlayground` import and a route handler under `case "component"` for `component/layout/board`.
+- **Lint**: `bun run lint` — 0 errors, 0 warnings. Initial run had 12 errors: 2 unused `eslint-disable-next-line` directives (removed) and 10 React Compiler errors (`react-hooks/refs` for ref writes during render in board-react.tsx, `react-hooks/preserve-manual-memoization` for `useCallback(fn, [])` with setState calls in the playground). Fixed by: (1) switching board-react.tsx to the ToggleGroup pattern of updating callback refs via per-prop effects; (2) replacing the playground's `useCallback` action handlers with an `actionsRef` updated via a no-deps effect, with thin stable wrappers for the toolbar and an empty-deps ShortcutHandler effect that dispatches through the ref.
+
+Stage Summary:
+- New Layout-category component established: Board — an infinite-canvas component with pan/zoom, dot/line grid system, sub-grid divisions, snap-to-grid and snap-to-items, rubber-band multi-select, per-item drag, and align/distribute/fit commands. Renders to a single <canvas> inside a fixed-height container.
+- The playground wires all 14 board.* commands from the shared command registry to a scoped ShortcutHandler, so the keyboard shortcuts (1/2/3 to add shapes, Delete to remove, Shift+Cmd+L/E/R/T/M/B to align, Shift+Cmd+H/J to distribute, Cmd+0 / Shift+Cmd+0 to fit) work globally while the playground is mounted.
+- The Board appears in the sidebar under Layout → Board and in the Components directory under the Layout category, since the Sidebar dynamically builds groups from `categories` + `components` in content.ts.
+- `bun run lint` — 0 errors, 0 warnings. `GET /` returns 200.
+- Files created:
+  - `src/components/board/board-react.tsx` (React wrapper, ~160 lines)
+  - `src/components/board/board-playground.tsx` (playground view, ~1140 lines)
+- Files modified:
+  - `src/lib/platform/content.ts` (added board metadata in the layout category)
+  - `src/store/navigation.ts` (added board slug → "Board" label mapping in `routeLabel`)
+  - `src/app/page.tsx` (added BoardPlayground import + route handler for `component/layout/board`)
+- Files unchanged:
+  - `src/lib/components/board/board.ts` (vanilla JS Board class — already complete from a prior task)
+  - `src/lib/components/board/index.ts` (barrel exports — already complete)
+
+---
+Task ID: 25 (summary)
+Agent: main + subagent
+Task: Build Board component — infinite canvas with grid, shapes, lattices, alignment commands
+
+Work Log:
+- **Vanilla JS Board component** (`src/lib/components/board/board.ts`): ~900-line canvas-based infinite board with:
+  - Infinite pan (Space+drag or middle-click) and zoom (Ctrl/Cmd+scroll or pinch)
+  - Grid system: dots mode (main + sub-grid dots with different opacity), lines mode (main + sub-grid lines), or none. Configurable grid size and sub-grid divisions.
+  - Snap to grid and snap to items (snaps to other items' edges and centers within a threshold)
+  - Board items: circle, rect, triangle shapes with position, size, rotation, and color
+  - Selection: single click, shift-click (additive), rubber-band drag (multi-select)
+  - Per-item lattices: local lattice (rotated bounding box, dashed lemon) and global lattice (axis-aligned AABB without rotation, dashed purple). Both rendered when an item is selected.
+  - Alignment commands: align left/center-h/right/top/center-v/bottom (uses global lattices)
+  - Distribution commands: distribute horizontal/vertical (even spacing between items)
+  - Fit commands: zoomToFit (all items), zoomToFitSelection
+  - Keyboard: Delete/Backspace removes selected, Escape clears selection, arrows nudge (Shift=10px), Space=pan mode
+  - Full public API with events: selection, change, view
+- **Board commands registered**: 14 commands in the "Board" category — 6 align, 2 distribute, 2 fit, 3 add-shape, 1 delete. Each with keyboard shortcuts (e.g. ⇧⌘L for align-left, 1/2/3 for add shapes, Delete for delete).
+- **React wrapper + playground** (built by subagent): Full playground with:
+  - Toolbar: Add Circle/Rect/Triangle, Delete, Fit All/Selection, 6 align buttons, 2 distribute buttons
+  - Property inspector: grid mode, grid size, sub-grid divisions, snap-to-grid, snap-to-items toggles, selection info, view stats
+  - Output table: all items with type/position/size/rotation/color, selected rows highlighted
+  - Keyboard shortcuts help section listing all 14 board commands
+  - ShortcutHandler scoped to board commands, wired to the Board instance
+  - Code panel (JS/HTML/CSS/API) + documentation section
+- VLM-verified: Board canvas renders, 3 shapes added successfully, items table shows 3 entries.
+
+Stage Summary:
+- Board component established: infinite canvas with pan/zoom, grid (dots/lines/none), sub-grid, snapping (grid + items), 3 shape types, multi-selection, local + global lattices, alignment + distribution + fit commands.
+- 14 board commands registered with keyboard shortcuts, wired via ShortcutHandler.
+- Appears in sidebar under Layout → Board.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 1 (board-transform)
+Agent: board-transform-subagent
+Task: Enhance the Board component with rotation/resize handles, pivot positions, and transform modes
+
+Work Log:
+- Read `/home/z/my-project/worklog.md` (Tasks 1–25) to lock the design system (Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66, no indigo/blue), the navigation model, and the existing Board playground conventions.
+- Read the full existing `src/lib/components/board/board.ts` (844 lines), `src/components/board/board-react.tsx`, and `src/components/board/board-playground.tsx` to understand the structure before making targeted edits.
+
+- **`src/lib/components/board/board.ts`** (844 → 1442 lines, targeted edits — no full rewrite):
+  - Added new exported types: `PivotPosition` (9 variants), `TransformMode` ("global" | "local"), `LatticeDisplay` ("local" | "global" | "both").
+  - Extended `BoardItem` with `pivotX` and `pivotY` (0–1, default 0.5/0.5 = center). The pivot is the point around which rotation happens and which stays fixed during resize.
+  - Extended `BoardOptions` with `transformMode` (default "global"), `selectionPivot` (default "center"), `latticeDisplay` (default "local"). Updated `DEFAULTS` and the constructor to read them.
+  - Updated `addItem()` to initialize `pivotX: 0.5, pivotY: 0.5` on every new item.
+  - Added 5 new public API methods: `setTransformMode(mode)`, `setLatticeDisplay(mode)`, `setSelectionPivot(pivot)`, `rotateSelected(degrees)` (delta rotation), `resizeSelected(scaleX, scaleY)` (factor scale). Both transform methods branch on global vs local mode.
+  - Added a `HandleName` union ("nw"|"n"|"ne"|"e"|"se"|"s"|"sw"|"w") and screen-pixel visual constants (ROTATE_HANDLE_OFFSET_PX=24, HANDLE_SIZE_PX=8, ROTATE_HANDLE_RADIUS_PX=5, HANDLE_HIT_RADIUS_PX=12, PIVOT_CROSSHAIR_RADIUS_PX=6) plus a `HANDLE_CURSORS` map for per-handle cursor styling.
+  - Extended `pointerState` to support `"rotate"` and `"resize"` modes with snapshot fields (`startItems`, `startBoardX/Y`, `startRotation`, `resizeHandle`, `startSelectionPivot`, `startSelectionLattice`).
+  - Added pivot/lattice math helpers: `getItemPivotBoard(item)`, `getLatticePivotBoard(lattice, px, py)`, `boardToLatticeLocal(bx, by, lattice)`, `getSelectionLattice()` (single item → local lattice; multi → combined AABB of all global lattices), `getSelectionPivotPosition()` (9-position map), `getHandleLocalPos(handle, lattice)`, `getLatticeHandles(lattice)` (8 resize + 1 rotation handle board positions), `hitTestHandles(bx, by)`.
+  - Added transform helpers: `rotateItemAround(item, pivot, degrees)`, `scaleItemFromSelectionPivot(item, pivot, sx, sy)` (global mode — item position moves with pivot), `scaleItemFromOwnPivot(item, pivot, sx, sy)` (local mode — pivot board position stays fixed by translating the center).
+  - Added gesture methods `startRotateMode`, `startResizeMode`, `applyRotate`, `applyResize`. `applyRotate` computes the angle delta from the pivot to the pointer (global: single selection pivot; local: per-item own pivot, resetting each item to its start state before applying the delta so the gesture is non-compounding). `applyResize` converts the pointer into lattice-local coords and computes scale factors per dimension based on which handle is dragged (corner handles affect both axes, edge handles affect one), with a guard against division-by-zero when the handle coincides with the pivot.
+  - Updated `onPointerDown` to check transform handles (rotate first, then resize) before hit-testing items — only when `latticeDisplay !== "global"`.
+  - Updated `onPointerMove` to handle rotate/resize modes and to update the hover cursor when no gesture is active (new `updateHoverCursor` method sets grab/nwse/nesw/ns/ew/move/default based on what's under the pointer).
+  - Updated `onPointerUp` to emit `"rotate-end"` / `"resize-end"` change events and refresh the hover cursor.
+  - Replaced the per-item `renderLattices(item)` loop with a single `renderSelectionOverlay()` call. The overlay: (1) for single selection draws the rotated local lattice (dashed lemon) and/or global AABB (dashed purple) gated by `latticeDisplay`; (2) for multi-selection draws the combined AABB in lemon and/or purple; (3) when the local lattice is shown, draws 8 white resize handles (dark Obsidian border), a lemon rotation handle above the top edge connected by a line, and a lemon pivot crosshair (at the selection pivot in global mode, or at each item's own pivot in local mode). All handle/crosshair sizes use `/zoom` so they stay a constant on-screen size regardless of zoom.
+
+- **`src/lib/components/board/index.ts`**: added `PivotPosition`, `TransformMode`, `LatticeDisplay` to the type re-exports.
+
+- **`src/components/board/board-react.tsx`** (160 → 199 lines):
+  - Imported and re-exported the new types.
+  - Added `transformMode`, `latticeDisplay`, `selectionPivot` props (initial + forwarded) with defaults matching the Board's own defaults ("global" / "local" / "center").
+  - Captured the new props in `initialPropsRef` and passed them to the `Board` constructor in the create-once effect.
+  - Added three forwarding effects (`setTransformMode`, `setLatticeDisplay`, `setSelectionPivot`) mirroring the existing `setGridMode`/`setGridSize` pattern.
+
+- **`src/components/board/board-playground.tsx`** (1141 → 1408 lines):
+  - Extended `PlaygroundState` with `transformMode`, `latticeDisplay`, `selectionPivot` and updated `DEFAULTS`. Added a `rotationValue` state for the rotation slider/input.
+  - Added `LATTICE_DISPLAY_OPTIONS`, `TRANSFORM_MODE_OPTIONS`, and `PIVOT_POSITIONS` (9 entries with row/col for the 3×3 grid) constants.
+  - Forwarded the three new props to `<BoardReact>`.
+  - Added a selection-sync effect that sets `rotationValue` to the first selected item's rotation whenever the selection changes.
+  - Added an `applyRotation(newRotation)` handler that computes the delta from the first selected item's current rotation and calls `board.rotateSelected(delta)`.
+  - Added a new **Transform** section in the property inspector (between Snap toggles and Selection info) containing:
+    - **Lattice display**: 3-way segmented toggle (Local / Global / Both) with Deep Violet active state.
+    - **Transform mode**: 2-way segmented toggle (Global / Local).
+    - **Selection pivot**: 3×3 button grid showing the 9 pivot positions as dots, active one highlighted lemon; disabled when transform mode is Local (since local mode uses per-item pivots).
+    - **Rotation**: numeric input (−360…360) + shadcn Slider (−180…180) bound to `rotationValue`; calls `applyRotation` on change; disabled when no selection.
+  - Extended the Selection info card to show the active selection pivot, transform mode, and the first selected item's pivotX/pivotY.
+  - Added a `pivot` column to the output items table (shows `pivotX,pivotY` to 2 dp).
+  - Updated the canvas hint pill to mention the rotation/resize handles.
+  - Updated `reset()` to also reset `rotationValue` to 0.
+  - Updated `generateJsCode()` to include the three new constructor options (live-synced).
+  - Updated `generateApiCode()` to include the new types (`PivotPosition`, `TransformMode`, `LatticeDisplay`), the new `BoardItem` fields (`pivotX`, `pivotY`), the new `BoardOptions` fields, and the 5 new transform methods.
+  - Added a "Transform: pivots, rotation, and resize" documentation section explaining pivots, global vs local transform modes, the 8 resize handles + rotation handle, the pivot crosshair, and the programmatic API. Added it to the on-this-page nav.
+
+- **Lint**: `bun run lint` — 0 errors, 0 warnings. `bunx tsc --noEmit` — no board-related errors (only pre-existing errors in unrelated color-circle/websocket/skills files). Dev server `GET /` returns 200.
+
+Stage Summary:
+- Board component now supports per-item pivots (`pivotX`/`pivotY`), 9 selection pivot positions, global vs local transform modes, and 3 lattice display modes.
+- Interactive rotation (lemon handle above the top edge) and resize (8 white square handles on edges/corners) work for both single and multi-selection, with the pivot point drawn as a lemon crosshair.
+- Programmatic API: `setTransformMode`, `setLatticeDisplay`, `setSelectionPivot`, `rotateSelected(degrees)`, `resizeSelected(scaleX, scaleY)`.
+- Playground property inspector exposes all new options with a 3×3 pivot grid, rotation slider + numeric input, and live pivot info for the selection.
+- Files modified:
+  - `src/lib/components/board/board.ts` (844 → 1442 lines)
+  - `src/lib/components/board/index.ts` (added 3 type exports)
+  - `src/components/board/board-react.tsx` (160 → 199 lines)
+  - `src/components/board/board-playground.tsx` (1141 → 1408 lines)
+
+---
+Task ID: 26 (summary)
+Agent: main + subagent
+Task: Enhance Board with rotation/resize handles, pivot system, transform modes
+
+Work Log:
+- **Pivot position on items**: Added `pivotX` and `pivotY` (0–1, default 0.5 = center) to `BoardItem`. The pivot is the point around which rotation happens and which stays fixed during resize.
+- **Transform mode**: Added `transformMode` option — "global" (transforms apply to the selection as a whole, using the selection area's pivot) or "local" (transforms apply per-item, using each item's own pivot). Default: "global".
+- **9 selection pivot positions**: Added `selectionPivot` option — one of center, top-left, top-center, top-right, middle-left, middle-right, bottom-left, bottom-center, bottom-right. This determines which point of the selection bounding box is used as the pivot for global transforms. Default: "center".
+- **Lattice display mode**: Added `latticeDisplay` option — "local" (show only the rotated bounding box with handles), "global" (show only the AABB), or "both". Default: "local".
+- **Rotation handle**: When the local lattice is displayed and items are selected, a lemon rotation handle is drawn above the top edge of the local lattice (a small circle connected by a line). Dragging this handle rotates the selected item(s). For multi-selection with global transform mode, rotates around the selection pivot. For local mode, each item rotates around its own pivot.
+- **Resize handles**: 8 resize handles (4 corners + 4 edge midpoints) drawn on the local lattice as small white squares with dark borders. Dragging a handle resizes the selected item(s). For multi-selection with global transform mode, scales all items proportionally from the selection pivot. For local mode, each item resizes independently.
+- **Pivot crosshair**: The pivot point is drawn as a small lemon crosshair marker on the selection.
+- **New public API**: `setTransformMode`, `setLatticeDisplay`, `setSelectionPivot`, `rotateSelected(degrees)`, `resizeSelected(scaleX, scaleY)`.
+- **New types exported**: `PivotPosition`, `TransformMode`, `LatticeDisplay`.
+- **Pointer interaction**: `onPointerDown` checks handles before item hit-testing; `onPointerMove` handles rotate/resize modes with hover cursor changes; `onPointerUp` emits rotate-end/resize-end events.
+- **Playground updated**: Property inspector now has a Transform section with lattice display 3-way toggle, transform mode 2-way toggle, 3×3 selection pivot grid (with active position highlighted), rotation slider + numeric input. Selection info card shows active pivot, transform mode, and item pivot coordinates. Output table has a pivot column.
+- VLM-verified: Board loads, items can be added, property inspector shows Lattice/Transform/Pivot sections, 17 aria-pressed buttons in inspector (includes 9 pivot positions + toggles).
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- Board now has full rotation/resize handle system on the local lattice (8 resize handles + 1 rotation handle).
+- Each item has a pivot position; transforms can be global (by selection area pivot) or local (by each item's own pivot).
+- 9 selection pivot positions available (center, 8 edge/corner positions).
+- Lattice display can be toggled: local only, global only, or both.
+- All new API methods and types exported.
+
+---
+Task ID: 27
+Agent: main
+Task: Fix directional resize, allow negative/flip, add min/max bounds
+
+Work Log:
+- **Directional resize (fixed edge)**: Completely rewrote `applyResize()` to use directional resizing — when you drag a handle, the **opposite edge stays fixed** while the dragged edge moves. This is how Figma/Excalidraw work. The previous implementation used scale-from-pivot which caused symmetric resizing (both edges moved toward/away from center). The new implementation:
+  - For "e" handle → west edge fixed, only width changes from the right
+  - For "w" handle → east edge fixed, only width changes from the left
+  - For "n" handle → south edge fixed, only height changes from the top
+  - For "s" handle → north edge fixed, only height changes from the bottom
+  - Corner handles (nw/ne/se/sw) fix the opposite corner
+  - Works in both global mode (selection lattice) and local mode (per-item lattice)
+- **Negative dimensions (flip)**: Removed the `Math.max(2, ...)` clamp that prevented widths/heights below 2px. Now dimensions can go negative — when a handle is dragged past the opposite edge, the width/height becomes negative, which flips the shape. The rendering uses `ctx.scale(flipX, flipY)` to visually flip the shape when dimensions are negative. The lattice methods (`getLocalLattice`, `getGlobalLattice`) use `Math.abs()` so bounds calculations are correct regardless of sign.
+- **Min/max bounds per item**: Added optional `minWidth`, `minHeight`, `maxWidth`, `maxHeight` to `BoardItem`. The `addItem` method accepts an optional `bounds` parameter. Added `applyItemBounds()` method that clamps the item's dimensions to its bounds after resize, adjusting the position so the fixed edge stays in place. Bounds preserve the flip sign (negative dimensions are clamped by magnitude, not sign).
+- **Rendering fix**: `renderItem()` now uses `Math.abs()` for shape geometry and applies `ctx.scale(flipX, flipY)` for negative dimensions, so flipped shapes render correctly.
+
+Stage Summary:
+- Resize is now directional (opposite edge fixed, like Figma/Excalidraw).
+- Items can be resized to negative values (flip effect) without breaking bounds.
+- Optional min/max width/height bounds per item, applied after resize with position adjustment.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 28
+Agent: main
+Task: Fix resize after rotation + make Board expand to fill live canvas
+
+Work Log:
+- **Fixed resize instability after rotation**: The root cause was that in local resize mode, `halfW = start.width / 2` used the raw (possibly negative) width, while `getLocalLattice()` returns `Math.abs(width)`. This mismatch between the local pointer coordinates (computed from the lattice using abs values) and the halfW/fixedLocalX (using raw values) caused the resize to jump when the item was rotated. Fixed by using `lattice.w / 2` (which is always abs) for all geometric calculations in the local resize mode. Also fixed the global resize mode to use `Math.abs(start.width)` when computing the new width, preserving the flip sign separately. The new center position is computed from the lattice center (not `start.x/y`) using `lattice.x + lattice.w / 2` for consistency.
+- **Made Board expand to fill live canvas**: The Board's scoped CSS had `.board-root { display: block; position: relative; }` which overrode the `absolute inset-0` positioning class applied by the React wrapper. Removed the `display: block` and `position: relative` from the scoped CSS so the React wrapper's Tailwind classes (`absolute inset-0`) take effect. Also changed the playground's live canvas container from `h-[520px]` (fixed height) to `flex-1` (expands to fill remaining space in the panel). The panel section uses `min-h-[700px] flex-1 flex-col` so the toolbar takes its natural height and the board canvas expands to fill the rest. Verified: board-root now renders at 534×395px (filling the available space) instead of 534×150px (fixed/cut off).
+
+Stage Summary:
+- Resize is now stable after rotation — all geometric calculations use absolute dimensions from the lattice, with flip signs preserved separately.
+- Board expands to fill the live canvas area (uses flex-1 instead of fixed height, and the scoped CSS no longer overrides positioning).
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 29
+Agent: main
+Task: Move resize handles to global lattice (AABB) instead of local lattice
+
+Work Log:
+- **Created `getSelectionAABB()` method**: Returns the global axis-aligned bounding box (AABB, rotation=0) for the selection — for single items it's the AABB of the rotated rect, for multi-selection it's the combined AABB. This is separate from `getSelectionLattice()` which returns the local lattice (rotated bounding box) for single items.
+- **Moved resize handles to the global AABB**: 
+  - `hitTestHandles()`: Resize handles now hit-test against the global AABB (rotation=0). The rotation handle still hit-tests against the local lattice (rotated bounding box).
+  - `startResizeMode()`: Snapshots the global AABB as `startSelectionLattice` instead of the local lattice.
+  - `applyResize()`: Completely rewritten to use the AABB directly — since the AABB has rotation=0, board coordinates = local coordinates. No `boardToLatticeLocal` conversion needed, no cos/sin transforms. The resize math is now: `newW = bx - fixedX` (for east handle), `fixedX` is the left edge of the AABB. Scale factors `sx = newW / aabb.w` are applied to each item's position and size relative to the fixed edge. This is stable regardless of item rotation.
+  - `renderSelectionOverlay()`: Resize handles are drawn on the global AABB, rotation handle on the local lattice.
+- **Why this is more stable**: The previous implementation converted the pointer to the local lattice's rotated frame using `boardToLatticeLocal`, then computed widths/positions in that rotated frame. Any rounding errors in the rotation conversion would compound during drag, causing jitter. With the AABB (rotation=0), the pointer position is used directly — no conversion, no compounding errors.
+
+Stage Summary:
+- Resize handles are now on the global lattice (AABB, axis-aligned) — no rotation conversion needed, so resize is stable at any rotation angle.
+- Rotation handle stays on the local lattice (rotated bounding box) — rotation is about the item's own axis.
+- The resize math is dramatically simpler: just `newW = pointer.x - fixedEdge.x` since the AABB has no rotation.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 30
+Agent: main
+Task: Fix resize displacement after rotation — compute position from new AABB
+
+Work Log:
+- **Root cause identified**: When an item is rotated, its AABB width = `|w·cos(θ)| + |h·sin(θ)|` — this is NOT proportional to the item's width `w` alone. The previous code scaled the item's position by the AABB scale factor `sx` (from `newW / aabb.w`) and also scaled the item's width by `sx`. But since the AABB width depends on both `w` and `h` (and `θ`), scaling `w` by `sx` doesn't produce an item whose new AABB has width `newW`. The mismatch between the expected AABB and the actual AABB of the resized item causes the item to drift on each frame of the drag.
+- **Fix**: Rewrote the per-item resize math in `applyResize()`:
+  1. Compute the new item width/height by scaling the start values by `sx`/`sy` (same as before).
+  2. Compute the **new AABB** for the item using the new width/height and the item's rotation: `newAabbW = newW·|cos(θ)| + newH·|sin(θ)|`.
+  3. Compute the **start AABB** for the item similarly.
+  4. Compute the item's start AABB left edge offset from the fixed selection edge: `startOffset = startItemLeft - fixedBoardX`.
+  5. Scale this offset by `sx`: `newOffset = startOffset * sx`.
+  6. Position the item center at: `item.x = fixedBoardX + newOffset + newAabbW / 2`.
+  
+  This ensures the item's AABB edge maintains its proportional position relative to the fixed selection edge, and the item center is computed from the NEW AABB (not the old position scaled). The fixed edge stays truly fixed, and the item doesn't drift.
+
+Stage Summary:
+- Resize no longer displaces rotated items. The item's position is computed from its new AABB dimensions and the proportional offset from the fixed edge, not by blindly scaling the old position.
+- `bun run lint` — 0 errors, 0 warnings.

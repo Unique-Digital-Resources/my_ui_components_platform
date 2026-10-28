@@ -1,0 +1,1141 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  Circle,
+     6→  Square,
+     7→  Triangle,
+     8→  Trash2,
+     9→  Maximize2,
+    10→  Scan,
+    11→  AlignStartVertical,
+    12→  AlignCenterHorizontal,
+    13→  AlignEndVertical,
+    14→  AlignStartHorizontal,
+    15→  AlignCenterVertical,
+    16→  AlignEndHorizontal,
+    17→  AlignHorizontalDistributeCenter,
+    18→  AlignVerticalDistributeCenter,
+    19→  RotateCcw,
+    20→  Keyboard,
+    21→} from "lucide-react";
+    22→import { getComponent } from "@/lib/platform/content";
+    23→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+    24→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+    25→import { BoardReact, type BoardItem, type BoardView, type GridMode } from "@/components/board/board-react";
+    26→import type { AlignType, DistributeType, ShapeType } from "@/lib/components/board";
+    27→import {
+    28→  registerBuiltinCommands,
+    29→  commandRegistry,
+    30→  ShortcutHandler,
+    31→  formatShortcut,
+    32→} from "@/lib/commands";
+    33→import { Slider } from "@/components/ui/slider";
+    34→import { Switch } from "@/components/ui/switch";
+    35→import { cn } from "@/lib/utils";
+    36→import { toast } from "sonner";
+    37→
+    38→// ---- Constants ----------------------------------------------------------
+    39→
+    40→/** Shape color palette — none are indigo/blue. */
+    41→const SHAPE_COLORS = ["#D9FF66", "#B9A0FF", "#FF858B", "#8FE3A5", "#FFD36B"];
+    42→const DEFAULT_SHAPE_SIZE = 90;
+    43→
+    44→interface PlaygroundState {
+    45→  gridMode: GridMode;
+    46→  gridSize: number;
+    47→  subGridDivisions: number;
+    48→  snapToGrid: boolean;
+    49→  snapToItems: boolean;
+    50→}
+    51→
+    52→const DEFAULTS: PlaygroundState = {
+    53→  gridMode: "dots",
+    54→  gridSize: 40,
+    55→  subGridDivisions: 4,
+    56→  snapToGrid: false,
+    57→  snapToItems: false,
+    58→};
+    59→
+    60→/** The Board command IDs that the playground wires up. */
+    61→const BOARD_COMMAND_IDS = [
+    62→  "board.align-left",
+    63→  "board.align-center-h",
+    64→  "board.align-right",
+    65→  "board.align-top",
+    66→  "board.align-center-v",
+    67→  "board.align-bottom",
+    68→  "board.distribute-h",
+    69→  "board.distribute-v",
+    70→  "board.fit-all",
+    71→  "board.fit-selection",
+    72→  "board.add-circle",
+    73→  "board.add-rect",
+    74→  "board.add-triangle",
+    75→  "board.delete-selected",
+    76→] as const;
+    77→
+    78→const ALIGN_BUTTONS: { type: AlignType; label: string; icon: typeof AlignStartVertical; cmdId: string }[] = [
+    79→  { type: "left", label: "Align Left", icon: AlignStartVertical, cmdId: "board.align-left" },
+    80→  { type: "center-h", label: "Align Center Horizontal", icon: AlignCenterHorizontal, cmdId: "board.align-center-h" },
+    81→  { type: "right", label: "Align Right", icon: AlignEndVertical, cmdId: "board.align-right" },
+    82→  { type: "top", label: "Align Top", icon: AlignStartHorizontal, cmdId: "board.align-top" },
+    83→  { type: "center-v", label: "Align Middle Vertical", icon: AlignCenterVertical, cmdId: "board.align-center-v" },
+    84→  { type: "bottom", label: "Align Bottom", icon: AlignEndHorizontal, cmdId: "board.align-bottom" },
+    85→];
+    86→
+    87→const DISTRIBUTE_BUTTONS: { type: DistributeType; label: string; icon: typeof AlignHorizontalDistributeCenter; cmdId: string }[] = [
+    88→  { type: "horizontal", label: "Distribute Horizontally", icon: AlignHorizontalDistributeCenter, cmdId: "board.distribute-h" },
+    89→  { type: "vertical", label: "Distribute Vertically", icon: AlignVerticalDistributeCenter, cmdId: "board.distribute-v" },
+    90→];
+    91→
+    92→const GRID_MODE_OPTIONS: { value: GridMode; label: string }[] = [
+    93→  { value: "none", label: "None" },
+    94→  { value: "dots", label: "Dots" },
+    95→  { value: "lines", label: "Lines" },
+    96→];
+    97→
+    98→// ---- Playground ---------------------------------------------------------
+    99→
+   100→export function BoardPlayground() {
+   101→  const meta = getComponent("board")!;
+   102→  const [state, setState] = React.useState<PlaygroundState>(DEFAULTS);
+   103→  const [items, setItems] = React.useState<BoardItem[]>([]);
+   104→  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+   105→  const [view, setView] = React.useState<BoardView>({ panX: 0, panY: 0, zoom: 1 });
+   106→  const [activeTab, setActiveTab] = React.useState<"javascript" | "html" | "css" | "api">("javascript");
+   107→  const [registryVersion, setRegistryVersion] = React.useState(0);
+   108→
+   109→  const boardRef = React.useRef<import("@/lib/components/board").Board | null>(null);
+   110→  const liveAreaRef = React.useRef<HTMLDivElement>(null);
+   111→  const handlerRef = React.useRef<ShortcutHandler | null>(null);
+   112→
+   113→  // Register the built-in commands on mount.
+   114→  React.useEffect(() => {
+   115→    registerBuiltinCommands();
+   116→    setRegistryVersion((v) => v + 1);
+   117→  }, []);
+   118→
+   119→  // Seed a few starter items once the board is created so the canvas isn't empty.
+   120→  React.useEffect(() => {
+   121→    const board = boardRef.current;
+   122→    if (!board) return;
+   123→    // Only seed if there are no items yet.
+   124→    if (board.getItems().length > 0) return;
+   125→    board.addItem("rect", -120, -40, 120, 90, 0, "#D9FF66");
+   126→    board.addItem("circle", 60, -60, 100, 100, 0, "#B9A0FF");
+   127→    board.addItem("triangle", -40, 80, 110, 100, 0, "#FF858B");
+   128→    setItems(board.getItems());
+   129→    // Intentionally empty deps — runs once after the board mounts.
+   130→  }, []);
+   131→
+   132→  // ---- Action handlers ----
+   133→  //
+   134→  // All actions read from refs (boardRef, liveAreaRef) and call stable
+   135→  // setState setters, so their behavior is independent of render scope.
+   136→  // We store the latest versions in an actionsRef (updated via a render-
+   137→  // scoped effect to satisfy the React Compiler's "no ref writes during
+   138→  // render" rule) so the ShortcutHandler — created once on mount — always
+   139→  // dispatches to the freshest implementation.
+   140→
+   141→  const actionsRef = React.useRef<{
+   142→    addShape: (type: ShapeType) => void;
+   143→    deleteSelected: () => void;
+   144→    fitAll: () => void;
+   145→    fitSelection: () => void;
+   146→    align: (type: AlignType) => void;
+   147→    distribute: (type: DistributeType) => void;
+   148→  }>({
+   149→    addShape: () => {},
+   150→    deleteSelected: () => {},
+   151→    fitAll: () => {},
+   152→    fitSelection: () => {},
+   153→    align: () => {},
+   154→    distribute: () => {},
+   155→  });
+   156→
+   157→  const addShape = (type: ShapeType) => actionsRef.current.addShape(type);
+   158→  const deleteSelected = () => actionsRef.current.deleteSelected();
+   159→  const fitAll = () => actionsRef.current.fitAll();
+   160→  const fitSelection = () => actionsRef.current.fitSelection();
+   161→  const align = (type: AlignType) => actionsRef.current.align(type);
+   162→  const distribute = (type: DistributeType) => actionsRef.current.distribute(type);
+   163→
+   164→  // Keep the actions ref fresh after every render.
+   165→  React.useEffect(() => {
+   166→    actionsRef.current.addShape = (type: ShapeType) => {
+   167→      const board = boardRef.current;
+   168→      const liveArea = liveAreaRef.current;
+   169→      if (!board) return;
+   170→      let cx = 0;
+   171→      let cy = 0;
+   172→      if (liveArea) {
+   173→        const v = board.getView();
+   174→        const w = liveArea.clientWidth;
+   175→        const h = liveArea.clientHeight;
+   176→        cx = (w / 2 - v.panX) / v.zoom;
+   177→        cy = (h / 2 - v.panY) / v.zoom;
+   178→      }
+   179→      // Random offset near the center.
+   180→      const offX = (Math.random() - 0.5) * 140;
+   181→      const offY = (Math.random() - 0.5) * 140;
+   182→      const color = SHAPE_COLORS[Math.floor(Math.random() * SHAPE_COLORS.length)];
+   183→      const id = board.addItem(type, cx + offX, cy + offY, DEFAULT_SHAPE_SIZE, DEFAULT_SHAPE_SIZE, 0, color);
+   184→      board.selectItem(id, false);
+   185→      setItems(board.getItems());
+   186→      setSelectedIds(board.getSelectedIds());
+   187→    };
+   188→    actionsRef.current.deleteSelected = () => {
+   189→      const board = boardRef.current;
+   190→      if (!board) return;
+   191→      const ids = board.getSelectedIds();
+   192→      if (ids.length === 0) return;
+   193→      for (const id of ids) board.removeItem(id);
+   194→      setItems(board.getItems());
+   195→      setSelectedIds(board.getSelectedIds());
+   196→    };
+   197→    actionsRef.current.fitAll = () => {
+   198→      boardRef.current?.zoomToFit();
+   199→    };
+   200→    actionsRef.current.fitSelection = () => {
+   201→      boardRef.current?.zoomToFitSelection();
+   202→    };
+   203→    actionsRef.current.align = (type: AlignType) => {
+   204→      const board = boardRef.current;
+   205→      if (!board) return;
+   206→      if (board.getSelectedIds().length < 2) {
+   207→        toast.message("Select 2+ items to align");
+   208→        return;
+   209→      }
+   210→      board.align(type);
+   211→      setItems(board.getItems());
+   212→    };
+   213→    actionsRef.current.distribute = (type: DistributeType) => {
+   214→      const board = boardRef.current;
+   215→      if (!board) return;
+   216→      if (board.getSelectedIds().length < 3) {
+   217→        toast.message("Select 3+ items to distribute");
+   218→        return;
+   219→      }
+   220→      board.distribute(type);
+   221→      setItems(board.getItems());
+   222→    };
+   223→  });
+   224→
+   225→  // ---- Shortcut handler (scoped to board command IDs) ----
+   226→
+   227→  React.useEffect(() => {
+   228→    const handler = new ShortcutHandler([...BOARD_COMMAND_IDS]);
+   229→    handler.on("board.add-circle", () => actionsRef.current.addShape("circle"));
+   230→    handler.on("board.add-rect", () => actionsRef.current.addShape("rect"));
+   231→    handler.on("board.add-triangle", () => actionsRef.current.addShape("triangle"));
+   232→    handler.on("board.delete-selected", () => actionsRef.current.deleteSelected());
+   233→    handler.on("board.fit-all", () => actionsRef.current.fitAll());
+   234→    handler.on("board.fit-selection", () => actionsRef.current.fitSelection());
+   235→    handler.on("board.align-left", () => actionsRef.current.align("left"));
+   236→    handler.on("board.align-center-h", () => actionsRef.current.align("center-h"));
+   237→    handler.on("board.align-right", () => actionsRef.current.align("right"));
+   238→    handler.on("board.align-top", () => actionsRef.current.align("top"));
+   239→    handler.on("board.align-center-v", () => actionsRef.current.align("center-v"));
+   240→    handler.on("board.align-bottom", () => actionsRef.current.align("bottom"));
+   241→    handler.on("board.distribute-h", () => actionsRef.current.distribute("horizontal"));
+   242→    handler.on("board.distribute-v", () => actionsRef.current.distribute("vertical"));
+   243→    handler.attach();
+   244→    handlerRef.current = handler;
+   245→    return () => {
+   246→      handler.destroy();
+   247→      handlerRef.current = null;
+   248→    };
+   249→    // Intentionally empty deps — the handler reads through actionsRef so
+   250→    // it always dispatches to the latest implementation without re-attaching.
+   251→  }, []);
+   252→
+   253→  // ---- State updaters ----
+   254→
+   255→  const update = React.useCallback(
+   256→    <K extends keyof PlaygroundState>(key: K, value: PlaygroundState[K]) => {
+   257→      setState((s) => ({ ...s, [key]: value }));
+   258→    },
+   259→    [],
+   260→  );
+   261→
+   262→  const reset = () => {
+   263→    setState(DEFAULTS);
+   264→    const board = boardRef.current;
+   265→    if (board) {
+   266→      // Remove all items, then re-seed.
+   267→      for (const it of board.getItems()) board.removeItem(it.id);
+   268→      board.addItem("rect", -120, -40, 120, 90, 0, "#D9FF66");
+   269→      board.addItem("circle", 60, -60, 100, 100, 0, "#B9A0FF");
+   270→      board.addItem("triangle", -40, 80, 110, 100, 0, "#FF858B");
+   271→      board.clearSelection();
+   272→      board.setView(0, 0, 1);
+   273→      setItems(board.getItems());
+   274→      setSelectedIds([]);
+   275→      setView(board.getView());
+   276→    }
+   277→    toast.success("Reset to defaults");
+   278→  };
+   279→
+   280→  // ---- Code generation ----
+   281→
+   282→  const jsCode = React.useMemo(() => generateJsCode(state), [state]);
+   283→  const htmlCode = React.useMemo(() => generateHtmlCode(), []);
+   284→  const cssCode = React.useMemo(() => generateCssCode(), []);
+   285→  const apiCode = React.useMemo(() => generateApiCode(), []);
+   286→
+   287→  const boardCommands = React.useMemo(
+   288→    () => commandRegistry.byIds([...BOARD_COMMAND_IDS]),
+   289→    [registryVersion],
+   290→  );
+   291→
+   292→  // ---- Render ----
+   293→
+   294→  return (
+   295→    <div>
+   296→      {/* Page header */}
+   297→      <div className="border-b border-border bg-background">
+   298→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   299→          <Breadcrumbs />
+   300→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   301→            <div>
+   302→              <PageOverline>Components / Layout</PageOverline>
+   303→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+   304→                {meta.name}
+   305→              </h1>
+   306→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">
+   307→                {meta.longDescription}
+   308→              </p>
+   309→            </div>
+   310→            <div className="flex flex-wrap items-center gap-2">
+   311→              {meta.tags.map((tag) => (
+   312→                <span
+   313→                  key={tag}
+   314→                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground"
+   315→                >
+   316→                  {tag}
+   317→                </span>
+   318→              ))}
+   319→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   320→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />
+   321→                {meta.status}
+   322→              </span>
+   323→            </div>
+   324→          </div>
+   325→        </div>
+   326→      </div>
+   327→
+   328→      {/* Playground workspace */}
+   329→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   330→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
+   331→          {/* Live canvas panel */}
+   332→          <section aria-label="Board live canvas" className="panel relative flex min-h-[640px] flex-col">
+   333→            {/* Toolbar */}
+   334→            <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5">
+   335→              <div className="flex flex-wrap items-center gap-1.5">
+   336→                <ToolbarButton onClick={() => addShape("circle")} title="Add Circle (1)" variant="primary">
+   337→                  <Circle className="h-3.5 w-3.5" />
+   338→                  <span>Circle</span>
+   339→                </ToolbarButton>
+   340→                <ToolbarButton onClick={() => addShape("rect")} title="Add Rectangle (2)" variant="primary">
+   341→                  <Square className="h-3.5 w-3.5" />
+   342→                  <span>Rect</span>
+   343→                </ToolbarButton>
+   344→                <ToolbarButton onClick={() => addShape("triangle")} title="Add Triangle (3)" variant="primary">
+   345→                  <Triangle className="h-3.5 w-3.5" />
+   346→                  <span>Triangle</span>
+   347→                </ToolbarButton>
+   348→                <ToolbarDivider />
+   349→                <ToolbarButton onClick={deleteSelected} title="Delete Selected (Delete)" variant="danger">
+   350→                  <Trash2 className="h-3.5 w-3.5" />
+   351→                  <span>Delete</span>
+   352→                </ToolbarButton>
+   353→                <ToolbarDivider />
+   354→                <ToolbarButton onClick={fitAll} title="Zoom to Fit All (Cmd+0)">
+   355→                  <Maximize2 className="h-3.5 w-3.5" />
+   356→                  <span>Fit All</span>
+   357→                </ToolbarButton>
+   358→                <ToolbarButton onClick={fitSelection} title="Zoom to Fit Selection (Shift+Cmd+0)">
+   359→                  <Scan className="h-3.5 w-3.5" />
+   360→                  <span>Fit Selection</span>
+   361→                </ToolbarButton>
+   362→                <div className="ml-auto flex items-center gap-1">
+   363→                  <ToolbarButton onClick={reset} title="Reset to defaults">
+   364→                    <RotateCcw className="h-3.5 w-3.5" />
+   365→                    <span>Reset</span>
+   366→                  </ToolbarButton>
+   367→                </div>
+   368→              </div>
+   369→              {/* Align + Distribute row */}
+   370→              <div className="flex flex-wrap items-center gap-1.5">
+   371→                <span className="eyebrow mr-1">Align</span>
+   372→                {ALIGN_BUTTONS.map((b) => {
+   373→                  const Icon = b.icon;
+   374→                  return (
+   375→                    <IconButton
+   376→                      key={b.type}
+   377→                      onClick={() => align(b.type)}
+   378→                      title={`${b.label} (${formatShortcut(commandRegistry.get(b.cmdId)?.shortcut ?? { keys: "" })})`}
+   379→                      aria-label={b.label}
+   380→                    >
+   381→                      <Icon className="h-3.5 w-3.5" />
+   382→                    </IconButton>
+   383→                  );
+   384→                })}
+   385→                <ToolbarDivider />
+   386→                <span className="eyebrow mr-1">Distribute</span>
+   387→                {DISTRIBUTE_BUTTONS.map((b) => {
+   388→                  const Icon = b.icon;
+   389→                  return (
+   390→                    <IconButton
+   391→                      key={b.type}
+   392→                      onClick={() => distribute(b.type)}
+   393→                      title={`${b.label} (${formatShortcut(commandRegistry.get(b.cmdId)?.shortcut ?? { keys: "" })})`}
+   394→                      aria-label={b.label}
+   395→                    >
+   396→                      <Icon className="h-3.5 w-3.5" />
+   397→                    </IconButton>
+   398→                  );
+   399→                })}
+   400→              </div>
+   401→            </div>
+   402→
+   403→            {/* Live Board canvas — fixed height is required */}
+   404→            <div ref={liveAreaRef} className="relative h-[520px] w-full">
+   405→              <BoardReact
+   406→                className="absolute inset-0"
+   407→                gridMode={state.gridMode}
+   408→                gridSize={state.gridSize}
+   409→                subGridDivisions={state.subGridDivisions}
+   410→                snapToGrid={state.snapToGrid}
+   411→                snapToItems={state.snapToItems}
+   412→                onSelection={(e) => setSelectedIds(e.ids)}
+   413→                onChange={() => setItems(boardRef.current?.getItems() ?? [])}
+   414→                onView={(v) => setView(v)}
+   415→                instanceRef={boardRef}
+   416→              />
+   417→              <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-background/70 px-3 py-1 text-[10px] text-muted-foreground backdrop-blur">
+   418→                Click to select. Shift-click for multi. Drag empty space for rubber-band. Space-drag to pan. Cmd+scroll to zoom.
+   419→              </div>
+   420→            </div>
+   421→
+   422→            {/* Output — item list */}
+   423→            <div className="border-t border-border p-4">
+   424→              <div className="mb-3 flex items-center justify-between">
+   425→                <span className="eyebrow">Output — items</span>
+   426→                <span className="font-mono text-[11px] text-muted-foreground">
+   427→                  {items.length} item{items.length === 1 ? "" : "s"} · {selectedIds.length} selected
+   428→                </span>
+   429→              </div>
+   430→              {items.length === 0 ? (
+   431→                <p className="text-[12px] text-muted-foreground/70">
+   432→                  No items on the board. Click <span className="text-brand-lemon">Circle</span>,{" "}
+   433→                  <span className="text-brand-lemon">Rect</span>, or{" "}
+   434→                  <span className="text-brand-lemon">Triangle</span> above, or press 1 / 2 / 3.
+   435→                </p>
+   436→              ) : (
+   437→                <div className="max-h-56 overflow-y-auto rounded-md border border-border">
+   438→                  <table className="w-full text-left text-[12px]">
+   439→                    <thead className="sticky top-0 bg-muted/40 backdrop-blur">
+   440→                      <tr>
+   441→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">id</th>
+   442→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">type</th>
+   443→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">x, y</th>
+   444→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">w × h</th>
+   445→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">rot</th>
+   446→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">color</th>
+   447→                      </tr>
+   448→                    </thead>
+   449→                    <tbody className="divide-y divide-border">
+   450→                      {items.map((item) => {
+   451→                        const isSel = selectedIds.includes(item.id);
+   452→                        return (
+   453→                          <tr
+   454→                            key={item.id}
+   455→                            className={cn(
+   456→                              "transition-colors",
+   457→                              isSel ? "bg-brand-lemon/10" : "hover:bg-muted/20",
+   458→                            )}
+   459→                          >
+   460→                            <td className="px-2.5 py-1.5 font-mono text-brand-lemon">{item.id}</td>
+   461→                            <td className="px-2.5 py-1.5 text-foreground">{item.type}</td>
+   462→                            <td className="px-2.5 py-1.5 font-mono text-muted-foreground">
+   463→                              {Math.round(item.x)}, {Math.round(item.y)}
+   464→                            </td>
+   465→                            <td className="px-2.5 py-1.5 font-mono text-muted-foreground">
+   466→                              {Math.round(item.width)} × {Math.round(item.height)}
+   467→                            </td>
+   468→                            <td className="px-2.5 py-1.5 font-mono text-muted-foreground">
+   469→                              {Math.round(item.rotation)}°
+   470→                            </td>
+   471→                            <td className="px-2.5 py-1.5">
+   472→                              <span className="inline-flex items-center gap-1.5">
+   473→                                <span
+   474→                                  className="inline-block h-3 w-3 rounded-sm border border-border"
+   475→                                  style={{ background: item.color }}
+   476→                                  aria-hidden="true"
+   477→                                />
+   478→                                <span className="font-mono text-[10px] text-muted-foreground">{item.color}</span>
+   479→                              </span>
+   480→                            </td>
+   481→                          </tr>
+   482→                        );
+   483→                      })}
+   484→                    </tbody>
+   485→                  </table>
+   486→                </div>
+   487→              )}
+   488→            </div>
+   489→          </section>
+   490→
+   491→          {/* Property inspector */}
+   492→          <aside aria-label="Property inspector" className="panel flex flex-col">
+   493→            <div className="border-b border-border px-4 py-2.5">
+   494→              <span className="eyebrow">Properties</span>
+   495→            </div>
+   496→            <div className="flex max-h-[640px] flex-col gap-6 overflow-y-auto p-4">
+   497→              {/* Grid mode segmented control */}
+   498→              <div>
+   499→                <label className="mb-1.5 block text-[12px] font-medium text-foreground">Grid mode</label>
+   500→                <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   501→                  {GRID_MODE_OPTIONS.map((o) => {
+   502→                    const active = state.gridMode === o.value;
+   503→                    return (
+   504→                      <button
+   505→                        key={o.value}
+   506→                        type="button"
+   507→                        onClick={() => update("gridMode", o.value)}
+   508→                        aria-pressed={active}
+   509→                        className={cn(
+   510→                          "rounded px-1 py-1.5 text-[11px] font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   511→                          active
+   512→                            ? "bg-brand-purple-strong text-foreground"
+   513→                            : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   514→                        )}
+   515→                      >
+   516→                        {o.label}
+   517→                      </button>
+   518→                    );
+   519→                  })}
+   520→                </div>
+   521→              </div>
+   522→
+   523→              {/* Grid size slider */}
+   524→              <div>
+   525→                <div className="mb-1.5 flex items-center justify-between">
+   526→                  <label className="text-[12px] font-medium text-foreground">Grid size</label>
+   527→                  <span className="font-mono text-[11px] text-muted-foreground">{state.gridSize}px</span>
+   528→                </div>
+   529→                <Slider
+   530→                  value={[state.gridSize]}
+   531→                  min={10}
+   532→                  max={100}
+   533→                  step={2}
+   534→                  onValueChange={(v) => update("gridSize", v[0] ?? state.gridSize)}
+   535→                />
+   536→                <p className="mt-1 text-[11px] text-muted-foreground/70">
+   537→                  Base grid size in board units. Sub-cells are placed every gridSize / subGridDivisions units.
+   538→                </p>
+   539→              </div>
+   540→
+   541→              {/* Sub-grid divisions slider */}
+   542→              <div>
+   543→                <div className="mb-1.5 flex items-center justify-between">
+   544→                  <label className="text-[12px] font-medium text-foreground">Sub-grid divisions</label>
+   545→                  <span className="font-mono text-[11px] text-muted-foreground">{state.subGridDivisions}</span>
+   546→                </div>
+   547→                <Slider
+   548→                  value={[state.subGridDivisions]}
+   549→                  min={1}
+   550→                  max={8}
+   551→                  step={1}
+   552→                  onValueChange={(v) => update("subGridDivisions", v[0] ?? state.subGridDivisions)}
+   553→                />
+   554→                <p className="mt-1 text-[11px] text-muted-foreground/70">
+   555→                  Number of sub-cells per main grid cell.
+   556→                </p>
+   557→              </div>
+   558→
+   559→              {/* Snap toggles */}
+   560→              <div className="space-y-3">
+   561→                <ToggleRow
+   562→                  label="Snap to grid"
+   563→                  description="Dragged items snap to the nearest grid intersection."
+   564→                  checked={state.snapToGrid}
+   565→                  onCheckedChange={(v) => update("snapToGrid", v)}
+   566→                />
+   567→                <ToggleRow
+   568→                  label="Snap to items"
+   569→                  description="Dragged items snap to other items' edges and centers (within 8px)."
+   570→                  checked={state.snapToItems}
+   571→                  onCheckedChange={(v) => update("snapToItems", v)}
+   572→                />
+   573→              </div>
+   574→
+   575→              <div className="h-px bg-border" />
+   576→
+   577→              {/* Selection info */}
+   578→              <div>
+   579→                <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   580→                  Selection
+   581→                </h3>
+   582→                <div className="rounded-md border border-border bg-muted/10 p-3">
+   583→                  <div className="flex items-baseline justify-between">
+   584→                    <span className="text-[11px] text-muted-foreground">Selected items</span>
+   585→                    <span className="font-mono text-2xl font-semibold text-brand-lemon">
+   586→                      {selectedIds.length}
+   587→                    </span>
+   588→                  </div>
+   589→                  {selectedIds.length > 0 && (
+   590→                    <div className="mt-2 flex flex-wrap gap-1">
+   591→                      {selectedIds.map((id) => (
+   592→                        <CopyableValue key={id} value={id} className="h-7 px-2 text-[11px]" />
+   593→                      ))}
+   594→                    </div>
+   595→                  )}
+   596→                </div>
+   597→              </div>
+   598→
+   599→              {/* View info */}
+   600→              <div>
+   601→                <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   602→                  View
+   603→                </h3>
+   604→                <div className="grid grid-cols-3 gap-2 rounded-md border border-border bg-muted/10 p-3 text-center">
+   605→                  <ViewStat label="zoom" value={view.zoom.toFixed(2) + "×"} />
+   606→                  <ViewStat label="panX" value={Math.round(view.panX).toString()} />
+   607→                  <ViewStat label="panY" value={Math.round(view.panY).toString()} />
+   608→                </div>
+   609→                <p className="mt-1 text-[11px] text-muted-foreground/70">
+   610→                  Updates live as you pan (space-drag) and zoom (Cmd+scroll).
+   611→                </p>
+   612→              </div>
+   613→
+   614→              {/* Keyboard shortcuts help */}
+   615→              <div>
+   616→                <h3 className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   617→                  <Keyboard className="h-3.5 w-3.5" />
+   618→                  Shortcuts
+   619→                </h3>
+   620→                <ul className="space-y-1 rounded-md border border-border bg-muted/10 p-2">
+   621→                  {boardCommands.map((cmd) => (
+   622→                    <li
+   623→                      key={cmd.id}
+   624→                      className="flex items-center justify-between gap-2 px-1 py-0.5 text-[11px]"
+   625→                    >
+   626→                      <span className="text-muted-foreground">{cmd.label}</span>
+   627→                      {cmd.shortcut && (
+   628→                        <kbd className="inline-flex items-center gap-0.5 rounded border border-brand-lemon/30 bg-brand-lemon/10 px-1 py-0.5 font-mono text-[10px] text-brand-lemon">
+   629→                          {formatShortcut(cmd.shortcut)}
+   630→                        </kbd>
+   631→                      )}
+   632→                    </li>
+   633→                  ))}
+   634→                </ul>
+   635→              </div>
+   636→            </div>
+   637→          </aside>
+   638→        </div>
+   639→
+   640→        {/* Code panel */}
+   641→        <section className="panel mt-6 overflow-hidden">
+   642→          <div className="flex items-center justify-between border-b border-border px-2">
+   643→            <div className="flex">
+   644→              {([["javascript", "JavaScript"], ["html", "HTML"], ["css", "CSS"], ["api", "API"]] as const).map(([key, label]) => (
+   645→                <button
+   646→                  key={key}
+   647→                  type="button"
+   648→                  onClick={() => setActiveTab(key)}
+   649→                  className={cn(
+   650→                    "relative h-9 px-3 text-[12px] font-medium transition-colors focus-visible:outline-none",
+   651→                    activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+   652→                  )}
+   653→                >
+   654→                  {label}
+   655→                  {activeTab === key && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   656→                </button>
+   657→              ))}
+   658→            </div>
+   659→            <span className="pr-2 text-[11px] font-mono text-muted-foreground/70">
+   660→              Synchronized with live configuration
+   661→            </span>
+   662→          </div>
+   663→          <div className="p-4">
+   664→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   665→            {activeTab === "html" && <CodeBlock code={htmlCode} language="html" filename="index.html" />}
+   666→            {activeTab === "css" && <CodeBlock code={cssCode} language="css" filename="styles.css" />}
+   667→            {activeTab === "api" && <CodeBlock code={apiCode} language="typescript" filename="api.ts" />}
+   668→          </div>
+   669→        </section>
+   670→
+   671→        {/* Documentation */}
+   672→        <ComponentDocumentation />
+   673→      </div>
+   674→    </div>
+   675→  );
+   676→}
+   677→
+   678→// ---- Sub-components -----------------------------------------------------
+   679→
+   680→function ToolbarButton({
+   681→  children,
+   682→  onClick,
+   683→  title,
+   684→  variant = "default",
+   685→}: {
+   686→  children: React.ReactNode;
+   687→  onClick: () => void;
+   688→  title?: string;
+   689→  variant?: "default" | "primary" | "danger";
+   690→}) {
+   691→  return (
+   692→    <button
+   693→      type="button"
+   694→      onClick={onClick}
+   695→      title={title}
+   696→      className={cn(
+   697→        "inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   698→        variant === "primary" &&
+   699→          "border-brand-lemon/40 bg-brand-lemon/10 text-brand-lemon hover:bg-brand-lemon/20",
+   700→        variant === "danger" &&
+   701→          "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20",
+   702→        variant === "default" &&
+   703→          "border-border bg-card text-foreground hover:border-brand-lemon/40 hover:text-brand-lemon",
+   704→      )}
+   705→    >
+   706→      {children}
+   707→    </button>
+   708→  );
+   709→}
+   710→
+   711→function IconButton({
+   712→  children,
+   713→  onClick,
+   714→  title,
+   715→  "aria-label": ariaLabel,
+   716→}: {
+   717→  children: React.ReactNode;
+   718→  onClick: () => void;
+   719→  title?: string;
+   720→  "aria-label"?: string;
+   721→}) {
+   722→  return (
+   723→    <button
+   724→      type="button"
+   725→      onClick={onClick}
+   726→      title={title}
+   727→      aria-label={ariaLabel}
+   728→      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-brand-lemon/40 hover:text-brand-lemon focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   729→    >
+   730→      {children}
+   731→    </button>
+   732→  );
+   733→}
+   734→
+   735→function ToolbarDivider() {
+   736→  return <span className="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />;
+   737→}
+   738→
+   739→function ToggleRow({
+   740→  label,
+   741→  description,
+   742→  checked,
+   743→  onCheckedChange,
+   744→}: {
+   745→  label: string;
+   746→  description: string;
+   747→  checked: boolean;
+   748→  onCheckedChange: (v: boolean) => void;
+   749→}) {
+   750→  return (
+   751→    <div className="flex items-start justify-between gap-3">
+   752→      <div className="min-w-0">
+   753→        <p className="text-[12px] font-medium text-foreground">{label}</p>
+   754→        <p className="mt-0.5 text-[11px] text-muted-foreground/70">{description}</p>
+   755→      </div>
+   756→      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
+   757→    </div>
+   758→  );
+   759→}
+   760→
+   761→function ViewStat({ label, value }: { label: string; value: string }) {
+   762→  return (
+   763→    <div className="flex flex-col items-center">
+   764→      <span className="font-mono text-[10px] uppercase text-muted-foreground">{label}</span>
+   765→      <span className="font-mono text-[13px] text-foreground">{value}</span>
+   766→    </div>
+   767→  );
+   768→}
+   769→
+   770→// ---- Documentation ------------------------------------------------------
+   771→
+   772→function ComponentDocumentation() {
+   773→  const meta = getComponent("board")!;
+   774→  const boardCommands = commandRegistry.byIds([...BOARD_COMMAND_IDS]);
+   775→
+   776→  return (
+   777→    <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_200px]">
+   778→      <div className="min-w-0 max-w-[760px]">
+   779→        <h2 className="text-2xl font-semibold tracking-tight">Documentation</h2>
+   780→        <p className="mt-2 text-sm text-muted-foreground">
+   781→          The Board is a framework-independent vanilla JavaScript component — no React or Next.js required.
+   782→          It renders an infinite canvas with pan/zoom, a configurable grid, multi-select, and alignment
+   783→          commands.
+   784→        </p>
+   785→
+   786→        <section className="mt-8">
+   787→          <h3 className="text-lg font-semibold">Overview</h3>
+   788→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   789→            {meta.longDescription} The Board renders to a single <code className="font-mono text-brand-lemon">&lt;canvas&gt;</code>{" "}
+   790→            element inside the container you pass to the constructor. Pan via space-drag, middle-click, or
+   791→            two-finger scroll; zoom toward the cursor via Ctrl/Cmd + wheel. Click to select an item,
+   792→            shift-click for additive selection, drag empty space for rubber-band selection, and drag an item
+   793→            to move it (with optional snapping to grid lines or to other items&apos; edges and centers).
+   794→          </p>
+   795→        </section>
+   796→
+   797→        <section className="mt-8">
+   798→          <h3 className="text-lg font-semibold">When to use it</h3>
+   799→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   800→            {meta.whenToUse.map((item) => (
+   801→              <li key={item} className="flex gap-2">
+   802→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   803→                {item}
+   804→              </li>
+   805→            ))}
+   806→          </ul>
+   807→        </section>
+   808→
+   809→        <section className="mt-8">
+   810→          <h3 className="text-lg font-semibold">When not to use it</h3>
+   811→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   812→            {meta.whenNotToUse.map((item) => (
+   813→              <li key={item} className="flex gap-2">
+   814→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
+   815→                {item}
+   816→              </li>
+   817→            ))}
+   818→          </ul>
+   819→        </section>
+   820→
+   821→        <section className="mt-8">
+   822→          <h3 className="text-lg font-semibold">Properties and defaults</h3>
+   823→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   824→            <table className="w-full text-left text-[13px]">
+   825→              <thead className="bg-muted/30">
+   826→                <tr>
+   827→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Property</th>
+   828→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Type</th>
+   829→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Default</th>
+   830→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Description</th>
+   831→                </tr>
+   832→              </thead>
+   833→              <tbody className="divide-y divide-border">
+   834→                {meta.properties.map((p) => (
+   835→                  <tr key={p.name}>
+   836→                    <td className="px-3 py-2 font-mono text-brand-lemon">{p.name}</td>
+   837→                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.type}</td>
+   838→                    <td className="px-3 py-2 font-mono text-foreground">{p.default}</td>
+   839→                    <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
+   840→                  </tr>
+   841→                ))}
+   842→              </tbody>
+   843→            </table>
+   844→          </div>
+   845→        </section>
+   846→
+   847→        <section className="mt-8">
+   848→          <h3 className="text-lg font-semibold">Methods</h3>
+   849→          <div className="mt-3 space-y-2">
+   850→            {meta.methods.map((m) => (
+   851→              <div key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   852→                <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   853→                <p className="mt-1 text-[13px] text-muted-foreground">{m.description}</p>
+   854→                {m.returns && (
+   855→                  <p className="mt-0.5 text-[11px] font-mono text-muted-foreground/70">
+   856→                    returns: {m.returns}
+   857→                  </p>
+   858→                )}
+   859→              </div>
+   860→            ))}
+   861→          </div>
+   862→        </section>
+   863→
+   864→        <section className="mt-8">
+   865→          <h3 className="text-lg font-semibold">Events</h3>
+   866→          <div className="mt-3 space-y-2">
+   867→            {meta.events.map((e) => (
+   868→              <div key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   869→                <div className="flex items-center gap-3">
+   870→                  <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   871→                  <code className="font-mono text-[11px] text-muted-foreground">{e.payload}</code>
+   872→                </div>
+   873→                <p className="mt-1 text-[13px] text-muted-foreground">{e.description}</p>
+   874→              </div>
+   875→            ))}
+   876→          </div>
+   877→        </section>
+   878→
+   879→        <section className="mt-8">
+   880→          <h3 className="text-lg font-semibold">Keyboard shortcuts</h3>
+   881→          <p className="mt-2 text-sm text-muted-foreground">
+   882→            The playground wires a <code className="font-mono text-brand-lemon">ShortcutHandler</code> scoped
+   883→            to the Board command IDs. These shortcuts are registered with the shared command registry via{" "}
+   884→            <code className="font-mono text-brand-lemon">registerBuiltinCommands()</code> and fire the
+   885→            corresponding Board method.
+   886→          </p>
+   887→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   888→            <table className="w-full text-left text-[13px]">
+   889→              <thead className="bg-muted/30">
+   890→                <tr>
+   891→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Command</th>
+   892→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Shortcut</th>
+   893→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Action</th>
+   894→                </tr>
+   895→              </thead>
+   896→              <tbody className="divide-y divide-border">
+   897→                {boardCommands.map((cmd) => (
+   898→                  <tr key={cmd.id}>
+   899→                    <td className="px-3 py-2 font-mono text-brand-lemon">{cmd.id}</td>
+   900→                    <td className="px-3 py-2 font-mono text-muted-foreground">
+   901→                      {cmd.shortcut ? formatShortcut(cmd.shortcut) : "—"}
+   902→                    </td>
+   903→                    <td className="px-3 py-2 text-muted-foreground">{cmd.label}</td>
+   904→                  </tr>
+   905→                ))}
+   906→              </tbody>
+   907→            </table>
+   908→          </div>
+   909→          <p className="mt-2 text-[11px] text-muted-foreground/70">
+   910→            Note: the Board also handles Delete / Backspace, Escape, and Arrow keys internally when the canvas
+   911→            has focus. The shortcuts above are global (window-level) and fire even when the canvas is not
+   912→            focused.
+   913→          </p>
+   914→        </section>
+   915→
+   916→        <section className="mt-8">
+   917→          <h3 className="text-lg font-semibold">Local vs global lattices</h3>
+   918→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   919→            Each item has two lattices. The <strong className="text-foreground">local lattice</strong> is the
+   920→            item&apos;s bounding box rotated with the item — for an unrotated rectangle, it&apos;s just the
+   921→            rect. The <strong className="text-foreground">global lattice</strong> is the axis-aligned bounding
+   922→            box (AABB) of the rotated rect, which for a rotated item is larger than the local lattice.
+   923→            Alignment and distribution commands operate on the global lattices so the visual edges line up
+   924→            regardless of rotation. When an item is selected, the Board renders both: a dashed lemon outline
+   925→            for the local lattice and a dashed lavender outline for the global lattice.
+   926→          </p>
+   927→        </section>
+   928→
+   929→        <section className="mt-8">
+   930→          <h3 className="text-lg font-semibold">Accessibility</h3>
+   931→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   932→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />The canvas has <code className="font-mono text-brand-lemon">role=&quot;application&quot;</code>, a descriptive <code className="font-mono text-brand-lemon">aria-label</code>, and <code className="font-mono text-brand-lemon">tabindex=&quot;0&quot;</code> so it can receive keyboard focus.</li>
+   933→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />A focus-visible ring is drawn inside the canvas via <code className="font-mono text-brand-lemon">box-shadow: inset 0 0 0 2px rgba(217,255,102,0.55)</code>.</li>
+   934→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />When focused, Delete / Backspace removes the selection, Escape clears it, and Arrow keys nudge by 1 board unit (Shift = 10 units).</li>
+   935→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Pointer interactions use <code className="font-mono text-brand-lemon">pointer capture</code> so drags don&apos;t lose tracking when the cursor exits the canvas.</li>
+   936→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />All toolbar buttons in this playground have <code className="font-mono text-brand-lemon">title</code> attributes and <code className="font-mono text-brand-lemon">aria-label</code>s on icon-only buttons.</li>
+   937→          </ul>
+   938→        </section>
+   939→      </div>
+   940→
+   941→      <aside className="hidden lg:block">
+   942→        <div className="sticky top-20">
+   943→          <span className="eyebrow mb-2 block">On this page</span>
+   944→          <nav className="space-y-1 text-[12px]">
+   945→            {["Overview", "When to use it", "When not to use it", "Properties and defaults", "Methods", "Events", "Keyboard shortcuts", "Local vs global lattices", "Accessibility"].map((s) => (
+   946→              <a
+   947→                key={s}
+   948→                href="#"
+   949→                onClick={(e) => e.preventDefault()}
+   950→                className="block rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+   951→              >
+   952→                {s}
+   953→              </a>
+   954→            ))}
+   955→          </nav>
+   956→        </div>
+   957→      </aside>
+   958→    </div>
+   959→  );
+   960→}
+   961→
+   962→// ---- Code generators ----------------------------------------------------
+   963→
+   964→function generateJsCode(state: PlaygroundState): string {
+   965→  return `import { Board } from "@workshop/board";
+   966→import { registerBuiltinCommands, ShortcutHandler, commandRegistry } from "@/lib/commands";
+   967→
+   968→// Register the platform commands once on app init.
+   969→registerBuiltinCommands();
+   970→
+   971→const container = document.querySelector("#board");
+   972→const board = new Board(container, {
+   973→  gridMode: ${JSON.stringify(state.gridMode)},
+   974→  gridSize: ${state.gridSize},
+   975→  subGridDivisions: ${state.subGridDivisions},
+   976→  snapToGrid: ${state.snapToGrid},
+   977→  snapToItems: ${state.snapToItems},
+   978→});
+   979→
+   980→// Add a shape near the center of the current view.
+   981→function addShape(type) {
+   982→  const v = board.getView();
+   983→  const cx = (container.clientWidth / 2 - v.panX) / v.zoom;
+   984→  const cy = (container.clientHeight / 2 - v.panY) / v.zoom;
+   985→  const x = cx + (Math.random() - 0.5) * 140;
+   986→  const y = cy + (Math.random() - 0.5) * 140;
+   987→  const id = board.addItem(type, x, y, 90, 90, 0, "#D9FF66");
+   988→  board.selectItem(id, false);
+   989→}
+   990→
+   991→// Wire the keyboard shortcuts to the board.
+   992→const handler = new ShortcutHandler([
+   993→  "board.align-left", "board.align-center-h", "board.align-right",
+   994→  "board.align-top", "board.align-center-v", "board.align-bottom",
+   995→  "board.distribute-h", "board.distribute-v",
+   996→  "board.fit-all", "board.fit-selection",
+   997→  "board.add-circle", "board.add-rect", "board.add-triangle",
+   998→  "board.delete-selected",
+   999→]);
+  1000→handler.on("board.add-circle", () => addShape("circle"));
+  1001→handler.on("board.add-rect", () => addShape("rect"));
+  1002→handler.on("board.add-triangle", () => addShape("triangle"));
+  1003→handler.on("board.delete-selected", () => {
+  1004→  board.getSelectedIds().forEach((id) => board.removeItem(id));
+  1005→});
+  1006→handler.on("board.fit-all", () => board.zoomToFit());
+  1007→handler.on("board.fit-selection", () => board.zoomToFitSelection());
+  1008→handler.on("board.align-left", () => board.align("left"));
+  1009→handler.on("board.align-center-h", () => board.align("center-h"));
+  1010→handler.on("board.align-right", () => board.align("right"));
+  1011→handler.on("board.align-top", () => board.align("top"));
+  1012→handler.on("board.align-center-v", () => board.align("center-v"));
+  1013→handler.on("board.align-bottom", () => board.align("bottom"));
+  1014→handler.on("board.distribute-h", () => board.distribute("horizontal"));
+  1015→handler.on("board.distribute-v", () => board.distribute("vertical"));
+  1016→handler.attach();
+  1017→
+  1018→// Subscribe to events.
+  1019→board.on("selection", ({ ids }) => console.log("selected:", ids));
+  1020→board.on("change", (e) => console.log("change:", e));
+  1021→board.on("view", (v) => console.log("view:", v));
+  1022→
+  1023→// Cleanup.
+  1024→// handler.destroy();
+  1025→// board.destroy();`;
+  1026→}
+  1027→
+  1028→function generateHtmlCode(): string {
+  1029→  return `<!DOCTYPE html>
+  1030→<html>
+  1031→  <head><link rel="stylesheet" href="board.css" /></head>
+  1032→  <body>
+  1033→    <!-- The container MUST have a fixed height, or the canvas will be 0px tall. -->
+  1034→    <div id="board" style="width: 100%; height: 520px;"></div>
+  1035→    <script type="module" src="init.js"></script>
+  1036→  </body>
+  1037→</html>`;
+  1038→}
+  1039→
+  1040→function generateCssCode(): string {
+  1041→  return `/* The Board ships its own minimal scoped styles (.board-root, .board-canvas).
+  1042→   The canvas background is set via the \`background\` option in the constructor,
+  1043→   not via CSS — pass \`new Board(container, { background: "#1A1422" })\` to
+  1044→   customize it. */
+  1045→
+  1046→:root {
+  1047→  --brand-lemon: #D9FF66;
+  1048→  --brand-purple: #211A30;
+  1049→}
+  1050→
+  1051→/* The container element. The Board class adds .board-root automatically,
+  1052→   which sets position: relative, overflow: hidden, and touch-action: none.
+  1053→   You only need to set the size. */
+  1054→#board {
+  1055→  width: 100%;
+  1056→  height: 520px;
+  1057→  /* Optional: rounded corners + border to match the panel chrome. */
+  1058→  border-radius: 12px;
+  1059→  border: 1px solid var(--border, #383343);
+  1060→}
+  1061→
+  1062→/* The canvas focus ring is drawn inside the canvas via box-shadow.
+  1063→   Override the color here if you want a different accent. */
+  1064→.board-root canvas:focus-visible {
+  1065→  box-shadow: inset 0 0 0 2px rgba(217, 255, 102, 0.55);
+  1066→}`;
+  1067→}
+  1068→
+  1069→function generateApiCode(): string {
+  1070→  return `type ShapeType = "circle" | "rect" | "triangle";
+  1071→type GridMode = "dots" | "lines" | "none";
+  1072→type AlignType = "left" | "center-h" | "right" | "top" | "center-v" | "bottom";
+  1073→type DistributeType = "horizontal" | "vertical";
+  1074→
+  1075→interface BoardItem {
+  1076→  id: string;
+  1077→  type: ShapeType;
+  1078→  x: number;        // center X in board coordinates
+  1079→  y: number;        // center Y in board coordinates
+  1080→  width: number;
+  1081→  height: number;
+  1082→  rotation: number; // degrees
+  1083→  color: string;
+  1084→  selected: boolean;
+  1085→}
+  1086→
+  1087→interface BoardView {
+  1088→  panX: number;
+  1089→  panY: number;
+  1090→  zoom: number;
+  1091→}
+  1092→
+  1093→interface BoardOptions {
+  1094→  gridMode?: GridMode;           // default "dots"
+  1095→  gridSize?: number;             // default 40, minimum 4
+  1096→  subGridDivisions?: number;     // default 4, minimum 1
+  1097→  snapToGrid?: boolean;          // default false
+  1098→  snapToItems?: boolean;         // default false
+  1099→  background?: string;           // default "#15151a"
+  1100→}
+  1101→
+  1102→class Board {
+  1103→  constructor(container: HTMLElement, options?: BoardOptions);
+  1104→
+  1105→  // Items
+  1106→  addItem(type: ShapeType, x: number, y: number, w: number, h: number, rotation?: number, color?: string): string;
+  1107→  removeItem(id: string): void;
+  1108→  getItems(): BoardItem[];
+  1109→  getSelectedIds(): string[];
+  1110→  getSelectedItems(): BoardItem[];
+  1111→  selectItem(id: string, additive?: boolean): void;
+  1112→  clearSelection(): void;
+  1113→
+  1114→  // View
+  1115→  setGridMode(mode: GridMode): void;
+  1116→  setGridSize(n: number): void;
+  1117→  setSubGridDivisions(n: number): void;
+  1118→  setSnapToGrid(on: boolean): void;
+  1119→  setSnapToItems(on: boolean): void;
+  1120→  getView(): BoardView;
+  1121→  setView(panX: number, panY: number, zoom: number): void;
+  1122→  zoomToFit(): void;
+  1123→  zoomToFitSelection(): void;
+  1124→
+  1125→  // Commands
+  1126→  align(type: AlignType): void;       // requires >= 2 selected
+  1127→  distribute(type: DistributeType): void;  // requires >= 3 selected
+  1128→
+  1129→  // Lattices
+  1130→  getLocalLattice(item: BoardItem): { x: number; y: number; w: number; h: number; rotation: number };
+  1131→  getGlobalLattice(item: BoardItem): { x: number; y: number; w: number; h: number; rotation: number };
+  1132→
+  1133→  // Events
+  1134→  on(event: "selection" | "change" | "view", handler: (data: any) => void): void;
+  1135→  off(event: string, handler: (data: any) => void): void;
+  1136→
+  1137→  // Lifecycle
+  1138→  destroy(): void;
+  1139→}`;
+  1140→}
+  1141→

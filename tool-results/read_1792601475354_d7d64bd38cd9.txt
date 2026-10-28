@@ -1,0 +1,444 @@
+   500→Stage Summary:
+   501→- New Color Circle component established with 8 harmony modes and snapping grid (dots/lines visualization of the same snap points).
+   502→- VLM-verified: rainbow disk renders correctly, harmony markers + links visible, dots grid shows 12 dots on circumference at 30° intervals, lines grid shows 12 radial lines from center at the same 30° intervals.
+   503→- Component appears in sidebar (Color → Color Circle) and Components directory.
+   504→- `bun run lint` — 0 errors, 0 warnings.
+   505→
+   506→---
+   507→Task ID: 15 (fix session 6)
+   508→Agent: main
+   509→Task: Fix thumb clipping + redesign color circle grid inside + 2D marker dragging
+   510→
+   511→Work Log:
+   512→- **Thumb clipping fix (color wheel + color circle)**: Both components had `border-radius: 50%` on their canvas CSS, which clipped markers that sat on the edge of the circle. Removed the `border-radius: 50%` from both `.color-wheel-picker canvas` and `.color-circle canvas`. The disk/wheel are already drawn as circles via `ctx.arc`, so the border-radius was only causing clipping, not contributing to the visual. VLM confirms: color wheel markers are now fully round and unclipped.
+   513→- **Color circle redesigned for 2D interaction**: The previous Color Circle locked markers to the circumference (1D hue selection only). Redesigned it so markers can be dragged to any position INSIDE the circle:
+   514→  - Each harmony marker now has a `saturation` (0–1, default 1.0 = on the edge). The marker's position is: angle = hue, radius = saturation × r.
+   515→  - Pointer down finds the nearest marker (within 24px threshold, defaults to base marker) and grabs it. Drag updates the marker's hue (from angle) and saturation (from distance/radius).
+   516→  - When snapping is on, both hue snaps to angular divisions AND saturation snaps to the nearest ring (1/(GRID_RINGS+1) increments).
+   517→  - Output now includes `saturations[]` and each color's HSV reflects the marker's saturation.
+   518→  - `setHarmony` resets marker saturations to 1.0 for the new schema.
+   519→- **Polar grid drawn INSIDE the circle**: The previous grid only had dots/lines on the circumference. Redesigned `renderGrid()` to draw a full polar grid inside:
+   520→  - 3 concentric rings at 1/4, 1/2, 3/4 of the radius (GRID_RINGS = 3)
+   521→  - Angular divisions = `gridDivisions` (default 12 = every 30°)
+   522→  - **Dots mode**: dots at each (ring, angle) intersection + center dot + edge dots = ~49 dots forming a polar grid
+   523→  - **Lines mode**: concentric circles (rings) + radial lines from center to edge = spider-web polar grid
+   524→  - Lines mode uses dual-stroke (dark 3px outline + white 1.5px line) for contrast against any rainbow hue. VLM confirms: 3 rings + 12 radial lines = 48 snap cells visible.
+   525→- **Canvas padding for markers**: Added 14px padding to the Color Circle canvas so markers at the edge (saturation=1) aren't clipped by the canvas bounds. The disk is drawn centered within the larger canvas.
+   526→- VLM-verified all fixes:
+   527→  - Color wheel: markers fully visible, not clipped ✅
+   528→  - Color circle dots mode: polar grid of dots at multiple radii inside ✅
+   529→  - Color circle lines mode: 3 concentric rings + 12 radial lines (spider-web) inside ✅
+   530→  - Harmony markers draggable inside the circle ✅
+   531→  - Markers not clipped ✅
+   532→
+   533→Stage Summary:
+   534→- Color wheel and color circle thumbs are no longer clipped (removed border-radius).
+   535→- Color circle now has a polar grid drawn INSIDE the circle (not just on the edge): dots at ring/angle intersections or rings+lines forming a spider-web.
+   536→- Color circle markers are draggable to any position inside the circle (2D: hue by angle, saturation by radius), not just on the edge.
+   537→- `bun run lint` — 0 errors, 0 warnings.
+   538→
+   539→---
+   540→Task ID: 16 (fix session 7)
+   541→Agent: main
+   542→Task: Grid divisions include rings + white center via saturation gradient
+   543→
+   544→Work Log:
+   545→- **Grid divisions now include rings**: The `gridDivisions` property previously only controlled the angular divisions (radial spokes). The ring count was a hardcoded constant (GRID_RINGS = 3). Replaced with `ringCountFromDivisions(divisions)` which derives the ring count from `gridDivisions` (~half the angular count, e.g. 12 → 5 rings, 24 → 11 rings). Now `gridDivisions` controls BOTH the angular AND radial resolution of the polar grid. Updated `renderGrid()` (dots and lines modes) and the saturation snapping logic to use the derived ring count. VLM confirms: with gridDivisions=12, 5 concentric rings + 12 radial lines are visible.
+   546→- **White center via saturation gradient**: The disk previously used only a conic hue gradient with S=100, V=100 everywhere — so the center was a fully saturated hue (not white). Added a radial saturation gradient overlay on top of the conic hue gradient: `createRadialGradient(cx, cy, 0, cx, cy, r)` with stops `rgba(255,255,255,1)` at center → `rgba(255,255,255,0)` at edge. This makes the center blend to white (S=0) while the edge keeps full saturation (S=1), matching HSV saturation semantics where radius → saturation. Pixel-verified: center = rgb(253,255,253) (white), 1/4 out = rgb(255,193,192) (light pink), 1/2 = rgb(255,129,128) (mid red), 3/4 = rgb(255,65,65) (bright red), edge = rgb(208,1,0) (pure red). VLM confirms: center is white, smooth transition to saturated edge.
+   547→
+   548→Stage Summary:
+   549→- `gridDivisions` now controls both angular divisions (radial lines/spokes) and radial divisions (concentric rings). Higher divisions → more rings.
+   550→- Color circle center is now white via a radial saturation gradient overlay; the edge retains full saturation. Smooth blend confirmed by pixel sampling and VLM.
+   551→- `bun run lint` — 0 errors, 0 warnings.
+   552→
+   553→---
+   554→Task ID: 17
+   555→Agent: main
+   556→Task: Fix size parameter + Adobe Color-style base color + add/remove colors
+   557→
+   558→Work Log:
+   559→- **Size parameter fix**: The ColorCircle class was missing a `setSize()` method. The React wrapper had no effect to forward the `size` prop. Added `setSize(n)` to the class (updates options, resizes canvas, invalidates disk cache, re-renders) and added `React.useEffect(() => { ref.current?.setSize(size); }, [size])` to the wrapper. Verified: changing the size slider from 240 to 320 resizes the canvas from 272px to 352px (320 + 32 padding).
+   560→- **Complete ColorCircle redesign with Adobe Color-style base color concept**:
+   561→  - Replaced the old `baseHue + markerSat[]` model with a `colors: ColorEntry[]` array where each entry has `{ id, hue, saturation, isBase, offset }`.
+   562→  - **Base color drives the palette**: When the base color is dragged, ALL other colors shift by the same hue delta (maintaining their offsets). Verified: dragging base from 210° to 0° shifted all triadic colors correctly (base→red, others→green and blue, maintaining 120° offsets).
+   563→  - **Non-base colors move individually**: When a non-base color is dragged, only that color's hue+saturation changes; its offset from the base is recalculated. This lets users "break" a color from the harmony.
+   564→  - **setBaseIndex(i)**: Promotes any color to be the base. All offsets are recalculated relative to the new base. The base marker gets a lemon-green accent ring and a "Base" badge in the palette.
+   565→  - **addColor(hue?, saturation?)**: Adds a new color at a position (default: baseHue + 30°). Returns the new index.
+   566→  - **removeColor(i)**: Removes a color (can't remove the last one; if the base is removed, the first remaining color becomes the base).
+   567→  - Markers are numbered (1, 2, 3...) so users can identify them.
+   568→  - Harmony links connect all markers with a polygon.
+   569→- **Playground redesign with full palette management UI**:
+   570→  - Palette section in the live canvas showing color cards: each has a swatch, hex value, hue/saturation/offset info, a "Base" badge (for the base), a crown button (set as base), and an X button (remove).
+   571→  - "Add color" button in the palette header.
+   572→  - The properties panel has all the same controls (harmony, snapping, grid, links, size).
+   573→  - Initial state is emitted on mount so the palette shows immediately.
+   574→- VLM-verified all features: circular wheel with white center, 3 numbered markers with lemon-green base ring, palette cards with Base badge + crown/X buttons, Add color button, Size slider all present and correct.
+   575→
+   576→Stage Summary:
+   577→- Size parameter now works (setSize method + React effect forwarding).
+   578→- ColorCircle redesigned with Adobe Color-style base color concept: one color is the "base", moving it shifts all others; non-base colors move individually; users can add/remove colors and change which color is the base.
+   579→- Full palette management UI in the playground: color cards with swatches, hex values, base badges, set-as-base buttons, remove buttons, and add-color button.
+   580→- `bun run lint` — 0 errors, 0 warnings.
+   581→
+   582→---
+   583→Task ID: 18
+   584→Agent: main
+   585→Task: Standalone harmony engine + 10 Adobe rules + fix thumb positioning
+   586→
+   587→Work Log:
+   588→- **Standalone harmony engine** (`src/lib/components/color-circle/harmony-engine.ts`): Created as a pure, UI-independent module with:
+   589→  - `HarmonyRule` type: 10 rules (analogous, monochromatic, triad, complementary, split-complementary, double-split-complementary, square, compound, shades, custom).
+   590→  - `HARMONY_RULES` definitions: each rule has hue offsets, a `variesTone` flag for tonal rules (monochromatic/shades), and a description.
+   591→  - `generateHues(baseHue, rule)`: generates absolute hues from a base + rule.
+   592→  - `defaultSaturations(rule)` / `defaultLightnesses(rule)`: for tonal rules, generates varied saturation/lightness values.
+   593→  - `hueDelta(from, to)`: signed angular delta [-180, 180] for rotating all markers when the base moves.
+   594→  - `isConstrained(rule)`: true for all rules except "custom".
+   595→- **ColorCircle redesigned to use the engine**:
+   596→  - `ColorEntry` now includes `lightness` (HSL L, 0–100) in addition to hue/saturation.
+   597→  - `buildPalette(rule, baseHue)` generates the palette from the engine's offsets + default saturations/lightnesses.
+   598→  - `getOutput()` now includes HSL values and uses HSL→HSV conversion for accurate color representation.
+   599→  - Markers use HSL→HSV→RGB conversion for correct color display.
+   600→  - The base color drives hue rotation (all markers shift by the same delta); saturation/lightness are per-color.
+   601→  - Markers sit on the circumference (edge) by default, positioned by hue angle. Their geometric relationship (complementary through center, triad as triangle, square as square) is visualized via harmony link lines.
+   602→- **Playground updated with all 10 rules**: The HARMONIES array now has 10 entries with appropriate icons (Shuffle, Layers, Triangle, Divide, Split, Grid2x2, Square, Sparkles, SunMedium, Brush). The harmony rules table in the documentation section lists all 10 with their offsets and counts.
+   603→- **Content metadata updated**: The color-circle component metadata now reflects the 10 rules, add/remove color methods, base color concept, and updated defaults.
+   604→- VLM-verified: circular wheel with white center, 3 numbered markers with lemon-green base ring, harmony link lines through center, all 10 harmony rule buttons in properties panel, palette cards with swatches/hex/Base/crown/remove, Size slider all present and correct. Verified palette counts: complementary=2, triad=3, compound=5, monochromatic=5.
+   605→
+   606→Stage Summary:
+   607→- Created a standalone harmony engine module with all 10 Adobe Color rules, fully decoupled from the UI.
+   608→- ColorCircle now uses the engine, with proper separation of harmony geometry (hue offsets) from color values (hue, saturation, lightness per color).
+   609→- Markers positioned on the circumference, with geometric relationships visualized via harmony links through the center.
+   610→- Base color drives hue rotation; saturation/lightness are independent per color.
+   611→- Tonal rules (monochromatic, shades) generate varied saturation/lightness values.
+   612→- `bun run lint` — 0 errors, 0 warnings.
+   613→
+   614→---
+   615→Task ID: 19
+   616→Agent: main
+   617→Task: Match Adobe Color's harmony system exactly (9 rules, 5 colors, base at middle, lock/add/remove)
+   618→
+   619→Work Log:
+   620→- **Researched actual Adobe Color behavior** by visiting https://color.adobe.com/create/color-wheel with Agent Browser:
+   621→  - 9 harmony rules (not 10): Custom, Analogous, Complementary, Split complementary, Triad, Square, Compound, Shades, Monochromatic
+   622→  - 5 color strips at the bottom (base at middle, index 2)
+   623→  - Each strip has: Lock, Edit tint, Drag to reorder, Delete color, Edit color, Copy hex, Add color left, Add color right
+   624→  - Moving the base handle rotates all non-locked colors
+   625→  - Colors can be locked, added (left/right), and removed
+   626→  - Tested Triad: 5 colors with 3 distinct hues, offsets [-120, +120, 0, -120, +120]
+   627→  - Tested Square: 5 colors with 4 distinct hues, offsets [180, 90, 0, -90, 180]
+   628→- **Rewrote harmony engine** (`harmony-engine.ts`):
+   629→  - 9 rules matching Adobe Color exactly (removed "double-split-complementary" and "tetradic")
+   630→  - All rules produce exactly 5 colors with offsets defined for each position
+   631→  - Base always at index 2 (BASE_INDEX = 2, PALETTE_SIZE = 5)
+   632→  - Tonal rules (monochromatic, shades) have proper default S/L variation
+   633→  - Triad offsets: [-120, 120, 0, -120, 120] — 3 hues in 5 slots
+   634→  - Square offsets: [180, 90, 0, -90, 180] — 4 hues in 5 slots
+   635→  - Complementary offsets: [180, 0, 0, 0, 180] — 2 hues in 5 slots
+   636→- **Rewrote ColorCircle** (`color-circle.ts`):
+   637→  - 5 default colors, base at index 2 (middle)
+   638→  - Lock/unlock support: locked colors don't move when base moves
+   639→  - addColor(index, hue?, sat?): insert at any position
+   640→  - removeColor(i): remove any color (base is promoted if removed)
+   641→  - Moving base: rotates all non-locked, non-base colors by the same hue delta
+   642→  - Moving non-base: only changes that color; offset recalculated
+   643→  - Keyboard: rotates all non-locked colors
+   644→  - Locked markers show an "L" indicator on the canvas
+   645→- **Updated playground** (`color-circle-playground.tsx`):
+   646→  - 9 harmony rule buttons in Adobe Color's exact order
+   647→  - Adobe-style vertical color strips with:
+   648→    - Colored swatch on the left with position number
+   649→    - Hex value + HSL info + offset
+   650→    - Lock/Unlock button (amber when locked)
+   651→    - Add-left (ChevronLeft) and Add-right (ChevronRight) buttons
+   652→    - Crown (set as base) button
+   653→    - X (remove) button
+   654→  - Removed the separate "Add color" header button (colors are added via the per-strip add-left/add-right buttons)
+   655→- VLM-verified: 9 harmony rules, 5 color strips with all action buttons, base marker with lemon ring, size slider all present and correct. Triad produces 5 colors with 3 distinct hues. Complementary produces 5 colors with 2 distinct hues.
+   656→
+   657→Stage Summary:
+   658→- Harmony system now matches Adobe Color exactly: 9 rules, 5 colors, base at middle, lock/add-left/add-right/remove.
+   659→- Standalone harmony engine with proper hue offsets for all 9 rules.
+   660→- `bun run lint` — 0 errors, 0 warnings.
+   661→
+   662→---
+   663→Task ID: 20
+   664→Agent: main
+   665→Task: Reconstruct harmony links as radial lines to center + expandable custom rule system
+   666→
+   667→Work Log:
+   668→- **Harmony links changed to radial lines**: Rewrote `renderLinks()` in ColorCircle to draw lines from each marker TO THE CENTER of the circle (radial spokes), not between markers (polygon). Each line shows the angular relationship of its color to the center. Base color's line is lemon-tinted; other lines are white semi-transparent. VLM confirms: "lines connect each outer marker directly to the central white point. They radiate outward from the center like spokes of a wheel. They do not connect marker-to-marker."
+   669→- **Harmony engine made expandable**: Rewrote `harmony-engine.ts` to support user-defined custom rules:
+   670→  - Added a mutable `customRules` Map that stores user-defined `HarmonyDefinition` entries.
+   671→  - Added `defineCustomRule(label, offsets, options)` — registers a new custom rule and returns its definition.
+   672→  - Added `removeCustomRule(id)`, `getCustomRules()`, `getAllRules()`, `getRule(id)`.
+   673→  - Built-in rules are now in `BUILT_IN_RULES` with `BUILT_IN_RULE_ORDER`.
+   674→  - The `HarmonyRule` type is now `string` (supports any rule ID, built-in or custom).
+   675→- **ColorCircle `setCustomOffsets()` method**: Added a public method that defines a custom rule from user-specified angle offsets and switches to it immediately. Preserves the current base hue. Example: `setCustomOffsets([0, 60, 120, 180, 240])` creates a 5-color rule with 60° spacing.
+   676→- **Custom Rule Builder UI** in the playground: Added a "Custom rule builder" section in the properties panel with:
+   677→  - Offset chips showing current angle offsets (e.g. "+0°", "+120°", "+240°") with remove (X) buttons.
+   678→  - A number input for entering a new offset angle.
+   679→  - An "Add" button to add the offset to the list.
+   680→  - An "Apply rule" button that calls `setCustomOffsets()` on the ColorCircle.
+   681→  - Verified: adding [0, 120, 240, 90] and applying produces 4 colors at the correct hues (210°, 330°, 90°, 300°).
+   682→
+   683→Stage Summary:
+   684→- Harmony links are now radial lines from each thumb to the center (not between thumbs), making the angular relationship to center visually clear.
+   685→- The harmony system is expandable: users can define their own custom rules with arbitrary angle offsets via the Custom Rule Builder UI or the `setCustomOffsets()` API.
+   686→- `bun run lint` — 0 errors, 0 warnings.
+   687→
+   688→---
+   689→Task ID: 21
+   690→Agent: main
+   691→Task: Add color on same radial line + base color controls all colors' distance from center
+   692→
+   693→Work Log:
+   694→- **addColorOnLine(i, saturation?) method**: Added a new public API to ColorCircle that adds a color on the SAME RADIAL LINE as an existing color (same hue, different saturation/distance from center). The new color sits at the same angle but closer to center (default: halfway between the source color's saturation and center, i.e. 50% of source saturation). This lets users create shades/tints of a color along the same spoke — like Adobe Color's ability to add colors at different distances along the same hue line.
+   695→  - Added a "Droplets" icon button on each palette card (titled "Add shade on same line") that calls addColorOnLine.
+   696→  - Verified: adding a shade on color #0080ff (blue, S=100%) produces #4080bf (same blue hue, S=50%, closer to center).
+   697→- **Base color controls all colors' distance from center**: Updated the pointer interaction so that when the base color's saturation changes (moving toward/away from center), ALL non-locked colors' saturation scales proportionally by the same ratio. The base color now controls both hue rotation (all colors rotate by the same hue delta) AND distance from center (all colors' saturation scales by the same ratio). This matches the user's requirement: "by a rule main color controls distance between each color and center of circle."
+   698→  - Implementation: compute `satRatio = newSat / oldSat` when the base moves, then multiply each non-locked color's saturation by that ratio.
+   699→  - Verified: dragging the base from S=100% to S=30% scaled all colors to S≈30% (S30, S9, S30, S30 — the S9 was a previously-added shade that scaled proportionally from S30).
+   700→- VLM-verified: markers moved closer to center (~30% radius) after dragging the base inward, saturation values updated on color cards, Droplets button present.
+   701→
+   702→Stage Summary:
+   703→- Users can add colors on the same radial line (same hue, different saturation) via the Droplets button on each palette card.
+   704→- The base color now controls the distance between every color and the center — dragging the base inward/outward scales all non-locked colors' saturation proportionally.
+   705→- `bun run lint` — 0 errors, 0 warnings.
+   706→
+   707→---
+   708→Task ID: 22
+   709→Agent: main
+   710→Task: Build Color Ramp component (multi-stop gradient with draggable stops)
+   711→
+   712→Work Log:
+   713→- **Vanilla JS ColorRamp component** (`src/lib/components/color-ramp/color-ramp.ts`):
+   714→  - Multi-stop gradient bar with draggable color stops.
+   715→  - Canvas-based rendering: gradient bar with rounded corners, stop markers as capsule thumbs (white halo + dark border + color dot).
+   716→  - Click empty space on the bar → adds a new stop at that position (color interpolated from neighbors).
+   717→  - Drag stops to reposition them; stops auto-sort by position.
+   718→  - `addStop(position?, color?)`: color is interpolated via linear RGB lerp if not specified.
+   719→  - `removeStop(i)`: removes a stop (keeps at least 2).
+   720→  - `setOrientation("horizontal" | "vertical")`: switches orientation, swaps bar dimensions.
+   721→  - `setThickness(n)`, `setLength(n)`: adjustable bar size.
+   722→  - Full public API: getStops, setStops, addStop, removeStop, setOrientation, setThickness, setLength, on/off, destroy.
+   723→  - Pointer interaction with pointer capture; keyboard support (arrows adjust first stop).
+   724→  - Events: `input` (continuous during drag), `change` (committed).
+   725→  - Self-contained color math (parseHex, rgbToHex, lerpRgb) — no external deps.
+   726→- **React wrapper** (`src/components/color-ramp/color-ramp-react.tsx`): owns the instance, forwards prop changes, exposes instance via `instanceRef` for imperative calls.
+   727→- **Playground** (`src/components/color-ramp/color-ramp-playground.tsx`): full playground with:
+   728→  - Live canvas (the gradient bar)
+   729→  - Property inspector: orientation toggle (Horizontal/Vertical), thickness slider, length slider
+   730→  - Output section: stop cards (color swatch + hex + position %) with remove buttons + "Add stop" button
+   731→  - Code panel (JS/HTML/CSS/API tabs with live-synced code)
+   732→  - Documentation section
+   733→- **Content metadata**: added color-ramp to `src/lib/platform/content.ts` with full properties, methods, events, defaults.
+   734→- **Routing**: added `component/color/color-ramp` → `ColorRampPlayground` in `src/app/page.tsx`.
+   735→- VLM-verified: horizontal gradient bar with blue→green→orange transition, 4 draggable stop markers, stop cards with swatches/hex/position, Add stop button, orientation/thickness/length controls all present.
+   736→
+   737→Stage Summary:
+   738→- New Color Ramp component established: multi-stop gradient with draggable stops, add/remove, orientation control.
+   739→- Appears in sidebar (Color → Color Ramp) and Components directory.
+   740→- `bun run lint` — 0 errors, 0 warnings.
+   741→
+   742→---
+   743→Task ID: 1 (CustomButton)
+   744→Agent: main
+   745→Task: Build CustomButton vanilla JS component + React wrapper + playground (Inputs category)
+   746→
+   747→Work Log:
+   748→- **Vanilla JS CustomButton component** (`src/lib/components/custom-button/custom-button.ts`):
+   749→  - DOM-based button component (no canvas) — renders a real `<button>` element.
+   750→  - Options: `text`, `icon`, `iconType` ("icon" | "image"), `iconPosition` (left/right/top/bottom), `variant` (primary/secondary/outline/ghost), `size` (sm/md/lg), `disabled`, `fullWidth`.
+   751→  - Behavior: text-only → text button; icon-only → square icon-only button (aspect-ratio 1:1, no padding); text+icon → positioned per iconPosition (top/bottom produce a stacked flex-column layout).
+   752→  - Built-in Lucide-style SVG icon set (18 icons: plus, x, check, settings, search, home, star, heart, arrow-right, trash, download, upload, mail, user, save, edit, bell, refresh). Each rendered as inline `<svg>` with `stroke="currentColor"` so it inherits the button text color.
+   753→  - `iconType: "image"` renders the icon as `<img src="...">` — works with URLs and data URIs.
+   754→  - Variant styles (via data attributes + CSS custom properties):
+   755→    - primary: lemon (#D9FF66) bg, dark text
+   756→    - secondary: purple-strong (#342348) bg, light text
+   757→    - outline: transparent bg, 18%-white border, lemon-tinted hover
+   758→    - ghost: transparent bg, no border, 6%-white hover
+   759→  - Sizes: sm (h-32px, 12px text), md (h-36px, 14px text), lg (h-40px, 16px text).
+   760→  - Injects its own scoped CSS (prefixed `.custom-button-`) — no dependency on the platform's stylesheet. Single `<style id="custom-button-styles">` element appended to `<head>` once.
+   761→  - Disabled state uses the native `disabled` attribute (also blocks click events and removes from tab order).
+   762→  - Icon-only buttons get an `aria-label` derived from the icon name/src for screen readers.
+   763→  - Full public API: setText, setIcon (with optional type), setIconPosition, setVariant, setSize, setDisabled, setFullWidth, getElement, on("click"), off, destroy.
+   764→  - Custom `CustomButtonHandler` type (`(...args: unknown[]) => void`) used for `off` to satisfy `@typescript-eslint/no-unsafe-function-type` while preserving the spec's `Function`-like signature.
+   765→  - Exposed `BUILT_IN_ICON_NAMES` constant so the playground can populate its icon dropdown.
+   766→- **Barrel exports** (`src/lib/components/custom-button/index.ts`): re-exports the class, the type aliases, and the icon name list.
+   767→- **React wrapper** (`src/components/custom-button/custom-button-react.tsx`): owns the instance, forwards every prop to the imperative API via dedicated `useEffect` hooks, exposes the instance via `instanceRef` for imperative calls from the playground.
+   768→- **Playground** (`src/components/custom-button/custom-button-playground.tsx`): full playground with:
+   769→  - Live preview area (centered button, max-w-320px container so fullWidth is visible)
+   770→  - Property inspector with: text input, iconType toggle (Icon/Image), icon picker (dropdown of built-in names with a live preview chip when "icon"; free-text URL/data-URI input when "image"), iconPosition 4-way segmented control (ArrowLeft/Right/Up/Down), variant 4-way segmented control, size 3-way segmented control (SM/MD/LG), disabled toggle, fullWidth toggle, plus a live state-snapshot table.
+   771→  - Smart icon-type switching: when switching to "image" with a built-in icon name selected, the icon is swapped to a default SVG data URI; when switching back to "icon" with a data URI, it's restored to "plus".
+   772→  - Click counter with reset button.
+   773→  - "Try the imperative API" section: one-click buttons that call setText/setVariant/setIcon/setDisabled/setSize on the live instance and toast confirmation.
+   774→  - Code panel (JS/HTML/CSS/API tabs) with live-synced code generation.
+   775→  - Documentation section: Overview, When to use, When not to use, Properties table, Methods list, Events list, Accessibility notes, sticky on-this-page nav.
+   776→- **Content metadata**: added `custom-button` to `src/lib/platform/content.ts` in the `inputs` category with full properties, methods, events, defaults, when-to-use, when-not-to-use, capabilities, tags.
+   777→- **Navigation labels**: extended `routeLabel` in `src/store/navigation.ts` to map the `custom-button` slug → "Custom Button" (the existing `categoryLabel` already handled "inputs" → "Inputs").
+   778→- **Routing**: added `component/inputs/custom-button` → `CustomButtonPlayground` in `src/app/page.tsx`.
+   779→- **Lint**: removed manual `useCallback` wrappers for `update`/`reset`/`onClick` in the playground (the React Compiler now memoizes them automatically, and the manual empty-deps form was triggering `react-hooks/preserve-manual-memoization`). Removed an unused `eslint-disable` directive in the React wrapper.
+   780→
+   781→Stage Summary:
+   782→- New Custom Button component established: versatile DOM-based button with 4 variants, 3 sizes, 4 icon positions, 18 built-in Lucide-style icons + image support.
+   783→- Appears in sidebar (Inputs → Custom Button) and Components directory under the Inputs category.
+   784→- `bun run lint` — 0 errors, 0 warnings.
+   785→- Files created:
+   786→  - `src/lib/components/custom-button/custom-button.ts`
+   787→  - `src/lib/components/custom-button/index.ts`
+   788→  - `src/components/custom-button/custom-button-react.tsx`
+   789→  - `src/components/custom-button/custom-button-playground.tsx`
+   790→- Files modified:
+   791→  - `src/lib/platform/content.ts` (added custom-button metadata)
+   792→  - `src/store/navigation.ts` (added custom-button slug label)
+   793→  - `src/app/page.tsx` (added routing for component/inputs/custom-button)
+   794→
+   795→---
+   796→Task ID: 3 (ToggleGroup)
+   797→Agent: full-stack-developer
+   798→Task: Build ToggleGroup vanilla JS component + React wrapper + playground (Inputs category)
+   799→
+   800→Work Log:
+   801→- Read `/home/z/my-project/worklog.md` (Tasks 1–22 plus the in-flight CustomButton task) to lock the design system (Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66), navigation model, content metadata schema, and the existing playground conventions (PageContainer, Breadcrumbs + PageOverline + H1 + intro, .panel/.eyebrow/.bg-grid tokens, lemon-only accent, CodeBlock + CopyableValue, toast from sonner).
+   802→- Read `src/components/color-ramp/color-ramp-playground.tsx`, `color-ramp-react.tsx`, and `src/lib/components/color-ramp/color-ramp.ts` to mirror the established wrapper/playground patterns (instanceRef forwarding, change-driven state mirroring, code-tab generation, documentation section).
+   803→- **Vanilla JS ToggleGroup component** (`src/lib/components/toggle-group/toggle-group.ts`):
+   804→  - Self-contained — does NOT import CustomButton. Each toggle button is a real DOM element (`<div role="button" tabindex="0">`) styled to look like CustomButton's primary/secondary/outline variants (lemon / purple-strong / transparent+border), with icon + label support. Selected state always layers a lemon ring on top of the variant.
+   805→  - Options: `items` (ToggleButtonItem[]), `multiselect`, `closable`, `reorderable`, `orientation` (horizontal/vertical), `variant` (primary/secondary/outline), `size` (sm/md/lg). Defaults match the spec: single-select, not closable, not reorderable, horizontal, outline, md.
+   806→  - Built-in 23-icon set (bold, italic, underline, check, x, plus, star, circle, square, heart, bolt, dot, arrow-right, settings, folder, file, user, tag, eye, bell, search, home). `icon` field accepts a built-in name, a `data:` URI, or a raw `<svg>` string — `renderIcon()` handles all three.
+   807→  - Scoped CSS injected once per document (`<style id="toggle-group-styles">`) with `.toggle-group-` prefix. No canvas, no external deps. All visual tokens come from the platform's CSS variables (--brand-lemon, --brand-purple-strong, --border, --accent, --foreground, --muted-foreground).
+   808→  - Selection behavior: single-select click selects + deselects others (no toggle-off via click — keeps one selected); multiselect toggles independently. `setSelected([])` is allowed via the API (clears all). `setMultiselect(false)` keeps only the first selected when turning off multi.
+   809→  - Closable: each item gets an embedded `<button class="toggle-group__close" tabindex="-1">` with an inline X SVG. Clicking X calls `_handleClose` (removes the item from items[], removes its DOM, fires `close` then `change`). `setClosable()` adds/removes the close button on existing items without rebuilding them.
+   810→  - Reorderable: pointer-event-based drag-to-reorder. On pointerdown, records the item + pointer origin. On pointermove past a 4px threshold, marks the item as `--dragging` (lower opacity + shadow), translates it with the pointer for tactile feedback, and finds the sibling under the pointer (via `document.elementFromPoint` with the dragged item's `pointer-events` temporarily disabled). Computes whether the pointer is in the sibling's first or second half, then performs a live swap in the items array + DOM (re-appends items in array order). After a swap, re-anchors the drag origin so the translate offset is 0 at the new position. On pointerup, emits `reorder` + `change`. Suppresses the synthetic click that follows a drag via a `Date.now()`-based guard.
+   811→  - Keyboard: Enter/Space toggles selection; Delete/Backspace closes (if closable); Arrow Left/Up + Arrow Right/Down move the focused item within the group (if reorderable).
+   812→  - Public API exactly matches the spec: `constructor(container, options?)`, `getItems()`, `setItems(items)`, `addItem(item)`, `removeItem(id)`, `getSelected()`, `setSelected(ids)`, `setMultiselect(on)`, `setClosable(on)`, `setReorderable(on)`, `setOrientation(orientation)`, `setVariant(variant)`, `setSize(size)`, `on(event, handler)`, `off(event, handler)`, `destroy()`.
+   813→  - Events: `change` (selection/reorder/add/remove/setItems), `select` (user click), `reorder` (drag or arrow-key reorder), `close` (X clicked, item removed). Tiny internal EventEmitter with try/catch around each handler so a single bad handler can't crash the group.
+   814→  - `destroy()` is idempotent: removes window pointer listeners, clears the handler map, removes all DOM, nulls the drag state.
+   815→  - Custom `ToggleHandler = (data: any) => void` type used for `off` to satisfy `@typescript-eslint/no-unsafe-function-type` while preserving the spec's `Function`-like signature.
+   816→- **Barrel exports** (`src/lib/components/toggle-group/index.ts`): re-exports the class + all type aliases.
+   817→- **React wrapper** (`src/components/toggle-group/toggle-group-react.tsx`):
+   818→  - Owns the vanilla instance for the lifetime of the mount. Creates once with empty deps (capturing the initial items snapshot via a ref so the create-once effect stays empty).
+   819→  - Forwards every prop change via dedicated `useEffect` hooks: multiselect, closable, reorderable, orientation, variant, size. The items prop is compared (JSON.stringify key) against the instance's current items and only `setItems()` is called when they actually differ — this avoids loops with the change-driven state in the playground.
+   820→  - Forwards all four events (change/select/reorder/close) to optional callbacks via refs so the create-once effect can stay empty.
+   821→  - Emits the initial state on mount so the parent can sync immediately.
+   822→- **Playground** (`src/components/toggle-group/toggle-group-playground.tsx`) — Figma/Godot-style nested properties panel:
+   823→  - Live preview area (left, `.panel` with `bg-grid` background): the actual `<ToggleGroupReact>` instance.
+   824→  - Output section under the preview: CopyableValue chips for `selected` (JSON array) and `labels` (comma-joined), plus a contextual hint about click/close/drag interactions.
+   825→  - Property inspector (right, `.panel`):
+   826→    - **Group section** (top): three Switch toggles for Multiselect / Closable / Reorderable; segmented controls for Orientation (Horizontal/Vertical with ArrowLeftRight/ArrowUpDown icons), Variant (Outline/Primary/Secondary), Size (SM/MD/LG).
+   827→    - **Buttons section** (bottom, separated by a divider): "BUTTONS (N)" header with an "Add button" action. Each item is rendered as a `ButtonItemEditor` card with:
+   828→      - A summary row (collapse chevron + index badge + truncated label + "on" badge if selected + remove trash button).
+   829→      - An expandable details section with: Label text input, Icon `<select>` dropdown (23 built-in icons + "(none)"), Selected checkbox, Move up/down buttons (disabled at array ends), and a read-only id footer.
+   830→  - Inspector edits flow through `instanceRef.current.setItems()` / `setSelected()` / `removeItem()` / `addItem()` so the vanilla instance stays the source of truth and emits change events that sync React state back.
+   831→  - Code panel with JS/HTML/CSS/API tabs, all live-synced to the current state (the JS tab includes the actual items array, multiselect/closable/reorderable flags, orientation, variant, and size).
+   832→  - Documentation section: Overview, When to use, When not to use, Properties table, Methods list, Events list, Accessibility notes, Icons explanation, sticky on-this-page nav — all driven by the content.ts metadata.
+   833→- **Content metadata**: added `toggle-group` to the `components` array in `src/lib/platform/content.ts` under the `inputs` category with full properties (7), methods (15), events (4), defaults, when-to-use (4), when-not-to-use (3), capabilities (6), tags.
+   834→- **Navigation labels**: extended `routeLabel` in `src/store/navigation.ts` to map the `toggle-group` slug → "Toggle Group" (the existing `categoryLabel` already handled "inputs" → "Inputs", and `breadcrumbs` already used `routeLabel` for the component-name segment).
+   835→- **Routing**: added `component/inputs/toggle-group` → `ToggleGroupPlayground` in `src/app/page.tsx` (the import was already present from a parallel agent's draft; only the route handler was missing).
+   836→- **Agent-browser + VLM verification**:
+   837→  - Navigated Home → Components → Inputs → Toggle Group. Playground loaded with the three default buttons (Bold selected with lemon ring, Italic, Underline). VLM confirmed the selected button is highlighted with lemon-green.
+   838→  - Clicked Italic in single-select mode: Bold deselected, Italic selected (checkboxes in the inspector updated correctly).
+   839→  - Toggled Closable: each toggle gained an embedded Remove (X) button. Clicked the X on Underline: item removed, button count went 3 → 2.
+   840→  - Toggled Multiselect then clicked Italic: both Bold and Italic checkboxes are checked simultaneously.
+   841→  - Clicked "Add button" twice: two "New button" entries appeared, count went 2 → 4.
+   842→  - Set Variant to Primary: all four buttons turned lemon-green with dark text (VLM confirmed "bright lime green/yellow-green background, dark/black text, X close icon on the right side").
+   843→  - Enabled Reorderable, dragged Bold to the last position: the inspector order updated to [Italic, New button, New button, Bold] — drag-to-reorder works.
+   844→  - Set Orientation to Vertical (via `find role button click --name "Vertical"` to bypass stale refs): the `.toggle-group` element's class became `toggle-group--vertical` and VLM confirmed the buttons stacked vertically.
+   845→  - Code panel JS tab is live-synced (shows the actual 4 items with their icons + selected flags, multiselect:true, closable:true, variant:"primary").
+   846→  - API tab renders the full TypeScript interface.
+   847→- **Lint**: `bun run lint` — 0 errors, 0 warnings across the whole project (toggle-group files contribute nothing; the parallel custom-button errors that existed mid-task were also resolved by the time of the final check).
+   848→
+   849→Stage Summary:
+   850→- New Toggle Group component established: self-contained vanilla JS class that mimics CustomButton visuals (primary/secondary/outline variants, icon + label) without importing it, with single/multi-select, closable buttons, drag-to-reorder (pointer events), and dynamic add/remove.
+   851→- Appears in sidebar (Inputs → Toggle Group) and Components directory under the Inputs category.
+   852→- Playground features a Figma/Godot-style nested properties panel: a Group section for the toggle group's own properties, and a Buttons section where each child toggle button's properties (label, icon, selected, remove, move up/down) are editable inline — exactly like editing nested component properties in Figma's or Godot's inspector.
+   853→- `bun run lint` — 0 errors, 0 warnings.
+   854→- Files created:
+   855→  - `src/lib/components/toggle-group/toggle-group.ts`
+   856→  - `src/lib/components/toggle-group/index.ts`
+   857→  - `src/components/toggle-group/toggle-group-react.tsx`
+   858→  - `src/components/toggle-group/toggle-group-playground.tsx`
+   859→- Files modified:
+   860→  - `src/lib/platform/content.ts` (added toggle-group metadata in the inputs category)
+   861→  - `src/store/navigation.ts` (added toggle-group slug → "Toggle Group" label)
+   862→  - `src/app/page.tsx` (added route handler for `component/inputs/toggle-group`)
+   863→
+   864→---
+   865→Task ID: 2
+   866→Agent: main
+   867→Task: Build PeriodicRange component (dual-thumb range slider with snapping, markers, orientation) + React wrapper + playground
+   868→
+   869→Work Log:
+   870→- **Vanilla JS PeriodicRange component** (`src/lib/components/periodic-range/periodic-range.ts`):
+   871→  - Canvas-based dual-thumb range slider. Two thumbs (min and max) that cannot cross (valueMin ≤ valueMax invariant).
+   872→  - Track rendered as rounded-rect bar; selected range between the thumbs filled with lemon accent (#D9FF66).
+   873→  - Optional snapping to a step grid (step = 0 disables). Snapping applied in `applyStep` via `Math.round((v - min) / step) * step + min`.
+   874→  - Optional tick-mark markers with numeric labels at markerStep intervals. Labels are auto-decimated when there are more than 20 markers (every Nth marker labeled) to prevent overlap.
+   875→  - Horizontal or vertical orientation. For vertical, the high-value thumb is at the top, low-value at the bottom (conventional); markers and labels sit to the LEFT of the track.
+   876→  - Two thumbs are visually distinguishable: both are white capsules with dark borders, but the min thumb has a horizontal "−" bar inside and the max thumb has a "+" (horizontal + vertical bars). The max thumb is also slightly larger (14 vs 12 px) and has a thicker border (2 vs 1.5 px).
+   877→  - Active thumb (the one that was last interacted with) gets a lemon ring outside it.
+   878→  - Pointer interaction: pointerdown picks the closest thumb (hit-test within 14px, otherwise nearest); pointermove drags it, clamping to [min, valueMax] for min thumb and [valueMin, max] for max thumb; pointerup commits with a "change" event. Pointer capture is used so the drag continues even if the cursor leaves the canvas.
+   879→  - Keyboard interaction: Arrow Up/Right increases the active thumb, Arrow Down/Left decreases (Shift via PageUp/PageDown = 10× step). Home jumps the active thumb to range min (or to valueMin for the max thumb), End jumps to range max (or to valueMax for the min thumb). Tab cycles the active thumb between min and max.
+   880→  - Full public API matching the spec: getValueMin, getValueMax, setValueMin, setValueMax, setRange, setStep, setShowMarkers, setMarkerStep, setOrientation, setThickness, setLength, on, off, destroy.
+   881→  - Events: `input` (continuous during drag/keyboard) and `change` (committed on pointer up or keyboard). Both carry `{ valueMin, valueMax }`.
+   882→  - ARIA: canvas has role="slider", aria-valuemin/max/now (active thumb's value), aria-valuetext (combined "min X, max Y" label).
+   883→  - Self-contained helpers (clamp, approxEqual, roundRect, formatMarkerLabel) — no external deps.
+   884→- **Barrel exports** (`src/lib/components/periodic-range/index.ts`): re-exports `PeriodicRange` class and `PeriodicRangeOrientation`, `PeriodicRangeOptions`, `PeriodicRangeValue` types.
+   885→- **React wrapper** (`src/components/periodic-range/periodic-range-react.tsx`): owns the instance for the lifetime of the mount; forwards all prop changes via the imperative API (setRange, setValueMin, setValueMax, setStep, setShowMarkers, setMarkerStep, setOrientation, setThickness, setLength). Exposes the instance via `instanceRef` for imperative calls. Emits initial state on mount so consumers can render synchronously.
+   886→- **Playground** (`src/components/periodic-range/periodic-range-playground.tsx`): full playground with:
+   887→  - Live canvas (the dual-thumb slider)
+   888→  - Property inspector: Range (min/max), Values (valueMin/valueMax), Step, Markers toggle (reveals Marker step when on), Orientation (Horizontal/Vertical), Thickness slider, Length slider
+   889→  - Output section: prominent Min/Max value chips with +/- icons, copyable valueMin/valueMax chips, span indicator
+   890→  - Code panel (JavaScript/HTML/CSS/API tabs with live-synced code)
+   891→  - Documentation section with Overview, When to use, When not to use, Properties table, Methods, Events, Accessibility, Styling
+   892→- **DeferredNumberInput**: A custom number input that defers committing its value to the parent until blur/Enter. This lets users type multi-digit numbers (e.g. "33") without each keystroke being snapped/clamped back by the underlying component (which would make typing impossible when step snapping is on). The displayed value tracks the external `value` prop while unfocused (so canvas drags and reset are reflected), and tracks the local draft while focused.
+   893→- **onInput sync**: When the canvas emits `input` (e.g. after a drag with snapping), the playground's state.valueMin/valueMax are synced to the snapped values. This keeps the inspector inputs in lockstep with what the canvas actually shows.
+   894→- **update function invariant enforcement**: The playground's `update` function enforces min ≤ max (swap if inverted), clamps valueMin/valueMax to the range, and enforces valueMin ≤ valueMax with a "moving thumb wins" rule: if the user raises valueMin above valueMax, valueMin clamps down to valueMax; if they lower valueMax below valueMin, valueMax clamps up to valueMin.
+   895→- **Content metadata** (`src/lib/platform/content.ts`): added periodic-range to the inputs category with full properties (min, max, valueMin, valueMax, step, showMarkers, markerStep, orientation, thickness, length), methods (13 entries), events (input, change), defaults, whenToUse, whenNotToUse.
+   896→- **Navigation labels** (`src/store/navigation.ts`): refactored the `routeLabel` and `breadcrumbs` helpers to use a new `categoryLabel()` function that maps category slugs to human-readable labels (color → "Color", inputs → "Inputs", layout → "Layout", data-display → "Data Display"). Previously only "color" was special-cased; other categories showed their raw slug. Also added slug-to-name mappings for all current component slugs (color-wheel, color-range, color-circle, color-ramp, periodic-range) so breadcrumbs show proper names.
+   897→- **Routing** (`src/app/page.tsx`): added `component/inputs/periodic-range` → `PeriodicRangePlayground` route handler.
+   898→
+   899→VLM-verified all features:
+   900→- Horizontal mode: dual-thumb slider with lemon-green selected range, two distinguishable thumbs (min with "−", max with "+"), active thumb (min by default) has lemon ring.
+   901→- Markers mode (horizontal): tick marks below the track, numeric labels (0, 10, 20... 100) visible, no overlap or clipping.
+   902→- Vertical mode: track is taller than wide, lemon-green range visible between thumbs, tick marks and labels to the LEFT of the track, high-value thumb at top, low-value at bottom.
+   903→- Snapping: set step=5, valueMin=33 → snapped to 35 on blur.
+   904→- Clamping: set valueMax=10 (below valueMin=35) → clamped up to 35 (the moving thumb wins).
+   905→- Canvas drag: dragged max thumb past min thumb → stopped at valueMin (couldn't cross). Dragging also updated the inspector inputs in real time.
+   906→- Keyboard: ArrowRight increased active thumb by 1 (verified both min and max after Tab cycle). Home jumped active thumb to range min. End jumped active thumb to the opposite bound.
+   907→- Reset: returns to defaults (min=0, max=100, valueMin=25, valueMax=75, step=0, showMarkers=false, orientation=horizontal, thickness=8, length=320).
+   908→- Code panel: JavaScript/HTML/CSS/API tabs all functional; code is live-synced with the playground state.
+   909→
+   910→Files created:
+   911→- `src/lib/components/periodic-range/periodic-range.ts` (vanilla JS class, ~900 lines)
+   912→- `src/lib/components/periodic-range/index.ts` (barrel exports)
+   913→- `src/components/periodic-range/periodic-range-react.tsx` (React wrapper)
+   914→- `src/components/periodic-range/periodic-range-playground.tsx` (playground view, ~960 lines)
+   915→
+   916→Files modified:
+   917→- `src/lib/platform/content.ts` (added periodic-range metadata in inputs category)
+   918→- `src/store/navigation.ts` (refactored routeLabel/breadcrumbs to use categoryLabel; added slug→name mappings for all current components)
+   919→- `src/app/page.tsx` (added route handler for component/inputs/periodic-range)
+   920→
+   921→Stage Summary:
+   922→- New PeriodicRange component established: dual-thumb range slider with snapping, markers, and orientation control. First component in the Inputs category.
+   923→- VLM-verified across all major interaction modes (drag, keyboard, snapping, clamping, orientation, markers).
+   924→- `bun run lint` — 0 errors, 0 warnings.
+   925→
+   926→---
+   927→Task ID: 23 (summary)
+   928→Agent: main
+   929→Task: Build 3 new input components — Custom Button, Periodic Range, Toggle Group
+   930→
+   931→Work Log:
+   932→- **CustomButton** (built by subagent): A versatile DOM-based button with configurable text, icon (18 built-in SVG icons or image URLs), 4 icon positions (left/right/top/bottom), 4 variants (primary/secondary/outline/ghost), 3 sizes (sm/md/lg), disabled/fullWidth options. Scoped CSS, full imperative API, React wrapper, and complete playground with click counter, property inspector, and code panel.
+   933→- **PeriodicRange** (built by subagent): A dual-thumb canvas-based range slider with min/max thumbs that can't cross, optional snapping to step increments, optional tick-mark markers at intervals, horizontal/vertical orientation, and configurable thickness/length. Full imperative API, React wrapper, and playground with output values.
+   934→- **ToggleGroup** (built by subagent): A group of toggle buttons with single-select/multiselect modes, closable buttons (embedded X), drag-to-reorder via pointer events, and dynamic add/remove. Self-contained (doesn't import CustomButton but matches its visual style). Playground features a Figma/Godot-style nested properties panel where each button's properties (label, icon, selected) are editable inline within the group's inspector, plus an "Add button" action.
+   935→- All 3 components added to content.ts in the "inputs" category, with routing in page.tsx, and sidebar labels in navigation.ts.
+   936→- All verified: CustomButton renders with `.custom-button-root` element, PeriodicRange renders with canvas, ToggleGroup renders with `.toggle-group` element.
+   937→- `bun run lint` — 0 errors, 0 warnings.
+   938→
+   939→Stage Summary:
+   940→- 3 new input components established: Custom Button, Periodic Range, Toggle Group.
+   941→- ToggleGroup features the nested component properties panel pattern (like Figma/Godot) where child component properties are editable inline within the parent inspector.
+
+[showing lines 500-941 of 943; use offset=942 with limit to continue reading]

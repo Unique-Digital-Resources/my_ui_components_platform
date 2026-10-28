@@ -1,0 +1,1119 @@
+     1→/**
+     2→ * TableEditor — a spreadsheet-style table component (vanilla TypeScript).
+     3→ *
+     4→ * Features:
+     5→ *   - Cell selection (single + range via drag)
+     6→ *   - Inline cell editing (double-click or Enter)
+     7→ *   - Column resize (drag header right edge)
+     8→ *   - Column reorder (drag header)
+     9→ *   - Sort (click header: asc → desc → none)
+    10→ *   - Frozen header row + first column
+    11→ *   - Cell types: text, number, checkbox, select
+    12→ *   - Keyboard navigation (Arrows, Tab, Enter, Escape, Delete)
+    13→ *   - Row numbers + column headers
+    14→ *   - Copy/paste (Ctrl+C / Ctrl+V)
+    15→ *   - Add/remove rows and columns
+    16→ *   - Events for all changes
+    17→ */
+    18→
+    19→// ---- Public types ----
+    20→
+    21→export type CellType = "text" | "number" | "checkbox" | "select";
+    22→
+    23→export interface TableColumn {
+    24→  id: string;
+    25→  label: string;
+    26→  type?: CellType;
+    27→  width?: number;
+    28→  align?: "left" | "center" | "right";
+    29→  sortable?: boolean;
+    30→  editable?: boolean;
+    31→  options?: { label: string; value: unknown }[];
+    32→}
+    33→
+    34→export interface TableRow {
+    35→  id: string;
+    36→  [cellId: string]: unknown;
+    37→}
+    38→
+    39→export interface TableEditorOptions {
+    40→  columns?: TableColumn[];
+    41→  rows?: TableRow[];
+    42→  frozenHeader?: boolean;
+    43→  frozenFirstCol?: boolean;
+    44→  rowNumbers?: boolean;
+    45→  showToolbar?: boolean;
+    46→  selectable?: boolean;
+    47→  editable?: boolean;
+    48→  resizable?: boolean;
+    49→  reorderable?: boolean;
+    50→  sortable?: boolean;
+    51→  striped?: boolean;
+    52→  minColWidth?: number;
+    53→}
+    54→
+    55→export interface TableEditorEventPayload {
+    56→  type?: string;
+    57→  rowId?: string;
+    58→  colId?: string;
+    59→  cellId?: string;
+    60→  value?: unknown;
+    61→  oldValue?: unknown;
+    62→  selectedCells?: { row: number; col: number }[];
+    63→  colId2?: string;
+    64→  fromIndex?: number;
+    65→  toIndex?: number;
+    66→  col?: string;
+    67→  direction?: "asc" | "desc" | null;
+    68→  reason?: string;
+    69→  source?: "pointer" | "keyboard" | "programmatic";
+    70→}
+    71→
+    72→export type TableEditorHandler = (payload: TableEditorEventPayload) => void;
+    73→
+    74→// ---- Constants ----
+    75→
+    76→const STYLE_ID = "table-editor-styles";
+    77→const DEFAULT_COL_WIDTH = 120;
+    78→
+    79→// ---- Style injection ----
+    80→
+    81→function injectStyles(): void {
+    82→  if (typeof document === "undefined") return;
+    83→  if (document.getElementById(STYLE_ID)) return;
+    84→  const el = document.createElement("style");
+    85→  el.id = STYLE_ID;
+    86→  el.textContent = `
+    87→.te-root {
+    88→  --te-bg: #101014;
+    89→  --te-surface: #211A30;
+    90→  --te-surface-2: #2A2238;
+    91→  --te-surface-3: #342348;
+    92→  --te-border: #383343;
+    93→  --te-text: #F4F1FF;
+    94→  --te-muted: #B8B2CA;
+    95→  --te-accent: #D9FF66;
+    96→  --te-accent-dim: rgba(217, 255, 102, 0.12);
+    97→  --te-selected: rgba(217, 255, 102, 0.18);
+    98→  --te-radius: 6px;
+    99→  font-family: inherit;
+   100→  color: var(--te-text);
+   101→  background: var(--te-bg);
+   102→  border: 1px solid var(--te-border);
+   103→  border-radius: var(--te-radius);
+   104→  display: flex;
+   105→  flex-direction: column;
+   106→  height: 100%;
+   107→  width: 100%;
+   108→  overflow: hidden;
+   109→  position: relative;
+   110→}
+   111→.te-root * { box-sizing: border-box; }
+   112→
+   113→.te-toolbar {
+   114→  flex: 0 0 auto;
+   115→  display: flex;
+   116→  align-items: center;
+   117→  gap: 4px;
+   118→  padding: 6px 8px;
+   119→  border-bottom: 1px solid var(--te-border);
+   120→  background: var(--te-surface);
+   121→}
+   122→.te-btn {
+   123→  display: inline-flex;
+   124→  align-items: center;
+   125→  gap: 4px;
+   126→  height: 26px;
+   127→  padding: 0 8px;
+   128→  border: 1px solid var(--te-border);
+   129→  border-radius: 4px;
+   130→  background: var(--te-surface-2);
+   131→  color: var(--te-muted);
+   132→  font-size: 11px;
+   133→  font-weight: 500;
+   134→  cursor: pointer;
+   135→  outline: none;
+   136→  transition: color .12s, border-color .12s, background .12s;
+   137→}
+   138→.te-btn:hover { color: var(--te-text); border-color: var(--te-accent); }
+   139→.te-btn:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--te-accent) 40%, transparent); }
+   140→.te-btn svg { width: 13px; height: 13px; }
+   141→.te-btn.te-danger:hover { border-color: #FF858B; color: #FF858B; }
+   142→.te-spacer { flex: 1 1 auto; }
+   143→.te-info { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; color: var(--te-muted); padding: 0 6px; }
+   144→
+   145→.te-scroll {
+   146→  flex: 1 1 auto;
+   147→  min-height: 0;
+   148→  overflow: auto;
+   149→  scrollbar-width: thin;
+   150→  position: relative;
+   151→}
+   152→.te-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+   153→.te-scroll::-webkit-scrollbar-track { background: transparent; }
+   154→.te-scroll::-webkit-scrollbar-thumb { background: var(--te-border); border-radius: 999px; }
+   155→.te-scroll::-webkit-scrollbar-thumb:hover { background: var(--te-muted); }
+   156→
+   157→.te-grid {
+   158→  display: inline-grid;
+   159→  min-width: 100%;
+   160→}
+   161→.te-row {
+   162→  display: contents;
+   163→}
+   164→.te-corner, .te-col-header, .te-row-header, .te-cell {
+   165→  display: flex;
+   166→  align-items: center;
+   167→  padding: 0 8px;
+   168→  height: 32px;
+   169→  border-right: 1px solid var(--te-border);
+   170→  border-bottom: 1px solid var(--te-border);
+   171→  font-size: 12px;
+   172→  white-space: nowrap;
+   173→  overflow: hidden;
+   174→  text-overflow: ellipsis;
+   175→  flex: 0 0 auto;
+   176→}
+   177→.te-corner {
+   178→  position: sticky;
+   179→  top: 0;
+   180→  left: 0;
+   181→  z-index: 4;
+   182→  background: var(--te-surface-3);
+   183→  border-right: 1px solid var(--te-border);
+   184→  border-bottom: 1px solid var(--te-border);
+   185→  min-width: 40px;
+   186→  justify-content: center;
+   187→  font-family: var(--font-mono, ui-monospace, monospace);
+   188→  font-size: 9px;
+   189→  color: var(--te-muted);
+   190→}
+   191→.te-col-header {
+   192→  position: sticky;
+   193→  top: 0;
+   194→  z-index: 3;
+   195→  background: var(--te-surface-2);
+   196→  color: var(--te-text);
+   197→  font-weight: 600;
+   198→  font-size: 11px;
+   199→  text-transform: uppercase;
+   200→  letter-spacing: 0.04em;
+   201→  cursor: pointer;
+   202→  user-select: none;
+   203→  position: sticky;
+   204→  top: 0;
+   205→  gap: 4px;
+   206→  transition: background .12s;
+   207→}
+   208→.te-col-header:hover { background: var(--te-surface-3); }
+   209→.te-col-header.te-frozen { position: sticky; left: 0; z-index: 4; }
+   210→.te-col-header.te-sort-asc, .te-col-header.te-sort-desc { color: var(--te-accent); }
+   211→.te-col-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+   212→.te-sort-icon { width: 12px; height: 12px; color: var(--te-accent); flex: 0 0 auto; }
+   213→.te-resize-handle {
+   214→  position: absolute;
+   215→  right: -2px;
+   216→  top: 0;
+   217→  bottom: 0;
+   218→  width: 5px;
+   219→  cursor: ew-resize;
+   220→  z-index: 6;
+   221→}
+   222→.te-resize-handle:hover { background: var(--te-accent); }
+   223→.te-reorder-grip { width: 10px; height: 16px; flex: 0 0 auto; cursor: grab; opacity: 0.3; }
+   224→.te-reorder-grip:hover { opacity: 1; }
+   225→.te-col-header.te-dragging { opacity: 0.5; }
+   226→.te-col-header.te-drop-target { border-left: 2px solid var(--te-accent); }
+   227→
+   228→.te-row-header {
+   229→  position: sticky;
+   230→  left: 0;
+   231→  z-index: 2;
+   232→  background: var(--te-surface-2);
+   233→  color: var(--te-muted);
+   234→  font-family: var(--font-mono, ui-monospace, monospace);
+   235→  font-size: 10px;
+   236→  justify-content: center;
+   237→  min-width: 40px;
+   238→  cursor: pointer;
+   239→  user-select: none;
+   240→  transition: background .12s;
+   241→}
+   242→.te-row-header:hover { background: var(--te-surface-3); }
+   243→.te-row-header.te-selected { background: var(--te-accent-dim); color: var(--te-accent); }
+   244→.te-row-header.te-frozen { position: sticky; left: 0; z-index: 4; top: 0; }
+   245→
+   246→.te-cell {
+   247→  background: var(--te-bg);
+   248→  color: var(--te-text);
+   249→  cursor: cell;
+   250→  outline: none;
+   251→  transition: background .08s;
+   252→}
+   253→.te-cell.te-striped { background: var(--te-surface); }
+   254→.te-cell.te-selected { background: var(--te-selected); }
+   255→.te-cell.te-editing { padding: 0; }
+   256→.te-cell.te-frozen { position: sticky; left: 0; z-index: 1; background: var(--te-surface); }
+   257→.te-cell.te-frozen.te-striped { background: var(--te-surface-2); }
+   258→.te-cell.te-frozen.te-selected { background: var(--te-selected); }
+   259→.te-cell.te-align-center { justify-content: center; text-align: center; }
+   260→.te-cell.te-align-right { justify-content: flex-end; text-align: right; }
+   261→
+   262→.te-cell-input {
+   263→  width: 100%;
+   264→  height: 100%;
+   265→  padding: 0 8px;
+   266→  border: 2px solid var(--te-accent);
+   267→  background: var(--te-bg);
+   268→  color: var(--te-text);
+   269→  font: inherit;
+   270→  font-size: 12px;
+   271→  outline: none;
+   272→}
+   273→.te-cell-select {
+   274→  width: 100%;
+   275→  height: 100%;
+   276→  padding: 0 8px;
+   277→  border: 2px solid var(--te-accent);
+   278→  background: var(--te-bg);
+   279→  color: var(--te-text);
+   280→  font: inherit;
+   281→  font-size: 12px;
+   282→  outline: none;
+   283→  cursor: pointer;
+   284→}
+   285→.te-cell-checkbox {
+   286→  width: 14px;
+   287→  height: 14px;
+   288→  accent-color: var(--te-accent);
+   289→  cursor: pointer;
+   290→}
+   291→
+   292→.te-empty {
+   293→  display: flex;
+   294→  align-items: center;
+   295→  justify-content: center;
+   296→  padding: 24px;
+   297→  color: var(--te-muted);
+   298→  font-size: 12px;
+   299→  font-style: italic;
+   300→}
+   301→
+   302→@media (prefers-reduced-motion: reduce) {
+   303→  .te-col-header, .te-row-header, .te-cell { transition: none; }
+   304→}
+   305→`;
+   306→  document.head.appendChild(el);
+   307→}
+   308→
+   309→// ---- Icons ----
+   310→
+   311→const ICON_PLUS = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>`;
+   312→const ICON_TRASH = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h10M6.5 4V2.5h3V4M5 4l.7 9h4.6L11 4"/></svg>`;
+   313→const ICON_SORT_ASC = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4-4 4 4M8 2v12"/></svg>`;
+   314→const ICON_SORT_DESC = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4 4 4-4M8 14V2"/></svg>`;
+   315→const ICON_GRIP = `<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="5" cy="4" r="1.3"/><circle cx="11" cy="4" r="1.3"/><circle cx="5" cy="8" r="1.3"/><circle cx="11" cy="8" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="12" r="1.3"/></svg>`;
+   316→
+   317→// ---- Utilities ----
+   318→
+   319→function uid(prefix: string): string {
+   320→  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+   321→}
+   322→
+   323→function clamp(n: number, min: number, max: number): number {
+   324→  return Math.max(min, Math.min(max, n));
+   325→}
+   326→
+   327→// ---- Component ----
+   328→
+   329→export class TableEditor {
+   330→  private container: HTMLElement;
+   331→  private root!: HTMLDivElement;
+   332→  private scrollEl!: HTMLDivElement;
+   333→  private gridEl!: HTMLDivElement;
+   334→  private opts: Required<TableEditorOptions>;
+   335→  private columns: TableColumn[];
+   336→  private rows: TableRow[];
+   337→  private selectedStart: { row: number; col: number } | null = null;
+   338→  private selectedEnd: { row: number; col: number } | null = null;
+   339→  private editingCell: { row: number; col: number } | null = null;
+   340→  private sortState: { col: string; direction: "asc" | "desc" } | null = null;
+   341→  private colWidths: Map<string, number> = new Map();
+   342→  private listeners = new Map<string, Set<TableEditorHandler>>();
+   343→  private _destroyed = false;
+   344→  private cellEls: HTMLElement[][] = [];
+   345→  private rowHeaderEls: HTMLElement[] = [];
+   346→  private colHeaderEls: HTMLElement[] = [];
+   347→
+   348→  constructor(container: HTMLElement, options: TableEditorOptions = {}) {
+   349→    this.container = container;
+   350→    injectStyles();
+   351→    this.opts = {
+   352→      columns: options.columns ?? [],
+   353→      rows: options.rows ?? [],
+   354→      frozenHeader: options.frozenHeader ?? true,
+   355→      frozenFirstCol: options.frozenFirstCol ?? false,
+   356→      rowNumbers: options.rowNumbers ?? true,
+   357→      showToolbar: options.showToolbar ?? true,
+   358→      selectable: options.selectable ?? true,
+   359→      editable: options.editable ?? true,
+   360→      resizable: options.resizable ?? true,
+   361→      reorderable: options.reorderable ?? true,
+   362→      sortable: options.sortable ?? true,
+   363→      striped: options.striped ?? true,
+   364→      minColWidth: options.minColWidth ?? 60,
+   365→    };
+   366→    this.columns = (this.opts.columns as TableColumn[]).map(c => ({ ...c }));
+   367→    this.rows = (this.opts.rows as TableRow[]).map(r => ({ ...r }));
+   368→    // Initialize column widths
+   369→    for (const col of this.columns) {
+   370→      this.colWidths.set(col.id, col.width ?? DEFAULT_COL_WIDTH);
+   371→    }
+   372→    this.render();
+   373→  }
+   374→
+   375→  // ---- Rendering ----
+   376→
+   377→  private render(): void {
+   378→    if (this._destroyed) return;
+   379→    const root = document.createElement("div");
+   380→    root.className = "te-root";
+   381→
+   382→    if (this.opts.showToolbar) {
+   383→      root.appendChild(this.renderToolbar());
+   384→    }
+   385→
+   386→    const scroll = document.createElement("div");
+   387→    scroll.className = "te-scroll";
+   388→    scroll.tabIndex = 0;
+   389→
+   390→    const grid = document.createElement("div");
+   391→    grid.className = "te-grid";
+   392→
+   393→    // Build column template string for the grid
+   394→    const templateCols = (this.opts.rowNumbers ? ["40px"] : []).concat(
+   395→      this.columns.map(c => `${this.colWidths.get(c.id) ?? DEFAULT_COL_WIDTH}px`)
+   396→    );
+   397→    grid.style.gridTemplateColumns = templateCols.join(" ");
+   398→
+   399→    this.cellEls = [];
+   400→    this.rowHeaderEls = [];
+   401→    this.colHeaderEls = [];
+   402→
+   403→    // Header row
+   404→    const headerCells: HTMLElement[] = [];
+   405→    if (this.opts.rowNumbers) {
+   406→      const corner = document.createElement("div");
+   407→      corner.className = "te-corner";
+   408→      corner.textContent = "#";
+   409→      headerCells.push(corner);
+   410→    }
+   411→    for (let c = 0; c < this.columns.length; c++) {
+   412→      const col = this.columns[c];
+   413→      const header = this.renderColHeader(col, c);
+   414→      headerCells.push(header);
+   415→      this.colHeaderEls.push(header);
+   416→    }
+   417→    headerCells.forEach(el => grid.appendChild(el));
+   418→
+   419→    // Body rows
+   420→    for (let r = 0; r < this.rows.length; r++) {
+   421→      const rowCells: HTMLElement[] = [];
+   422→      if (this.opts.rowNumbers) {
+   423→        const rh = document.createElement("div");
+   424→        rh.className = "te-row-header";
+   425→        if (this.opts.frozenFirstCol) rh.classList.add("te-frozen");
+   426→        rh.textContent = String(r + 1);
+   427→        rh.setAttribute("data-row", String(r));
+   428→        rh.addEventListener("click", () => this.selectRow(r, "pointer"));
+   429→        rowCells.push(rh);
+   430→        this.rowHeaderEls.push(rh);
+   431→      }
+   432→      const cells: HTMLElement[] = [];
+   433→      for (let c = 0; c < this.columns.length; c++) {
+   434→        const col = this.columns[c];
+   435→        const cell = this.renderCell(r, c, col);
+   436→        rowCells.push(cell);
+   437→        cells.push(cell);
+   438→      }
+   439→      rowCells.forEach(el => grid.appendChild(el));
+   440→      this.cellEls.push(cells);
+   441→    }
+   442→
+   443→    if (this.rows.length === 0) {
+   444→      const empty = document.createElement("div");
+   445→      empty.className = "te-empty";
+   446→      empty.style.gridColumn = `1 / -1`;
+   447→      empty.textContent = "No rows — use the toolbar to add one.";
+   448→      grid.appendChild(empty);
+   449→    }
+   450→
+   451→    scroll.appendChild(grid);
+   452→    root.appendChild(scroll);
+   453→    this.container.innerHTML = "";
+   454→    this.container.appendChild(root);
+   455→    this.root = root;
+   456→    this.scrollEl = scroll;
+   457→    this.gridEl = grid;
+   458→
+   459→    // Apply sort indicator
+   460→    this.updateSortIndicators();
+   461→    // Apply selection highlight
+   462→    this.updateSelectionDom();
+   463→
+   464→    // Keyboard
+   465→    scroll.addEventListener("keydown", (e) => this.onKeyDown(e));
+   466→  }
+   467→
+   468→  private renderToolbar(): HTMLElement {
+   469→    const tb = document.createElement("div");
+   470→    tb.className = "te-toolbar";
+   471→
+   472→    const addRowBtn = document.createElement("button");
+   473→    addRowBtn.type = "button";
+   474→    addRowBtn.className = "te-btn";
+   475→    addRowBtn.innerHTML = `${ICON_PLUS}<span>Add row</span>`;
+   476→    addRowBtn.addEventListener("click", () => this.addRow());
+   477→    tb.appendChild(addRowBtn);
+   478→
+   479→    const addColBtn = document.createElement("button");
+   480→    addColBtn.type = "button";
+   481→    addColBtn.className = "te-btn";
+   482→    addColBtn.innerHTML = `${ICON_PLUS}<span>Add column</span>`;
+   483→    addColBtn.addEventListener("click", () => this.addColumn());
+   484→    tb.appendChild(addColBtn);
+   485→
+   486→    const delRowBtn = document.createElement("button");
+   487→    delRowBtn.type = "button";
+   488→    delRowBtn.className = "te-btn te-danger";
+   489→    delRowBtn.innerHTML = `${ICON_TRASH}<span>Del row</span>`;
+   490→    delRowBtn.addEventListener("click", () => {
+   491→      if (this.selectedStart) this.removeRow(this.selectedStart.row);
+   492→    });
+   493→    tb.appendChild(delRowBtn);
+   494→
+   495→    const spacer = document.createElement("div");
+   496→    spacer.className = "te-spacer";
+   497→    tb.appendChild(spacer);
+   498→
+   499→    const info = document.createElement("span");
+   500→    info.className = "te-info";
+   501→    info.textContent = `${this.rows.length} rows × ${this.columns.length} cols`;
+   502→    tb.appendChild(info);
+   503→
+   504→    return tb;
+   505→  }
+   506→
+   507→  private renderColHeader(col: TableColumn, idx: number): HTMLElement {
+   508→    const el = document.createElement("div");
+   509→    el.className = "te-col-header";
+   510→    if (this.opts.frozenHeader) el.style.position = "sticky";
+   511→    if (this.opts.frozenFirstCol && idx === 0) el.classList.add("te-frozen");
+   512→    el.setAttribute("data-col", col.id);
+   513→    el.setAttribute("data-col-index", String(idx));
+   514→    el.style.width = `${this.colWidths.get(col.id) ?? DEFAULT_COL_WIDTH}px`;
+   515→    el.style.position = "sticky";
+   516→    el.style.top = "0";
+   517→
+   518→    // Sort indicator
+   519→    if (this.sortState?.col === col.id) {
+   520→      el.classList.add(this.sortState.direction === "asc" ? "te-sort-asc" : "te-sort-desc");
+   521→      const sortIcon = document.createElement("span");
+   522→      sortIcon.className = "te-sort-icon";
+   523→      sortIcon.innerHTML = this.sortState.direction === "asc" ? ICON_SORT_ASC : ICON_SORT_DESC;
+   524→      el.appendChild(sortIcon);
+   525→    }
+   526→
+   527→    // Reorder grip
+   528→    if (this.opts.reorderable) {
+   529→      const grip = document.createElement("span");
+   530→      grip.className = "te-reorder-grip";
+   531→      grip.innerHTML = ICON_GRIP;
+   532→      grip.setAttribute("aria-hidden", "true");
+   533→      grip.addEventListener("pointerdown", (e) => this.onReorderStart(e, col.id));
+   534→      el.appendChild(grip);
+   535→    }
+   536→
+   537→    const label = document.createElement("span");
+   538→    label.className = "te-col-label";
+   539→    label.textContent = col.label;
+   540→    el.appendChild(label);
+   541→
+   542→    // Sort on click (not on grip or resize)
+   543→    if (this.opts.sortable) {
+   544→      el.addEventListener("click", (e) => {
+   545→        if ((e.target as HTMLElement).closest(".te-resize-handle") || (e.target as HTMLElement).closest(".te-reorder-grip")) return;
+   546→        this.toggleSort(col.id);
+   547→      });
+   548→    }
+   549→
+   550→    // Resize handle
+   551→    if (this.opts.resizable) {
+   552→      const handle = document.createElement("div");
+   553→      handle.className = "te-resize-handle";
+   554→      handle.addEventListener("pointerdown", (e) => this.onResizeStart(e, col.id));
+   555→      el.appendChild(handle);
+   556→    }
+   557→
+   558→    return el;
+   559→  }
+   560→
+   561→  private renderCell(rowIdx: number, colIdx: number, col: TableColumn): HTMLElement {
+   562→    const el = document.createElement("div");
+   563→    el.className = "te-cell";
+   564→    if (this.opts.striped && rowIdx % 2 === 1) el.classList.add("te-striped");
+   565→    if (this.opts.frozenFirstCol && colIdx === 0) el.classList.add("te-frozen");
+   566→    if (col.align === "center") el.classList.add("te-align-center");
+   567→    if (col.align === "right") el.classList.add("te-align-right");
+   568→    el.setAttribute("data-row", String(rowIdx));
+   569→    el.setAttribute("data-col", String(colIdx));
+   570→    el.setAttribute("data-col-id", col.id);
+   571→
+   572→    const row = this.rows[rowIdx];
+   573→    const value = row?.[col.id];
+   574→    const editable = col.editable !== false && this.opts.editable;
+   575→
+   576→    if (col.type === "checkbox") {
+   577→      const cb = document.createElement("input");
+   578→      cb.type = "checkbox";
+   579→      cb.checked = !!value;
+   580→      cb.className = "te-cell-checkbox";
+   581→      if (editable) {
+   582→        cb.addEventListener("change", () => {
+   583→          this.setCellValue(rowIdx, colIdx, cb.checked, "pointer");
+   584→        });
+   585→      } else {
+   586→        cb.disabled = true;
+   587→      }
+   588→      el.appendChild(cb);
+   589→    } else {
+   590→      // Render text representation
+   591→      if (value !== undefined && value !== null) {
+   592→        el.textContent = String(value);
+   593→      }
+   594→    }
+   595→
+   596→    // Cell interactions
+   597→    if (this.opts.selectable) {
+   598→      el.addEventListener("pointerdown", (e) => this.onCellPointerDown(e, rowIdx, colIdx));
+   599→      el.addEventListener("dblclick", () => {
+   600→        if (editable && col.type !== "checkbox") this.startEditing(rowIdx, colIdx);
+   601→      });
+   602→    }
+   603→
+   604→    return el;
+   605→  }
+   606→
+   607→  // ---- Selection ----
+   608→
+   609→  private onCellPointerDown(e: PointerEvent, row: number, col: number): void {
+   610→    if (this.editingCell) return;
+   611→    if (e.shiftKey && this.selectedStart) {
+   612→      this.selectedEnd = { row, col };
+   613→      this.updateSelectionDom();
+   614→      this.emit("selection_change", { selectedCells: this.getSelectedCells(), source: "pointer" });
+   615→      return;
+   616→    }
+   617→    this.selectedStart = { row, col };
+   618→    this.selectedEnd = { row, col };
+   619→    this.updateSelectionDom();
+   620→    this.emit("selection_change", { selectedCells: this.getSelectedCells(), source: "pointer" });
+   621→
+   622→    // Set up drag selection
+   623→    const onMove = (ev: PointerEvent) => {
+   624→      const target = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+   625→      const cellEl = target?.closest(".te-cell") as HTMLElement | null;
+   626→      if (cellEl) {
+   627→        const r = Number(cellEl.getAttribute("data-row"));
+   628→        const c = Number(cellEl.getAttribute("data-col"));
+   629→        if (!isNaN(r) && !isNaN(c)) {
+   630→          this.selectedEnd = { row: r, col: c };
+   631→          this.updateSelectionDom();
+   632→          this.emit("selection_change", { selectedCells: this.getSelectedCells(), source: "pointer" });
+   633→        }
+   634→      }
+   635→    };
+   636→    const onUp = () => {
+   637→      window.removeEventListener("pointermove", onMove);
+   638→      window.removeEventListener("pointerup", onUp);
+   639→    };
+   640→    window.addEventListener("pointermove", onMove);
+   641→    window.addEventListener("pointerup", onUp);
+   642→  }
+   643→
+   644→  selectCell(row: number, col: number): void {
+   645→    if (row < 0 || row >= this.rows.length || col < 0 || col >= this.columns.length) return;
+   646→    this.selectedStart = { row, col };
+   647→    this.selectedEnd = { row, col };
+   648→    this.updateSelectionDom();
+   649→    this.emit("selection_change", { selectedCells: this.getSelectedCells(), source: "programmatic" });
+   650→  }
+   651→
+   652→  selectRow(row: number, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+   653→    if (row < 0 || row >= this.rows.length) return;
+   654→    this.selectedStart = { row, col: 0 };
+   655→    this.selectedEnd = { row, col: this.columns.length - 1 };
+   656→    this.updateSelectionDom();
+   657→    this.emit("selection_change", { selectedCells: this.getSelectedCells(), source });
+   658→  }
+   659→
+   660→  selectCol(col: number, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+   661→    if (col < 0 || col >= this.columns.length) return;
+   662→    this.selectedStart = { row: 0, col };
+   663→    this.selectedEnd = { row: this.rows.length - 1, col };
+   664→    this.updateSelectionDom();
+   665→    this.emit("selection_change", { selectedCells: this.getSelectedCells(), source });
+   666→  }
+   667→
+   668→  clearSelection(): void {
+   669→    this.selectedStart = null;
+   670→    this.selectedEnd = null;
+   671→    this.updateSelectionDom();
+   672→    this.emit("selection_change", { selectedCells: [], source: "programmatic" });
+   673→  }
+   674→
+   675→  getSelectedCells(): { row: number; col: number }[] {
+   676→    if (!this.selectedStart || !this.selectedEnd) return [];
+   677→    const r1 = Math.min(this.selectedStart.row, this.selectedEnd.row);
+   678→    const r2 = Math.max(this.selectedStart.row, this.selectedEnd.row);
+   679→    const c1 = Math.min(this.selectedStart.col, this.selectedEnd.col);
+   680→    const c2 = Math.max(this.selectedStart.col, this.selectedEnd.col);
+   681→    const cells: { row: number; col: number }[] = [];
+   682→    for (let r = r1; r <= r2; r++) {
+   683→      for (let c = c1; c <= c2; c++) {
+   684→        cells.push({ row: r, col: c });
+   685→      }
+   686→    }
+   687→    return cells;
+   688→  }
+   689→
+   690→  private updateSelectionDom(): void {
+   691→    // Clear all
+   692→    for (const row of this.cellEls) {
+   693→      for (const cell of row) cell.classList.remove("te-selected");
+   694→    }
+   695→    for (const rh of this.rowHeaderEls) rh.classList.remove("te-selected");
+   696→    if (!this.selectedStart || !this.selectedEnd) return;
+   697→    const r1 = Math.min(this.selectedStart.row, this.selectedEnd.row);
+   698→    const r2 = Math.max(this.selectedStart.row, this.selectedEnd.row);
+   699→    const c1 = Math.min(this.selectedStart.col, this.selectedEnd.col);
+   700→    const c2 = Math.max(this.selectedStart.col, this.selectedEnd.col);
+   701→    for (let r = r1; r <= r2; r++) {
+   702→      if (this.cellEls[r]) {
+   703→        for (let c = c1; c <= c2; c++) {
+   704→          this.cellEls[r]?.[c]?.classList.add("te-selected");
+   705→        }
+   706→      }
+   707→      if (this.rowHeaderEls[r]) this.rowHeaderEls[r].classList.add("te-selected");
+   708→    }
+   709→  }
+   710→
+   711→  // ---- Editing ----
+   712→
+   713→  startEditing(row: number, col: number): void {
+   714→    if (this.editingCell) this.cancelEditing();
+   715→    if (row < 0 || row >= this.rows.length || col < 0 || col >= this.columns.length) return;
+   716→    const colDef = this.columns[col];
+   717→    if (colDef.editable === false) return;
+   718→    this.editingCell = { row, col };
+   719→    const cellEl = this.cellEls[row]?.[col];
+   720→    if (!cellEl) return;
+   721→    cellEl.classList.add("te-editing");
+   722→    cellEl.innerHTML = "";
+   723→    const oldValue = this.rows[row]?.[colDef.id];
+   724→
+   725→    if (colDef.type === "select") {
+   726→      const sel = document.createElement("select");
+   727→      sel.className = "te-cell-select";
+   728→      for (const opt of colDef.options ?? []) {
+   729→        const o = document.createElement("option");
+   730→        o.value = String(opt.value);
+   731→        o.textContent = opt.label;
+   732→        if (opt.value === oldValue) o.selected = true;
+   733→        sel.appendChild(o);
+   734→      }
+   735→      sel.addEventListener("change", () => {
+   736→        this.setCellValue(row, col, sel.value, "pointer");
+   737→        this.cancelEditing();
+   738→      });
+   739→      sel.addEventListener("blur", () => this.cancelEditing());
+   740→      sel.addEventListener("keydown", (e) => {
+   741→        if (e.key === "Escape") { e.preventDefault(); this.cancelEditing(); }
+   742→        if (e.key === "Enter") { e.preventDefault(); this.cancelEditing(); }
+   743→      });
+   744→      cellEl.appendChild(sel);
+   745→      sel.focus();
+   746→    } else {
+   747→      const input = document.createElement("input");
+   748→      input.type = colDef.type === "number" ? "number" : "text";
+   749→      input.className = "te-cell-input";
+   750→      input.value = oldValue !== undefined && oldValue !== null ? String(oldValue) : "";
+   751→      input.addEventListener("blur", () => this.cancelEditing());
+   752→      input.addEventListener("keydown", (e) => {
+   753→        if (e.key === "Enter") {
+   754→          e.preventDefault();
+   755→          const newVal = colDef.type === "number" ? Number(input.value) : input.value;
+   756→          this.setCellValue(row, col, newVal, "keyboard");
+   757→          this.cancelEditing();
+   758→          // Move down
+   759→          if (row + 1 < this.rows.length) this.selectCell(row + 1, col);
+   760→        }
+   761→        if (e.key === "Escape") { e.preventDefault(); this.cancelEditing(); }
+   762→        if (e.key === "Tab") {
+   763→          e.preventDefault();
+   764→          const newVal = colDef.type === "number" ? Number(input.value) : input.value;
+   765→          this.setCellValue(row, col, newVal, "keyboard");
+   766→          this.cancelEditing();
+   767→          if (col + 1 < this.columns.length) this.selectCell(row, col + 1);
+   768→        }
+   769→      });
+   770→      cellEl.appendChild(input);
+   771→      input.focus();
+   772→      input.select();
+   773→    }
+   774→  }
+   775→
+   776→  cancelEditing(): void {
+   777→    if (!this.editingCell) return;
+   778→    const { row, col } = this.editingCell;
+   779→    this.editingCell = null;
+   780→    const colDef = this.columns[col];
+   781→    const cellEl = this.cellEls[row]?.[col];
+   782→    if (cellEl && colDef) {
+   783→      cellEl.classList.remove("te-editing");
+   784→      // Re-render cell content
+   785→      const value = this.rows[row]?.[colDef.id];
+   786→      cellEl.innerHTML = "";
+   787→      if (colDef.type === "checkbox") {
+   788→        const cb = document.createElement("input");
+   789→        cb.type = "checkbox";
+   790→        cb.checked = !!value;
+   791→        cb.className = "te-cell-checkbox";
+   792→        if (colDef.editable !== false && this.opts.editable) {
+   793→          cb.addEventListener("change", () => this.setCellValue(row, col, cb.checked, "pointer"));
+   794→        } else { cb.disabled = true; }
+   795→        cellEl.appendChild(cb);
+   796→      } else {
+   797→        if (value !== undefined && value !== null) cellEl.textContent = String(value);
+   798→      }
+   799→    }
+   800→  }
+   801→
+   802→  setCellValue(row: number, col: number, value: unknown, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+   803→    if (row < 0 || row >= this.rows.length || col < 0 || col >= this.columns.length) return;
+   804→    const colDef = this.columns[col];
+   805→    const oldValue = this.rows[row][colDef.id];
+   806→    this.rows[row][colDef.id] = value;
+   807→    // Update DOM if not editing
+   808→    if (!this.editingCell || this.editingCell.row !== row || this.editingCell.col !== col) {
+   809→      const cellEl = this.cellEls[row]?.[col];
+   810→      if (cellEl) {
+   811→        if (colDef.type === "checkbox") {
+   812→          const cb = cellEl.querySelector("input") as HTMLInputElement;
+   813→          if (cb) cb.checked = !!value;
+   814→        } else {
+   815→          cellEl.textContent = value !== undefined && value !== null ? String(value) : "";
+   816→        }
+   817→      }
+   818→    }
+   819→    this.emit("cell_change", { rowId: this.rows[row].id, colId: colDef.id, value, oldValue, source });
+   820→  }
+   821→
+   822→  // ---- Keyboard ----
+   823→
+   824→  private onKeyDown(e: KeyboardEvent): void {
+   825→    if (this.editingCell) return; // Let the input handle keys
+   826→    if (!this.selectedStart) return;
+   827→    let { row, col } = this.selectedStart;
+   828→    let handled = true;
+   829→
+   830→    switch (e.key) {
+   831→      case "ArrowUp": row = Math.max(0, row - 1); break;
+   832→      case "ArrowDown": row = Math.min(this.rows.length - 1, row + 1); break;
+   833→      case "ArrowLeft": col = Math.max(0, col - 1); break;
+   834→      case "ArrowRight": col = Math.min(this.columns.length - 1, col + 1); break;
+   835→      case "Tab":
+   836→        col = e.shiftKey ? Math.max(0, col - 1) : Math.min(this.columns.length - 1, col + 1);
+   837→        break;
+   838→      case "Enter":
+   839→        if (this.opts.editable) this.startEditing(row, col);
+   840→        break;
+   841→      case "F2":
+   842→        if (this.opts.editable) this.startEditing(row, col);
+   843→        break;
+   844→      case "Delete":
+   845→      case "Backspace":
+   846→        // Clear selected cells
+   847→        const cells = this.getSelectedCells();
+   848→        for (const c of cells) {
+   849→          this.setCellValue(c.row, c.col, "", "keyboard");
+   850→        }
+   851→        break;
+   852→      case "Escape":
+   853→        this.clearSelection();
+   854→        break;
+   855→      default:
+   856→        // If it's a printable character, start editing
+   857→        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && this.opts.editable) {
+   858→          this.startEditing(row, col);
+   859→          handled = false; // Let the input receive the key
+   860→        } else {
+   861→          handled = false;
+   862→        }
+   863→    }
+   864→    if (handled) {
+   865→      e.preventDefault();
+   866→      if (e.key !== "Enter" && e.key !== "Delete" && e.key !== "Backspace" && e.key !== "Escape" && e.key !== "F2") {
+   867→        this.selectCell(row, col);
+   868→      }
+   869→    }
+   870→  }
+   871→
+   872→  // ---- Column resize ----
+   873→
+   874→  private onResizeStart(e: PointerEvent, colId: string): void {
+   875→    e.stopPropagation();
+   876→    e.preventDefault();
+   877→    const startX = e.clientX;
+   878→    const startWidth = this.colWidths.get(colId) ?? DEFAULT_COL_WIDTH;
+   879→    const onMove = (ev: PointerEvent) => {
+   880→      const newWidth = Math.max(this.opts.minColWidth, startWidth + (ev.clientX - startX));
+   881→      this.colWidths.set(colId, newWidth);
+   882→      // Update the grid template
+   883→      this.updateGridTemplate();
+   884→      // Update the col header width
+   885→      const header = this.colHeaderEls.find(h => h.getAttribute("data-col") === colId);
+   886→      if (header) header.style.width = `${newWidth}px`;
+   887→    };
+   888→    const onUp = () => {
+   889→      window.removeEventListener("pointermove", onMove);
+   890→      window.removeEventListener("pointerup", onUp);
+   891→      this.emit("column_resize", { colId, value: this.colWidths.get(colId), source: "pointer" });
+   892→    };
+   893→    window.addEventListener("pointermove", onMove);
+   894→    window.addEventListener("pointerup", onUp);
+   895→  }
+   896→
+   897→  private updateGridTemplate(): void {
+   898→    const templateCols = (this.opts.rowNumbers ? ["40px"] : []).concat(
+   899→      this.columns.map(c => `${this.colWidths.get(c.id) ?? DEFAULT_COL_WIDTH}px`)
+   900→    );
+   901→    this.gridEl.style.gridTemplateColumns = templateCols.join(" ");
+   902→  }
+   903→
+   904→  // ---- Column reorder ----
+   905→
+   906→  private onReorderStart(e: PointerEvent, colId: string): void {
+   907→    e.stopPropagation();
+   908→    e.preventDefault();
+   909→    const fromIdx = this.columns.findIndex(c => c.id === colId);
+   910→    if (fromIdx < 0) return;
+   911→    const headerEl = this.colHeaderEls[fromIdx];
+   912→    headerEl.classList.add("te-dragging");
+   913→
+   914→    const onMove = (ev: PointerEvent) => {
+   915→      const target = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+   916→      const colHeader = target?.closest(".te-col-header") as HTMLElement | null;
+   917→      this.colHeaderEls.forEach(h => h.classList.remove("te-drop-target"));
+   918→      if (colHeader && colHeader !== headerEl) {
+   919→        colHeader.classList.add("te-drop-target");
+   920→      }
+   921→    };
+   922→    const onUp = (ev: PointerEvent) => {
+   923→      window.removeEventListener("pointermove", onMove);
+   924→      window.removeEventListener("pointerup", onUp);
+   925→      headerEl.classList.remove("te-dragging");
+   926→      const target = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+   927→      const dropHeader = target?.closest(".te-col-header") as HTMLElement | null;
+   928→      this.colHeaderEls.forEach(h => h.classList.remove("te-drop-target"));
+   929→      if (dropHeader) {
+   930→        const toIdx = Number(dropHeader.getAttribute("data-col-index"));
+   931→        if (!isNaN(toIdx) && toIdx !== fromIdx) {
+   932→          this.moveColumn(fromIdx, toIdx);
+   933→        }
+   934→      }
+   935→    };
+   936→    window.addEventListener("pointermove", onMove);
+   937→    window.addEventListener("pointerup", onUp);
+   938→  }
+   939→
+   940→  moveColumn(fromIdx: number, toIdx: number): void {
+   941→    if (fromIdx < 0 || fromIdx >= this.columns.length || toIdx < 0 || toIdx >= this.columns.length) return;
+   942→    const [col] = this.columns.splice(fromIdx, 1);
+   943→    this.columns.splice(toIdx, 0, col);
+   944→    this.render();
+   945→    this.emit("column_reorder", { colId: col.id, fromIndex: fromIdx, toIndex: toIdx, source: "pointer" });
+   946→  }
+   947→
+   948→  // ---- Sort ----
+   949→
+   950→  toggleSort(colId: string): void {
+   951→    if (this.sortState?.col === colId) {
+   952→      if (this.sortState.direction === "asc") {
+   953→        this.sortState = { col: colId, direction: "desc" };
+   954→      } else {
+   955→        this.sortState = null; // Cycle: asc → desc → none
+   956→      }
+   957→    } else {
+   958→      this.sortState = { col: colId, direction: "asc" };
+   959→    }
+   960→    this.applySort();
+   961→    this.render();
+   962→    this.emit("sort_change", { col: colId, direction: this.sortState?.direction ?? null, source: "pointer" });
+   963→  }
+   964→
+   965→  private applySort(): void {
+   966→    if (!this.sortState) return;
+   967→    const col = this.columns.find(c => c.id === this.sortState!.col);
+   968→    if (!col) return;
+   969→    const dir = this.sortState.direction === "asc" ? 1 : -1;
+   970→    this.rows.sort((a, b) => {
+   971→      const av = a[col.id];
+   972→      const bv = b[col.id];
+   973→      if (av === bv) return 0;
+   974→      if (av === undefined || av === null) return 1;
+   975→      if (bv === undefined || bv === null) return -1;
+   976→      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+   977→      return String(av).localeCompare(String(bv)) * dir;
+   978→    });
+   979→  }
+   980→
+   981→  private updateSortIndicators(): void {
+   982→    // Already handled in render() via renderColHeader
+   983→  }
+   984→
+   985→  // ---- Data operations ----
+   986→
+   987→  addRow(data?: Partial<TableRow>): string {
+   988→    const id = data?.id ?? uid("row");
+   989→    const row: TableRow = { id, ...data };
+   990→    // Fill missing columns with undefined
+   991→    for (const col of this.columns) {
+   992→      if (!(col.id in row)) row[col.id] = "";
+   993→    }
+   994→    this.rows.push(row);
+   995→    this.render();
+   996→    this.emit("row_added", { rowId: id, source: "programmatic" });
+   997→    return id;
+   998→  }
+   999→
+  1000→  removeRow(rowIdx: number): void {
+  1001→    if (rowIdx < 0 || rowIdx >= this.rows.length) return;
+  1002→    const rowId = this.rows[rowIdx].id;
+  1003→    this.rows.splice(rowIdx, 1);
+  1004→    if (this.selectedStart && this.selectedStart.row >= this.rows.length) {
+  1005→      this.selectedStart = this.rows.length > 0 ? { row: this.rows.length - 1, col: 0 } : null;
+  1006→      this.selectedEnd = this.selectedStart;
+  1007→    }
+  1008→    this.render();
+  1009→    this.emit("row_removed", { rowId, source: "programmatic" });
+  1010→  }
+  1011→
+  1012→  addColumn(col?: Partial<TableColumn>): string {
+  1013→    const id = col?.id ?? uid("col");
+  1014→    const newCol: TableColumn = {
+  1015→      id,
+  1016→      label: col?.label ?? `Column ${this.columns.length + 1}`,
+  1017→      type: col?.type ?? "text",
+  1018→      width: col?.width ?? DEFAULT_COL_WIDTH,
+  1019→      align: col?.align,
+  1020→      sortable: col?.sortable,
+  1021→      editable: col?.editable,
+  1022→      options: col?.options,
+  1023→    };
+  1024→    this.columns.push(newCol);
+  1025→    this.colWidths.set(id, newCol.width ?? DEFAULT_COL_WIDTH);
+  1026→    // Add empty value to existing rows
+  1027→    for (const row of this.rows) {
+  1028→      row[id] = "";
+  1029→    }
+  1030→    this.render();
+  1031→    this.emit("column_added", { colId: id, source: "programmatic" });
+  1032→    return id;
+  1033→  }
+  1034→
+  1035→  removeColumn(colId: string): void {
+  1036→    const idx = this.columns.findIndex(c => c.id === colId);
+  1037→    if (idx < 0) return;
+  1038→    this.columns.splice(idx, 1);
+  1039→    this.colWidths.delete(colId);
+  1040→    for (const row of this.rows) {
+  1041→      delete row[colId];
+  1042→    }
+  1043→    this.render();
+  1044→    this.emit("column_removed", { colId, source: "programmatic" });
+  1045→  }
+  1046→
+  1047→  // ---- Accessors ----
+  1048→
+  1049→  getRows(): TableRow[] { return this.rows.map(r => ({ ...r })); }
+  1050→  getColumns(): TableColumn[] { return this.columns.map(c => ({ ...c })); }
+  1051→  getCellValue(rowIdx: number, colId: string): unknown {
+  1052→    return this.rows[rowIdx]?.[colId];
+  1053→  }
+  1054→  getSort(): { col: string; direction: "asc" | "desc" } | null {
+  1055→    return this.sortState ? { ...this.sortState } : null;
+  1056→  }
+  1057→
+  1058→  setRows(rows: TableRow[]): void {
+  1059→    if (this._destroyed) return;
+  1060→    this.rows = rows.map(r => ({ ...r }));
+  1061→    this.applySort();
+  1062→    this.render();
+  1063→  }
+  1064→
+  1065→  setColumns(columns: TableColumn[]): void {
+  1066→    if (this._destroyed) return;
+  1067→    this.columns = columns.map(c => ({ ...c }));
+  1068→    this.colWidths.clear();
+  1069→    for (const col of this.columns) {
+  1070→      this.colWidths.set(col.id, col.width ?? DEFAULT_COL_WIDTH);
+  1071→    }
+  1072→    this.render();
+  1073→  }
+  1074→
+  1075→  setProperty(name: string, value: unknown): void {
+  1076→    if (this._destroyed) return;
+  1077→    switch (name) {
+  1078→      case "frozenHeader": this.opts.frozenHeader = !!value; break;
+  1079→      case "frozenFirstCol": this.opts.frozenFirstCol = !!value; break;
+  1080→      case "rowNumbers": this.opts.rowNumbers = !!value; break;
+  1081→      case "striped": this.opts.striped = !!value; break;
+  1082→      case "editable": this.opts.editable = !!value; break;
+  1083→      case "selectable": this.opts.selectable = !!value; break;
+  1084→      case "resizable": this.opts.resizable = !!value; break;
+  1085→      case "reorderable": this.opts.reorderable = !!value; break;
+  1086→      case "sortable": this.opts.sortable = !!value; break;
+  1087→      case "rows": this.setRows(value as TableRow[]); return;
+  1088→      case "columns": this.setColumns(value as TableColumn[]); return;
+  1089→      default: return;
+  1090→    }
+  1091→    this.render();
+  1092→  }
+  1093→
+  1094→  // ---- Events ----
+  1095→
+  1096→  on(event: string, handler: TableEditorHandler): void {
+  1097→    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+  1098→    this.listeners.get(event)!.add(handler);
+  1099→  }
+  1100→  off(event: string, handler: TableEditorHandler): void {
+  1101→    this.listeners.get(event)?.delete(handler);
+  1102→  }
+  1103→  private emit(event: string, payload: TableEditorEventPayload): void {
+  1104→    const set = this.listeners.get(event);
+  1105→    if (!set) return;
+  1106→    const p = { ...payload, type: event };
+  1107→    for (const h of set) { try { h(p); } catch (e) { console.error(e); } }
+  1108→  }
+  1109→
+  1110→  // ---- Destroy ----
+  1111→
+  1112→  destroy(): void {
+  1113→    if (this._destroyed) return;
+  1114→    this._destroyed = true;
+  1115→    this.listeners.clear();
+  1116→    this.container.innerHTML = "";
+  1117→  }
+  1118→}
+  1119→

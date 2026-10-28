@@ -1,0 +1,834 @@
+     1→/**
+     2→ * RichTextEditor — a pluggable rich-text editor with a component registry
+     3→ * (vanilla TypeScript).
+     4→ *
+     5→ * Design principles:
+     6→ *   - Registry-based: inline and block components are registered with a
+     7→ *     syntax trigger (like markdown: # for heading, * for bold, > for quote,
+     8→ *     etc.). The host can add custom components and syntax at runtime.
+     9→ *   - Realtime mode: when enabled, syntax is rendered live as the user types
+    10→ *     (like Obsidian's live preview). When disabled, raw syntax is shown.
+    11→ *   - Toolbar: built-in formatting commands (bold, italic, headings, lists,
+    12→ *     quotes, code, links) using the shared command registry pattern.
+    13→ *   - contenteditable-based: native browser editing, no canvas.
+    14→ *
+    15→ * Architecture:
+    16→ *   - `RTEComponentRegistry`: singleton map of component name → definition.
+    17→ *     Each definition has: type (inline/block), trigger (syntax prefix),
+    18→ *     render function (text → HTML), and optional toolbar command.
+    19→ *   - `RichTextEditor` class: manages the contenteditable area, toolbar,
+    20→ *     realtime parsing, and command execution.
+    21→ */
+    22→
+    23→// ---- Public types ----
+    24→
+    25→export type RTEComponentType = "inline" | "block";
+    26→
+    27→export interface RTEComponentDef {
+    28→  /** Unique name, e.g. "heading1", "bold", "quote", "code-block". */
+    29→  name: string;
+    30→  type: RTEComponentType;
+    31→  /** Syntax trigger. For block: line prefix (e.g. "# ", "## ", "> "). For inline: wrapper (e.g. "**", "*", "`"). */
+    32→  trigger?: string;
+    33→  /** Render function: takes the inner text, returns HTML string. */
+    34→  render: (text: string) => string;
+    35→  /** Optional toolbar label/icon for the command. */
+    36→  toolbarLabel?: string;
+    37→  /** Optional toolbar icon (inline SVG string). */
+    38→  toolbarIcon?: string;
+    39→  /** Optional keyboard shortcut (e.g. "Meta+B"). */
+    40→  shortcut?: string;
+    41→}
+    42→
+    43→export interface RichTextEditorOptions {
+    44→  content?: string;
+    45→  realtime?: boolean;
+    46→  showToolbar?: boolean;
+    47→  placeholder?: string;
+    48→  readOnly?: boolean;
+    49→  spellcheck?: boolean;
+    50→}
+    51→
+    52→export interface RichTextEditorEventPayload {
+    53→  type?: string;
+    54→  content?: string;
+    55→  html?: string;
+    56→  componentName?: string;
+    57→  source?: "pointer" | "keyboard" | "programmatic";
+    58→}
+    59→
+    60→export type RichTextEditorHandler = (payload: RichTextEditorEventPayload) => void;
+    61→
+    62→// ---- Registry ----
+    63→
+    64→class RTEComponentRegistryImpl {
+    65→  private components = new Map<string, RTEComponentDef>();
+    66→
+    67→  register(def: RTEComponentDef): void {
+    68→    this.components.set(def.name, { ...def });
+    69→  }
+    70→  registerAll(defs: RTEComponentDef[]): void {
+    71→    for (const d of defs) this.register(d);
+    72→  }
+    73→  get(name: string): RTEComponentDef | undefined {
+    74→    return this.components.get(name);
+    75→  }
+    76→  has(name: string): boolean {
+    77→    return this.components.has(name);
+    78→  }
+    79→  list(): RTEComponentDef[] {
+    80→    return Array.from(this.components.values());
+    81→  }
+    82→  byType(type: RTEComponentType): RTEComponentDef[] {
+    83→    return this.list().filter(c => c.type === type);
+    84→  }
+    85→  /** Find a block component by line prefix. */
+    86→  findBlockByPrefix(line: string): RTEComponentDef | undefined {
+    87→    // Sort by trigger length descending so "### " matches before "# "
+    88→    const blocks = this.byType("block").filter(c => c.trigger).sort((a, b) => (b.trigger!.length - a.trigger!.length));
+    89→    for (const block of blocks) {
+    90→      if (line.startsWith(block.trigger!)) return block;
+    91→    }
+    92→    return undefined;
+    93→  }
+    94→  /** Find inline components that match within text. */
+    95→  findInlineInText(text: string): { component: RTEComponentDef; start: number; end: number; inner: string }[] {
+    96→    const results: { component: RTEComponentDef; start: number; end: number; inner: string }[] = [];
+    97→    const inlines = this.byType("inline").filter(c => c.trigger);
+    98→    for (const inline of inlines) {
+    99→      const trigger = inline.trigger!;
+   100→      let idx = 0;
+   101→      while (idx < text.length) {
+   102→        const start = text.indexOf(trigger, idx);
+   103→        if (start < 0) break;
+   104→        const end = text.indexOf(trigger, start + trigger.length);
+   105→        if (end < 0) break;
+   106→        const inner = text.slice(start + trigger.length, end);
+   107→        results.push({ component: inline, start, end: end + trigger.length, inner });
+   108→        idx = end + trigger.length;
+   109→      }
+   110→    }
+   111→    // Sort by start position; resolve overlaps (first match wins)
+   112→    results.sort((a, b) => a.start - b.start);
+   113→    const filtered: typeof results = [];
+   114→    let lastEnd = -1;
+   115→    for (const r of results) {
+   116→      if (r.start >= lastEnd) {
+   117→        filtered.push(r);
+   118→        lastEnd = r.end;
+   119→      }
+   120→    }
+   121→    return filtered;
+   122→  }
+   123→  unregister(name: string): boolean {
+   124→    return this.components.delete(name);
+   125→  }
+   126→  clear(): void {
+   127→    this.components.clear();
+   128→  }
+   129→}
+   130→
+   131→export const rteComponentRegistry = new RTEComponentRegistryImpl();
+   132→
+   133→export function defineRTEComponent(def: RTEComponentDef): void {
+   134→  rteComponentRegistry.register(def);
+   135→}
+   136→export function defineRTEComponents(defs: RTEComponentDef[]): void {
+   137→  rteComponentRegistry.registerAll(defs);
+   138→}
+   139→
+   140→/** Register the built-in markdown-like components. Call once at init. */
+   141→export function registerBuiltinRTEComponents(): void {
+   142→  defineRTEComponents([
+   143→    // Block components
+   144→    { name: "heading1", type: "block", trigger: "# ", toolbarLabel: "H1", toolbarIcon: "<b>H1</b>",
+   145→      render: (text) => `<h1 class="rte-h1">${escapeHtml(text)}</h1>` },
+   146→    { name: "heading2", type: "block", trigger: "## ", toolbarLabel: "H2", toolbarIcon: "<b>H2</b>",
+   147→      render: (text) => `<h2 class="rte-h2">${escapeHtml(text)}</h2>` },
+   148→    { name: "heading3", type: "block", trigger: "### ", toolbarLabel: "H3", toolbarIcon: "<b>H3</b>",
+   149→      render: (text) => `<h3 class="rte-h3">${escapeHtml(text)}</h3>` },
+   150→    { name: "quote", type: "block", trigger: "> ", toolbarLabel: "Quote", toolbarIcon: "❝",
+   151→      render: (text) => `<blockquote class="rte-quote">${renderInline(text)}</blockquote>` },
+   152→    { name: "code-block", type: "block", trigger: "```", toolbarLabel: "Code", toolbarIcon: "{ }",
+   153→      render: (text) => `<pre class="rte-code-block"><code>${escapeHtml(text)}</code></pre>` },
+   154→    { name: "bullet", type: "block", trigger: "- ", toolbarLabel: "Bullet", toolbarIcon: "•",
+   155→      render: (text) => `<li class="rte-bullet">${renderInline(text)}</li>` },
+   156→    { name: "numbered", type: "block", trigger: "1. ", toolbarLabel: "Numbered", toolbarIcon: "1.",
+   157→      render: (text) => `<li class="rte-numbered">${renderInline(text)}</li>` },
+   158→    { name: "divider", type: "block", trigger: "---", toolbarLabel: "Divider", toolbarIcon: "—",
+   159→      render: () => `<hr class="rte-divider"/>` },
+   160→    // Inline components
+   161→    { name: "bold", type: "inline", trigger: "**", toolbarLabel: "Bold", toolbarIcon: "<b>B</b>", shortcut: "Meta+B",
+   162→      render: (text) => `<strong>${escapeHtml(text)}</strong>` },
+   163→    { name: "italic", type: "inline", trigger: "*", toolbarLabel: "Italic", toolbarIcon: "<i>I</i>", shortcut: "Meta+I",
+   164→      render: (text) => `<em>${escapeHtml(text)}</em>` },
+   165→    { name: "code", type: "inline", trigger: "`", toolbarLabel: "Code", toolbarIcon: "<code>&lt;/&gt;</code>", shortcut: "Meta+`",
+   166→      render: (text) => `<code class="rte-code-inline">${escapeHtml(text)}</code>` },
+   167→    { name: "link", type: "inline", trigger: "[", toolbarLabel: "Link", toolbarIcon: "🔗",
+   168→      render: (text) => { const m = text.match(/^(.+)\]\((.+)\)$/); if (m) return `<a href="${escapeHtml(m[2])}" class="rte-link">${escapeHtml(m[1])}</a>`; return escapeHtml(`[${text}]`); } },
+   169→  ]);
+   170→}
+   171→
+   172→// ---- Helpers ----
+   173→
+   174→function escapeHtml(text: string): string {
+   175→  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+   176→}
+   177→
+   178→/** Render inline components within a text string. */
+   179→function renderInline(text: string): string {
+   180→  const matches = rteComponentRegistry.findInlineInText(text);
+   181→  if (matches.length === 0) return escapeHtml(text);
+   182→  let result = "";
+   183→  let lastEnd = 0;
+   184→  for (const m of matches) {
+   185→    result += escapeHtml(text.slice(lastEnd, m.start));
+   186→    result += m.component.render(m.inner);
+   187→    lastEnd = m.end;
+   188→  }
+   189→  result += escapeHtml(text.slice(lastEnd));
+   190→  return result;
+   191→}
+   192→
+   193→/** Parse raw text content into rendered HTML (for realtime mode). */
+   194→function parseContent(rawText: string): string {
+   195→  const lines = rawText.split("\n");
+   196→  let html = "";
+   197→  let inCodeBlock = false;
+   198→  let codeBlockContent = "";
+   199→  let inList = false;
+   200→  let listType = "";
+   201→
+   202→  for (const line of lines) {
+   203→    // Code block toggle
+   204→    if (line.trim().startsWith("```")) {
+   205→      if (inCodeBlock) {
+   206→        html += `<pre class="rte-code-block"><code>${escapeHtml(codeBlockContent)}</code></pre>`;
+   207→        codeBlockContent = "";
+   208→        inCodeBlock = false;
+   209→      } else {
+   210→        inCodeBlock = true;
+   211→      }
+   212→      continue;
+   213→    }
+   214→    if (inCodeBlock) {
+   215→      codeBlockContent += line + "\n";
+   216→      continue;
+   217→    }
+   218→
+   219→    // Divider
+   220→    if (line.trim() === "---") {
+   221→      if (inList) { html += `</${listType}>`; inList = false; }
+   222→      html += `<hr class="rte-divider"/>`;
+   223→      continue;
+   224→    }
+   225→
+   226→    // Empty line
+   227→    if (line.trim() === "") {
+   228→      if (inList) { html += `</${listType}>`; inList = false; }
+   229→      html += "<br>";
+   230→      continue;
+   231→    }
+   232→
+   233→    // Block components
+   234→    const block = rteComponentRegistry.findBlockByPrefix(line);
+   235→    if (block) {
+   236→      if (inList && block.name !== listType) { html += `</${listType}>`; inList = false; }
+   237→      if (block.name === "bullet" || block.name === "numbered") {
+   238→        if (!inList) {
+   239→          listType = block.name === "bullet" ? "ul" : "ol";
+   240→          html += `<${listType} class="rte-list">`;
+   241→          inList = true;
+   242→        }
+   243→        const innerText = line.slice(block.trigger!.length);
+   244→        html += block.render(innerText);
+   245→      } else {
+   246→        if (inList) { html += `</${listType}>`; inList = false; }
+   247→        const innerText = line.slice(block.trigger!.length);
+   248→        html += block.render(innerText);
+   249→      }
+   250→    } else {
+   251→      if (inList) { html += `</${listType}>`; inList = false; }
+   252→      html += `<p class="rte-paragraph">${renderInline(line)}</p>`;
+   253→    }
+   254→  }
+   255→  if (inList) html += `</${listType}>`;
+   256→  if (inCodeBlock) html += `<pre class="rte-code-block"><code>${escapeHtml(codeBlockContent)}</code></pre>`;
+   257→  return html;
+   258→}
+   259→
+   260→/** Extract raw text from the contenteditable (inverse of parseContent). */
+   261→function extractRaw(el: HTMLElement): string {
+   262→  // In realtime mode, the content is rendered HTML. We need to extract the
+   263→  // raw text representation. For simplicity, we store the raw text in a
+   264→  // data attribute and use the rendered HTML for display.
+   265→  // Actually, in non-realtime mode, the content IS the raw text.
+   266→  // In realtime mode, we parse from the rendered HTML back to raw.
+   267→  // For a simple implementation, we use innerText which gives us the text content.
+   268→  return el.innerText;
+   269→}
+   270→
+   271→// ---- Style injection ----
+   272→
+   273→const STYLE_ID = "rich-text-editor-styles";
+   274→
+   275→function injectStyles(): void {
+   276→  if (typeof document === "undefined") return;
+   277→  if (document.getElementById(STYLE_ID)) return;
+   278→  const el = document.createElement("style");
+   279→  el.id = STYLE_ID;
+   280→  el.textContent = `
+   281→.rte-root {
+   282→  --rte-bg: #151519;
+   283→  --rte-surface: #1E1E24;
+   284→  --rte-surface-2: #28282E;
+   285→  --rte-surface-3: #34343C;
+   286→  --rte-border: #3A3A42;
+   287→  --rte-text: #F4F1FF;
+   288→  --rte-muted: #888894;
+   289→  --rte-accent: #D9FF66;
+   290→  --rte-accent-dim: rgba(217,255,102,0.12);
+   291→  --rte-radius: 6px;
+   292→  font-family: inherit;
+   293→  color: var(--rte-text);
+   294→  background: var(--rte-bg);
+   295→  border: 1px solid var(--rte-border);
+   296→  border-radius: var(--rte-radius);
+   297→  display: flex;
+   298→  flex-direction: column;
+   299→  height: 100%;
+   300→  width: 100%;
+   301→  overflow: hidden;
+   302→}
+   303→.rte-root * { box-sizing: border-box; }
+   304→
+   305→.rte-toolbar {
+   306→  flex: 0 0 auto;
+   307→  display: flex;
+   308→  align-items: center;
+   309→  gap: 2px;
+   310→  padding: 4px 6px;
+   311→  border-bottom: 1px solid var(--rte-border);
+   312→  background: var(--rte-surface);
+   313→  flex-wrap: wrap;
+   314→}
+   315→.rte-btn {
+   316→  display: inline-flex;
+   317→  align-items: center;
+   318→  justify-content: center;
+   319→  gap: 3px;
+   320→  height: 24px;
+   321→  min-width: 24px;
+   322→  padding: 0 5px;
+   323→  border: 1px solid transparent;
+   324→  border-radius: 4px;
+   325→  background: transparent;
+   326→  color: var(--rte-muted);
+   327→  font-size: 11px;
+   328→  font-weight: 600;
+   329→  cursor: pointer;
+   330→  outline: none;
+   331→  transition: color .12s, background .12s, border-color .12s;
+   332→  white-space: nowrap;
+   333→}
+   334→.rte-btn:hover { color: var(--rte-text); background: var(--rte-surface-2); }
+   335→.rte-btn:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--rte-accent) 40%, transparent); }
+   336→.rte-btn.rte-active { color: var(--rte-accent); background: var(--rte-accent-dim); border-color: var(--rte-accent); }
+   337→.rte-sep { width: 1px; height: 18px; background: var(--rte-border); margin: 0 2px; }
+   338→.rte-spacer { flex: 1 1 auto; }
+   339→.rte-mode-btn {
+   340→  font-size: 10px;
+   341→  font-family: var(--font-mono, ui-monospace, monospace);
+   342→  text-transform: uppercase;
+   343→  letter-spacing: 0.04em;
+   344→}
+   345→
+   346→.rte-editor {
+   347→  flex: 1 1 auto;
+   348→  min-height: 0;
+   349→  overflow-y: auto;
+   350→  padding: 16px 20px;
+   351→  outline: none;
+   352→  font-size: 14px;
+   353→  line-height: 1.6;
+   354→  scrollbar-width: thin;
+   355→}
+   356→.rte-editor::-webkit-scrollbar { width: 8px; }
+   357→.rte-editor::-webkit-scrollbar-track { background: transparent; }
+   358→.rte-editor::-webkit-scrollbar-thumb { background: var(--rte-border); border-radius: 999px; }
+   359→.rte-editor:focus { background: var(--rte-bg); }
+   360→.rte-editor.rte-readonly { cursor: default; }
+   361→.rte-editor:empty::before {
+   362→  content: attr(data-placeholder);
+   363→  color: var(--rte-muted);
+   364→  font-style: italic;
+   365→  pointer-events: none;
+   366→}
+   367→
+   368→.rte-editor h1.rte-h1 { font-size: 24px; font-weight: 700; margin: 12px 0 6px; color: var(--rte-text); }
+   369→.rte-editor h2.rte-h2 { font-size: 20px; font-weight: 700; margin: 10px 0 5px; color: var(--rte-text); }
+   370→.rte-editor h3.rte-h3 { font-size: 16px; font-weight: 600; margin: 8px 0 4px; color: var(--rte-text); }
+   371→.rte-editor p.rte-paragraph { margin: 4px 0; }
+   372→.rte-editor blockquote.rte-quote {
+   373→  border-left: 3px solid var(--rte-accent);
+   374→  padding: 4px 12px;
+   375→  margin: 6px 0;
+   376→  background: var(--rte-surface);
+   377→  border-radius: 0 4px 4px 0;
+   378→  color: var(--rte-muted);
+   379→}
+   380→.rte-editor pre.rte-code-block {
+   381→  background: var(--rte-surface-2);
+   382→  border: 1px solid var(--rte-border);
+   383→  border-radius: 4px;
+   384→  padding: 10px 12px;
+   385→  margin: 6px 0;
+   386→  overflow-x: auto;
+   387→  font-family: var(--font-jetbrains, ui-monospace, monospace);
+   388→  font-size: 12px;
+   389→  line-height: 1.5;
+   390→}
+   391→.rte-editor code.rte-code-inline {
+   392→  background: var(--rte-surface-2);
+   393→  border: 1px solid var(--rte-border);
+   394→  border-radius: 3px;
+   395→  padding: 1px 4px;
+   396→  font-family: var(--font-jetbrains, ui-monospace, monospace);
+   397→  font-size: 12px;
+   398→  color: var(--rte-accent);
+   399→}
+   400→.rte-editor ul.rte-list, .rte-editor ol.rte-list {
+   401→  margin: 4px 0;
+   402→  padding-left: 24px;
+   403→}
+   404→.rte-editor ul.rte-list { list-style: disc; }
+   405→.rte-editor ol.rte-list { list-style: decimal; }
+   406→.rte-editor li.rte-bullet, .rte-editor li.rte-numbered {
+   407→  margin: 2px 0;
+   408→}
+   409→.rte-editor hr.rte-divider {
+   410→  border: none;
+   411→  border-top: 1px solid var(--rte-border);
+   412→  margin: 12px 0;
+   413→}
+   414→.rte-editor a.rte-link {
+   415→  color: var(--rte-accent);
+   416→  text-decoration: underline;
+   417→  cursor: pointer;
+   418→}
+   419→.rte-editor strong { font-weight: 700; color: var(--rte-text); }
+   420→.rte-editor em { font-style: italic; }
+   421→
+   422→.rte-statusbar {
+   423→  flex: 0 0 auto;
+   424→  display: flex;
+   425→  align-items: center;
+   426→  justify-content: space-between;
+   427→  padding: 4px 10px;
+   428→  border-top: 1px solid var(--rte-border);
+   429→  background: var(--rte-surface);
+   430→  font-size: 10px;
+   431→  font-family: var(--font-mono, ui-monospace, monospace);
+   432→  color: var(--rte-muted);
+   433→}
+   434→`;
+   435→  document.head.appendChild(el);
+   436→}
+   437→
+   438→// ---- Icons ----
+   439→
+   440→// ---- Component ----
+   441→
+   442→export class RichTextEditor {
+   443→  private container: HTMLElement;
+   444→  private root!: HTMLDivElement;
+   445→  private editor!: HTMLDivElement;
+   446→  private toolbar!: HTMLDivElement;
+   447→  private statusbar!: HTMLDivElement;
+   448→  private opts: Required<RichTextEditorOptions>;
+   449→  private rawContent: string;
+   450→  private listeners = new Map<string, Set<RichTextEditorHandler>>();
+   451→  private _destroyed = false;
+   452→  private inputTimer: ReturnType<typeof setTimeout> | null = null;
+   453→
+   454→  constructor(container: HTMLElement, options: RichTextEditorOptions = {}) {
+   455→    this.container = container;
+   456→    injectStyles();
+   457→    // Ensure built-in components are registered
+   458→    if (rteComponentRegistry.list().length === 0) {
+   459→      registerBuiltinRTEComponents();
+   460→    }
+   461→    this.opts = {
+   462→      content: options.content ?? "",
+   463→      realtime: options.realtime ?? true,
+   464→      showToolbar: options.showToolbar ?? true,
+   465→      placeholder: options.placeholder ?? "Start typing... Use # for headings, **bold**, *italic*, `code`, > quote, - list",
+   466→      readOnly: options.readOnly ?? false,
+   467→      spellcheck: options.spellcheck ?? false,
+   468→    };
+   469→    this.rawContent = this.opts.content;
+   470→    this.render();
+   471→  }
+   472→
+   473→  private render(): void {
+   474→    if (this._destroyed) return;
+   475→    const root = document.createElement("div");
+   476→    root.className = "rte-root";
+   477→
+   478→    if (this.opts.showToolbar) {
+   479→      root.appendChild(this.renderToolbar());
+   480→    }
+   481→
+   482→    const editor = document.createElement("div");
+   483→    editor.className = "rte-editor";
+   484→    editor.setAttribute("contenteditable", this.opts.readOnly ? "false" : "true");
+   485→    editor.setAttribute("spellcheck", String(this.opts.spellcheck));
+   486→    editor.setAttribute("data-placeholder", this.opts.placeholder);
+   487→    editor.style.minHeight = "200px";
+   488→    if (this.opts.readOnly) editor.classList.add("rte-readonly");
+   489→
+   490→    // Input handler
+   491→    editor.addEventListener("input", () => this.onInput());
+   492→    editor.addEventListener("keydown", (e) => this.onKeyDown(e));
+   493→    // Save selection on mouseup/keyup so toolbar buttons can restore it
+   494→    editor.addEventListener("mouseup", () => this.saveSelection());
+   495→    editor.addEventListener("keyup", () => this.saveSelection());
+   496→    editor.addEventListener("focus", () => this.saveSelection());
+   497→
+   498→    root.appendChild(editor);
+   499→    this.editor = editor;
+   500→
+   501→    // Set content (after this.editor is assigned)
+   502→    this.updateEditorContent();
+   503→
+   504→    // Status bar
+   505→    const statusbar = document.createElement("div");
+   506→    statusbar.className = "rte-statusbar";
+   507→    const modeLabel = document.createElement("span");
+   508→    modeLabel.textContent = this.opts.realtime ? "REALTIME" : "SOURCE";
+   509→    modeLabel.setAttribute("data-mode-label", "true");
+   510→    statusbar.appendChild(modeLabel);
+   511→    const wordCount = document.createElement("span");
+   512→    wordCount.textContent = `${this.getWordCount()} words`;
+   513→    wordCount.setAttribute("data-word-count", "true");
+   514→    statusbar.appendChild(wordCount);
+   515→    root.appendChild(statusbar);
+   516→    this.statusbar = statusbar;
+   517→
+   518→    this.container.innerHTML = "";
+   519→    this.container.appendChild(root);
+   520→    this.root = root;
+   521→  }
+   522→
+   523→  private renderToolbar(): HTMLElement {
+   524→    const tb = document.createElement("div");
+   525→    tb.className = "rte-toolbar";
+   526→
+   527→    // Block formatting buttons
+   528→    const blockBtns = rteComponentRegistry.byType("block").filter(c => c.toolbarLabel);
+   529→    for (const comp of blockBtns) {
+   530→      const btn = this.toolbarBtn(comp.toolbarIcon ?? comp.toolbarLabel ?? comp.name, comp.toolbarLabel ?? comp.name, () => this.applyBlockComponent(comp.name));
+   531→      tb.appendChild(btn);
+   532→    }
+   533→
+   534→    tb.appendChild(this.sep());
+   535→
+   536→    // Inline formatting buttons
+   537→    const inlineBtns = rteComponentRegistry.byType("inline").filter(c => c.toolbarLabel);
+   538→    for (const comp of inlineBtns) {
+   539→      const btn = this.toolbarBtn(comp.toolbarIcon ?? comp.toolbarLabel ?? comp.name, comp.toolbarLabel ?? comp.name, () => this.applyInlineComponent(comp.name));
+   540→      tb.appendChild(btn);
+   541→    }
+   542→
+   543→    tb.appendChild(this.spacer());
+   544→
+   545→    // Mode toggle
+   546→    const modeBtn = document.createElement("button");
+   547→    modeBtn.type = "button";
+   548→    modeBtn.className = "rte-btn rte-mode-btn";
+   549→    modeBtn.textContent = this.opts.realtime ? "Source" : "Preview";
+   550→    modeBtn.setAttribute("title", "Toggle realtime/source mode");
+   551→    modeBtn.addEventListener("mousedown", (e) => e.preventDefault());
+   552→    modeBtn.addEventListener("click", () => this.toggleRealtime());
+   553→    modeBtn.setAttribute("data-mode-btn", "true");
+   554→    tb.appendChild(modeBtn);
+   555→
+   556→    this.toolbar = tb;
+   557→    return tb;
+   558→  }
+   559→
+   560→  private savedRange: Range | null = null;
+   561→
+   562→  private saveSelection(): void {
+   563→    const sel = window.getSelection();
+   564→    if (sel && sel.rangeCount > 0 && this.editor.contains(sel.anchorNode)) {
+   565→      this.savedRange = sel.getRangeAt(0).cloneRange();
+   566→    }
+   567→  }
+   568→
+   569→  private toolbarBtn(icon: string, label: string, onClick: () => void): HTMLButtonElement {
+   570→    const btn = document.createElement("button");
+   571→    btn.type = "button";
+   572→    btn.className = "rte-btn";
+   573→    btn.innerHTML = icon;
+   574→    btn.setAttribute("title", label);
+   575→    btn.setAttribute("aria-label", label);
+   576→    // CRITICAL: prevent mousedown from stealing focus from the editor
+   577→    btn.addEventListener("mousedown", (e) => {
+   578→      e.preventDefault();
+   579→      // Save the current selection before the click
+   580→      const sel = window.getSelection();
+   581→      if (sel && sel.rangeCount > 0) {
+   582→        this.savedRange = sel.getRangeAt(0).cloneRange();
+   583→      }
+   584→    });
+   585→    btn.addEventListener("click", (e) => {
+   586→      e.preventDefault();
+   587→      // Restore the saved selection
+   588→      if (this.savedRange) {
+   589→        const sel = window.getSelection();
+   590→        sel?.removeAllRanges();
+   591→        sel?.addRange(this.savedRange);
+   592→      }
+   593→      // Focus the editor
+   594→      this.editor.focus();
+   595→      onClick();
+   596→    });
+   597→    return btn;
+   598→  }
+   599→  private sep(): HTMLElement { const s = document.createElement("div"); s.className = "rte-sep"; return s; }
+   600→  private spacer(): HTMLElement { const s = document.createElement("div"); s.className = "rte-spacer"; return s; }
+   601→
+   602→  private updateEditorContent(): void {
+   603→    if (this.opts.realtime) {
+   604→      this.editor.innerHTML = parseContent(this.rawContent);
+   605→    } else {
+   606→      this.editor.textContent = this.rawContent;
+   607→    }
+   608→  }
+   609→
+   610→  private onInput(): void {
+   611→    // Debounce re-parse in realtime mode
+   612→    if (this.inputTimer) clearTimeout(this.inputTimer);
+   613→    this.inputTimer = setTimeout(() => {
+   614→      if (this.opts.realtime) {
+   615→        // Extract raw text from the editor
+   616→        this.rawContent = this.editor.innerText;
+   617→        // Re-parse and re-render, preserving cursor position approximately
+   618→        const sel = window.getSelection();
+   619→        const offset = sel?.anchorOffset ?? 0;
+   620→        this.editor.innerHTML = parseContent(this.rawContent);
+   621→        // Try to restore cursor
+   622→        this.restoreCursor(offset);
+   623→      } else {
+   624→        this.rawContent = this.editor.innerText;
+   625→      }
+   626→      this.updateStatusbar();
+   627→      this.emit("change", { content: this.rawContent, html: this.opts.realtime ? this.editor.innerHTML : parseContent(this.rawContent), source: "keyboard" });
+   628→    }, 300);
+   629→  }
+   630→
+   631→  private restoreCursor(offset: number): void {
+   632→    const sel = window.getSelection();
+   633→    if (!sel || !this.editor.firstChild) return;
+   634→    const range = document.createRange();
+   635→    let node: Node | null = this.editor;
+   636→    let remaining = Math.min(offset, this.editor.innerText.length);
+   637→    // Walk text nodes
+   638→    const walker = document.createTreeWalker(this.editor, NodeFilter.SHOW_TEXT);
+   639→    while (walker.nextNode()) {
+   640→      const textNode = walker.currentNode as Text;
+   641→      if (textNode.textContent && remaining <= textNode.textContent.length) {
+   642→        range.setStart(textNode, remaining);
+   643→        range.collapse(true);
+   644→        sel.removeAllRanges();
+   645→        sel.addRange(range);
+   646→        return;
+   647→      }
+   648→      remaining -= textNode.textContent?.length ?? 0;
+   649→    }
+   650→    // Fallback: place cursor at end
+   651→    range.selectNodeContents(this.editor);
+   652→    range.collapse(false);
+   653→    sel.removeAllRanges();
+   654→    sel.addRange(range);
+   655→  }
+   656→
+   657→  private onKeyDown(e: KeyboardEvent): void {
+   658→    // Shortcuts
+   659→    const inlines = rteComponentRegistry.byType("inline").filter(c => c.shortcut);
+   660→    for (const comp of inlines) {
+   661→      if (e.key === comp.shortcut!.split("+").pop() && (e.metaKey || e.ctrlKey)) {
+   662→        e.preventDefault();
+   663→        this.applyInlineComponent(comp.name);
+   664→        return;
+   665→      }
+   666→    }
+   667→    // Enter: in realtime mode, let the browser handle it but debounce re-parse
+   668→    // Tab: insert spaces
+   669→    if (e.key === "Tab") {
+   670→      e.preventDefault();
+   671→      document.execCommand("insertText", false, "  ");
+   672→    }
+   673→  }
+   674→
+   675→  // ---- Command execution ----
+   676→
+   677→  /** Apply a block component at the current cursor line. */
+   678→  applyBlockComponent(name: string): void {
+   679→    if (this.opts.readOnly) return;
+   680→    const comp = rteComponentRegistry.get(name);
+   681→    if (!comp || comp.type !== "block") return;
+   682→    // Ensure the editor has focus
+   683→    this.editor.focus();
+   684→    const sel = window.getSelection();
+   685→    if ((!sel || !sel.anchorNode || !this.editor.contains(sel.anchorNode)) && this.savedRange) {
+   686→      sel?.removeAllRanges();
+   687→      sel?.addRange(this.savedRange);
+   688→    }
+   689→    if (!sel || !sel.anchorNode) return;
+   690→
+   691→    // Get the current line
+   692→    const editorText = this.editor.innerText;
+   693→    const caretPos = this.getCaretPosition();
+   694→    const lines = editorText.split("\n");
+   695→    let pos = 0;
+   696→    let lineIdx = 0;
+   697→    for (let i = 0; i < lines.length; i++) {
+   698→      if (pos + lines[i].length >= caretPos) { lineIdx = i; break; }
+   699→      pos += lines[i].length + 1;
+   700→    }
+   701→
+   702→    // Toggle: if the line already starts with this trigger, remove it
+   703→    const line = lines[lineIdx];
+   704→    if (comp.trigger && line.startsWith(comp.trigger)) {
+   705→      lines[lineIdx] = line.slice(comp.trigger.length);
+   706→    } else if (comp.trigger) {
+   707→      // Remove other block triggers first
+   708→      const existingBlock = rteComponentRegistry.findBlockByPrefix(line);
+   709→      if (existingBlock) {
+   710→        lines[lineIdx] = line.slice(existingBlock.trigger!.length);
+   711→      }
+   712→      lines[lineIdx] = comp.trigger + lines[lineIdx];
+   713→    }
+   714→
+   715→    this.rawContent = lines.join("\n");
+   716→    this.updateEditorContent();
+   717→    this.updateStatusbar();
+   718→    this.emit("command", { componentName: name, content: this.rawContent, source: "pointer" });
+   719→  }
+   720→
+   721→  /** Apply an inline component to the selection. */
+   722→  applyInlineComponent(name: string): void {
+   723→    if (this.opts.readOnly) return;
+   724→    const comp = rteComponentRegistry.get(name);
+   725→    if (!comp || comp.type !== "inline" || !comp.trigger) return;
+   726→    // Get the current selection text (from saved range or live selection)
+   727→    let selectedText = "";
+   728→    const sel = window.getSelection();
+   729→    if (sel && sel.rangeCount > 0 && this.editor.contains(sel.anchorNode)) {
+   730→      selectedText = sel.toString();
+   731→    } else if (this.savedRange) {
+   732→      selectedText = this.savedRange.toString();
+   733→    }
+   734→    if (!selectedText) {
+   735→      // No selection — insert empty trigger pair at cursor
+   736→      // Just append the trigger to rawContent and re-render
+   737→      this.rawContent += comp.trigger + comp.trigger;
+   738→      this.updateEditorContent();
+   739→    } else {
+   740→      // Replace the selected text with trigger-wrapped version in rawContent
+   741→      // Toggle: if already wrapped, unwrap
+   742→      const wrapped = comp.trigger + selectedText + comp.trigger;
+   743→      const unwrapped = selectedText;
+   744→      if (this.rawContent.includes(wrapped)) {
+   745→        this.rawContent = this.rawContent.replace(wrapped, unwrapped);
+   746→      } else {
+   747→        this.rawContent = this.rawContent.replace(selectedText, wrapped);
+   748→      }
+   749→      this.updateEditorContent();
+   750→    }
+   751→    this.updateStatusbar();
+   752→    this.emit("command", { componentName: name, content: this.rawContent, source: "pointer" });
+   753→  }
+   754→
+   755→  private getCaretPosition(): number {
+   756→    const sel = window.getSelection();
+   757→    if (!sel || sel.rangeCount === 0) return 0;
+   758→    const range = sel.getRangeAt(0);
+   759→    const preRange = range.cloneRange();
+   760→    preRange.selectNodeContents(this.editor);
+   761→    preRange.setEnd(range.endContainer, range.endOffset);
+   762→    return preRange.toString().length;
+   763→  }
+   764→
+   765→  private updateStatusbar(): void {
+   766→    const wc = this.statusbar.querySelector("[data-word-count]");
+   767→    if (wc) wc.textContent = `${this.getWordCount()} words`;
+   768→  }
+   769→
+   770→  getWordCount(): number {
+   771→    return this.rawContent.trim().split(/\s+/).filter(s => s.length > 0).length;
+   772→  }
+   773→
+   774→  // ---- Public API ----
+   775→
+   776→  getContent(): string { return this.rawContent; }
+   777→  getHtml(): string { return this.opts.realtime ? this.editor.innerHTML : parseContent(this.rawContent); }
+   778→
+   779→  setContent(content: string): void {
+   780→    if (this._destroyed) return;
+   781→    this.rawContent = content;
+   782→    this.updateEditorContent();
+   783→    this.updateStatusbar();
+   784→  }
+   785→
+   786→  toggleRealtime(): void {
+   787→    this.opts.realtime = !this.opts.realtime;
+   788→    this.updateEditorContent();
+   789→    // Update mode label
+   790→    const modeLabel = this.statusbar.querySelector("[data-mode-label]");
+   791→    if (modeLabel) modeLabel.textContent = this.opts.realtime ? "REALTIME" : "SOURCE";
+   792→    // Update mode button
+   793→    const modeBtn = this.toolbar?.querySelector("[data-mode-btn]");
+   794→    if (modeBtn) (modeBtn as HTMLElement).textContent = this.opts.realtime ? "Source" : "Preview";
+   795→    this.emit("mode_change", { source: "programmatic" });
+   796→  }
+   797→
+   798→  isRealtime(): boolean { return this.opts.realtime; }
+   799→
+   800→  setProperty(name: string, value: unknown): void {
+   801→    if (this._destroyed) return;
+   802→    switch (name) {
+   803→      case "realtime": if (this.opts.realtime !== !!value) this.toggleRealtime(); break;
+   804→      case "readOnly": this.opts.readOnly = !!value; this.render(); break;
+   805→      case "spellcheck": this.opts.spellcheck = !!value; this.editor.setAttribute("spellcheck", String(this.opts.spellcheck)); break;
+   806→      case "content": this.setContent(value as string); break;
+   807→      case "placeholder": this.opts.placeholder = value as string; this.editor.setAttribute("data-placeholder", this.opts.placeholder); break;
+   808→      default: return;
+   809→    }
+   810→  }
+   811→
+   812→  on(event: string, handler: RichTextEditorHandler): void {
+   813→    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+   814→    this.listeners.get(event)!.add(handler);
+   815→  }
+   816→  off(event: string, handler: RichTextEditorHandler): void {
+   817→    this.listeners.get(event)?.delete(handler);
+   818→  }
+   819→  private emit(event: string, payload: RichTextEditorEventPayload): void {
+   820→    const set = this.listeners.get(event);
+   821→    if (!set) return;
+   822→    const p = { ...payload, type: event };
+   823→    for (const h of set) { try { h(p); } catch (e) { console.error(e); } }
+   824→  }
+   825→
+   826→  destroy(): void {
+   827→    if (this._destroyed) return;
+   828→    this._destroyed = true;
+   829→    if (this.inputTimer) clearTimeout(this.inputTimer);
+   830→    this.listeners.clear();
+   831→    this.container.innerHTML = "";
+   832→  }
+   833→}
+   834→

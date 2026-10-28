@@ -1,0 +1,400 @@
+- **Wheel thickness/spacing fix**: The React wrapper only forwarded `shape`, `size`, `hue`, `color` via imperative setters — `wheelThickness` and `wheelSpacing` were passed to the constructor but never updated after mount. Added `setWheelThickness(n)` and `setWheelSpacing(n)` methods to the vanilla class (both call `updateCanvasSize` + invalidate caches + schedule render), and added corresponding `useEffect` hooks in the React wrapper.
+- **rotateShape option added** (PRD §4.4 "Rotating hue representation"): Added `rotateShape?: boolean` to `ColorPickerOptions`. When true, the triangle's pure-hue vertex (B) tracks the current hue position on the wheel. Implementation:
+  - Added `getShapeRotation()` method: returns `hueRad - 120°` (B's default angular position is 120° clockwise from top).
+  - Added `rotatePoint()` helper function for 2D rotation around a center.
+  - `drawTriangleTo` now accepts a rotation parameter and rotates all three vertices.
+  - `getInnerMarkerPosition` applies the same rotation to the triangle marker.
+  - `updateInnerFromPoint` (pointer interaction) un-rotates the pointer point before computing barycentric coordinates.
+  - Inner cache key includes the rotation so the cache invalidates on hue change when rotateShape is on.
+  - Added `setRotateShape(bool)` method and React wrapper forwarding.
+  - Added a toggle switch in the playground property inspector; updated generated JS code and API docs.
+- **Hydration mismatch fix**: The `ThemeToggle` component's `aria-label` depended on `isDark` which was `false` during SSR (useTheme returns undefined) but `true` on the client (after next-themes resolves) — causing a hydration mismatch on the button's aria-label. Fixed by using a static `aria-label="Toggle color theme"` that never depends on theme state, and reading the actual theme from `document.documentElement.classList` in a `useEffect` after mount. Also removed `className="dark"` from `<html>` in layout.tsx (let next-themes handle it via its inline script).
+- **Overline text decoration fix**: The custom `.overline` CSS class conflicted with Tailwind's built-in `overline` utility (`text-decoration-line: overline` — a line ABOVE the text). This caused all small uppercase labels to have an unwanted line above them. Renamed the class from `.overline` to `.eyebrow` in globals.css and updated all 30+ usages across the codebase via sed. Verified via `getComputedStyle` that `.eyebrow` elements now have `text-decoration-line: none`.
+- Updated content metadata to include `rotateShape` in the properties table and `setWheelThickness`, `setWheelSpacing`, `setRotateShape` in the methods table.
+- Updated the playground's generated API code to include the new methods and the `rotateShape` option.
+
+Stage Summary:
+- All four shapes (triangle, square, disk, none) now render correctly with fully opaque interiors, smooth AA edges, and correct HSV color gradients. Verified via pixel sampling and VLM screenshot analysis.
+- The hue wheel is a complete rainbow ring (verified at 8 angular positions: red→yellow→green→cyan→blue→purple→magenta).
+- Wheel thickness and spacing sliders now update the canvas size live (verified: thickness 24→40 resized canvas from 244→276px).
+- The rotateShape toggle works: when enabled, the triangle rotates so its pure-hue vertex tracks the wheel hue.
+- No hydration errors (console grep for "error|hydrat|mismatch" returns 0).
+- No text decoration lines on eyebrow labels (getComputedStyle confirms `text-decoration-line: none`).
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 10 (fix session 2)
+Agent: main
+Task: Fix three rendering issues: smooth wheel, disk distribution, rotateShape for square/disk
+
+Work Log:
+- **Smooth hue wheel (conic gradient)**: Replaced the 360 one-degree arc segments in `drawWheelTo` with `ctx.createConicGradient()` — a native canvas API that produces a perfectly smooth, seamless hue transition with zero visible segment boundaries. The conic gradient starts at -π/2 (top, red=0°) and goes clockwise, with 24 color stops every 15°. Fills the annulus via even-odd fill rule. Added a fallback to 720 half-degree segments for browsers without ConicGradient support. Verified: pixel sampling at 0.25° intervals shows smooth RGB transitions (255,1,0 → 255,4,0 → 255,5,0 → 255,8,0) with no hard steps at former 1° boundaries.
+- **Disk as clipped square gradient (not radial)**: Completely rewrote `drawDiskTo` — the old polar mapping (r→saturation, θ→value) radiated colors from the center, creating a sharp central point and a visually different distribution from the square/triangle. The new implementation draws the exact same saturation×value gradient as the square (pure hue base → white-to-transparent horizontal → transparent-to-black vertical), clipped to a circle via `ctx.clip()`. Uses the circumscribing square (side = 2·innerR) so the gradient covers the full circle. The center now shows a smooth mid-tone (S=0.5, V=0.5) instead of a sharp white point. Verified by pixel sampling: center=rgb(63,88,127) with gradual transitions to nearby pixels (no discontinuity). VLM confirms: "square-like 2D gradient clipped to a circle, NOT radiating from center, no sharp center point."
+- **rotateShape extended to square and disk**: Updated `getShapeRotation()` to return a non-zero rotation for all three shapes (previously only triangle). For triangle: pure-hue vertex B (120° default) → `hue - 120°`. For square and disk: pure-hue edge (right side, 90° default) → `hue - 90°`. Updated `drawSquareTo` and `drawDiskTo` to accept a rotation parameter and apply it via canvas transform (`translate→rotate→translate`). Updated `getInnerMarkerPosition` for both square and disk to apply rotation. Updated `updateInnerFromPoint` for both square and disk to un-rotate the pointer point before computing SV coordinates. Verified: with hue=0° (red) + rotateShape on, the square/disk's pure-hue edge rotates from right to top, the bright-red corner moves to top-left (315°), and the black edge moves from bottom to right — confirmed by both pixel sampling and VLM analysis.
+- Cleaned up: removed the `diskTheta` field and all its references (constructor, setColor, marker position, pointer interaction) since the disk no longer uses polar mapping. Updated the header documentation comment for the disk mapping.
+
+Stage Summary:
+- All three rendering issues fixed and VLM-verified:
+  1. ✅ Wheel is now perfectly smooth (conic gradient, no dashes/slices)
+  2. ✅ Disk has flat 2D SV gradient (same as square), no sharp center point, no radial pattern
+  3. ✅ Square and disk rotate with the hue when rotateShape is enabled (in addition to triangle)
+- `bun run lint` — 0 errors, 0 warnings.
+- The disk's color distribution now matches the square: white on the left (S=0), pure hue on the right (S=1), black at the bottom (V=0), bright at the top (V=1) — just with a circular boundary instead of square.
+
+---
+Task ID: 11 (fix session 3)
+Agent: main
+Task: Fix square/disk rotation to align pure-hue corner; move outputs to live canvas
+
+Work Log:
+- **Rotation alignment fix**: Changed `getShapeRotation()` for square and disk from `hue - 90°` to `hue - 45°`. Previously the square/disk rotated by their right-edge center (90°, which is S=1 V=0.5 — not pure hue). Now they rotate by their pure-hue corner (top-right, S=1 V=1, at 45° clockwise from top), so the pure-hue corner points toward the wheel hue thumb — exactly matching how the triangle's pure-hue vertex B tracks the hue. Verified: with hue=0° (red, top of wheel) + rotateShape on, the brightest/most-saturated red (rgb(203,41,41) for square, rgb(186,50,50) for disk) appears at the TOP of the inner shape, aligned with the wheel hue marker. All three shapes now rotate by their hue-representing corner/vertex toward the wheel thumb.
+- **Output layout restructure**: 
+  - Removed the 4-cell output bar (HEX/RGB/HSV/HSL read-only cells) from the bottom of the live canvas.
+  - Added a proper "Output" section inside the live canvas panel (below the canvas, above the panel border): includes an "OUTPUT" eyebrow label, a color swatch + current HEX display, and a responsive 2×2 / 1×4 grid of CopyableValue chips (HEX/RGB/HSV/HSL) with copy-to-clipboard.
+  - Removed the "Output" section from the Properties panel (it previously sat at the bottom with `mt-auto`).
+  - Removed the now-unused `OutputCell` helper component.
+  - Verified via DOM inspection: Properties panel no longer contains "Output"; live canvas panel does contain "Output". VLM confirms the layout is correct — the Properties panel is now a clean props-only inspector, and all color outputs are consolidated in the live canvas.
+
+Stage Summary:
+- All three shapes (triangle, square, disk) now rotate by their pure-hue corner/vertex toward the wheel hue thumb when rotateShape is enabled.
+- All color outputs (HEX/RGB/HSV/HSL + swatch) are now consolidated in the live canvas panel; the Properties panel contains only configuration controls.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 12 (fix session 4)
+Agent: main
+Task: Click-to-copy overlay + new Color Range component
+
+Work Log:
+- **CopyableValue overlay effect**: Rewrote the `CopyableValue` component in `src/components/platform/code-block.tsx`:
+  - Removed the persistent copy icon (the `Copy`/`Check` lucide icon that sat at the right of each chip).
+  - The whole chip is now the click target — no separate button.
+  - On click, a green overlay (bg-emerald-600) slides up from the bottom (`translate-y-full → translate-y-0`) with a white checkmark icon and "Copied" text. Fades back after 1100ms.
+  - Fixed the clipboard handler to always show the overlay even if `navigator.clipboard.writeText` fails (added a `document.execCommand('copy')` fallback and moved `setCopied(true)` outside the try/catch). Previously, in headless/non-secure contexts, the clipboard API would throw and the overlay never appeared.
+  - VLM-verified: the green "Copied" overlay is visible on the clicked chip, the other 3 chips remain in their normal state, and no copy icon button is present.
+- **New Color Range component** (`src/lib/components/color-range/`):
+  - `color-range.ts`: A vanilla TypeScript 1D color slider with 4 modes:
+    - **hue**: 0–360°, full spectrum gradient (smooth, via canvas linear gradient with 24 stops)
+    - **lightness**: 0–100%, black → base color → white
+    - **contrast**: 0–100%, base color mixed toward black (0) or white (100)
+    - **alpha**: 0–1, transparent → opaque over a checkerboard pattern
+  - Parameters: `mode`, `value`, `color` (base color for non-hue modes), `orientation` (horizontal/vertical), `thickness` (6–48px), `length` (80–420px).
+  - Canvas-based rendering with rounded-rect clip, cached track canvas, and a draggable capsule thumb (white halo + dark border).
+  - Full public API: `getValue`, `getValueOutput`, `setValue`, `setMode`, `setColor`, `setOrientation`, `setThickness`, `setLength`, `on/off`, `destroy`.
+  - Pointer interaction with pointer capture; keyboard support (arrows ±1, Shift=±10, Home/End).
+  - ARIA: role="slider", aria-valuenow/min/max/text.
+  - Self-contained color math (parseHex, hsvToRgb, rgbToHsv) — no dependency on the color-wheel component.
+  - `index.ts`: barrel re-export.
+- **React wrapper** (`src/components/color-range/color-range-react.tsx`): Owns the instance, forwards prop changes via imperative API, forwards input/change events via refs.
+- **Playground view** (`src/components/color-range/color-range-playground.tsx`): Full playground with live canvas, property inspector (mode 2×2 grid, orientation toggle, thickness/length sliders, base color input), output section (mode + value + label chips with click-to-copy), code panel (JS/HTML/CSS/API tabs with live-synced code), and documentation section (properties/methods/events/accessibility tables).
+- **Content metadata**: Added the color-range component to `src/lib/platform/content.ts` with full properties, methods, events, defaults, whenToUse/whenNotToUse.
+- **Routing**: Updated `src/app/page.tsx` to route `component/color/color-range` to the `ColorRangePlayground`.
+- Fixed icon import: `Transparency` and `BlendingMode` don't exist in lucide-react; used `Blend` for the alpha mode icon.
+
+Stage Summary:
+- CopyableValue chips now have no copy icon; clicking any chip shows a green "Copied" overlay with a checkmark (micro effect, 1.1s).
+- New Color Range component established with 4 modes (hue/lightness/contrast/alpha), configurable orientation/thickness/length, full public API, keyboard support, and a complete playground.
+- The component appears in the sidebar under Color → Color Range, and in the Components directory.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 13 (fix session 5)
+Agent: main
+Task: Fix output section height, color range result color, vertical mode
+
+Work Log:
+- **Color wheel output section height fix**: The CopyableValue chips could expand vertically when their text content (e.g. "rgb(66, 135, 245)") wrapped to a second line, causing the output section to grow inconsistently and confuse users. Fixed by:
+  - Setting a fixed `h-9` (36px) height on every chip.
+  - Making the label `shrink-0` so it never compresses.
+  - Making the value `truncate` so long text is clipped with an ellipsis instead of wrapping.
+  - Changed `inline-flex` to `inline-flex h-9 items-center` with `gap-1.5` and removed `py-1.5` (the fixed height handles vertical sizing).
+  - Verified: all 4 chips (HEX, RGB, HSV, HSL) now render at exactly 36px height in a single row, no expansion. VLM confirms uniform heights with aligned top/bottom edges.
+- **Color range result color (shared color object)**: All four modes (hue, lightness, contrast, alpha) now process the same base color and produce a concrete result color visible to the user.
+  - Added `ColorRangeResultColor` interface: `{ hex, rgba, r, g, b, a }`.
+  - Added `getResultColor()` public method to the `ColorRange` class.
+  - Added `computeResultColor(mode, value, baseRgb, baseHsv)` module helper:
+    - **hue**: `hsvToRgb(value, baseHsv.s, baseHsv.v)` — replaces hue, keeps base S/V.
+    - **lightness/contrast**: mixes black → base (at 50) → white. value≤50: `base * (value/50)`. value>50: `base + (255-base) * ((value-50)/50)`.
+    - **alpha**: `rgba(baseRgb, value)` — base color with alpha applied.
+  - Included `color: ColorRangeResultColor` in `ColorRangeValueOutput` so every `input`/`change` event carries the result color.
+  - Updated the playground output section to show the result color prominently: a color swatch (with checkerboard for alpha mode), the HEX value, and 4 copyable chips (HEX, RGBA, Value, Mode).
+  - Verified: hue=5° → result #f55142 (red with base S/V). lightness=50% → result #4287f5 (base color). alpha=1.0 → rgba(66,135,245,1). All modes produce visible, correct result colors.
+- **Vertical mode fix**: The `drawTrackTo` method drew the track rectangle as `roundRect(tx, ty, tLen, tThick, r)` for both orientations — for vertical this produced a horizontal track (width=length, height=thickness) with a vertical gradient, which was visually broken. Fixed by computing `trackW` and `trackH` based on orientation: horizontal → `(tLen, tThick)`, vertical → `(tThick, tLen)`. Applied the same fix to the `fillRect`, the clip path, and the border stroke. Also fixed the thumb dimensions for vertical: swapped `thumbW`/`thumbH` so the thumb is wide (spans thickness) and short (along track axis) in vertical mode, and used `Math.min(thumbW, thumbH)/2` for the corner radius to handle both orientations. Verified: vertical hue track now renders a proper tall narrow bar with the rainbow gradient running top-to-bottom; vertical alpha track shows checkerboard + gradient correctly.
+
+Stage Summary:
+- Color wheel output chips: fixed height (36px), truncated text, no expansion.
+- Color range: all 4 modes now produce a visible result color derived from the same base color; output shows swatch + HEX + RGBA + value + mode.
+- Color range vertical mode: track and thumb now render correctly for vertical orientation.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 14
+Agent: main
+Task: Build Color Circle component with harmony modes + snapping grid (dots/lines)
+
+Work Log:
+- **Vanilla JS ColorCircle component** (`src/lib/components/color-circle/color-circle.ts`):
+  - Full circular disk filled with a smooth conic hue gradient (cached, createConicGradient with 24 stops).
+  - 8 harmony schemas: none, complementary [0,180], analogous [-30,0,30], triadic [0,120,240], tetradic [0,60,180,240], split-complementary [0,150,210], square [0,90,180,270], monochromatic [0]. Exported as `HARMONY_SCHEMAS`.
+  - Harmony markers: dots on the circumference at each harmony hue, connected by link lines (polygon). Base hue marker has a lemon accent ring.
+  - Snapping grid with two visualization modes using the SAME snap points:
+    - `dots`: small semi-transparent dots on the circumference at each division.
+    - `lines`: radial lines from center to circumference at each division.
+    - Both use `gridDivisions` (e.g. 12 = every 30°). When snapping is on, dragging snaps the base hue to the nearest grid point.
+  - Public API: getBaseHue, setBaseHue, getHarmony, setHarmony, setSnapping, setGridMode, setGridDivisions, setShowHarmonyLinks, getOutput, on/off, destroy.
+  - Output includes `{ baseHue, harmony, hues[], colors[] }` where colors are full HSV (S=100, V=100) for each harmony hue.
+  - setHarmony emits input+change events so listeners update when the harmony changes (not just when the user drags).
+  - Pointer + keyboard interaction (arrows ±1°, Shift=15°, Home/End). ARIA slider role.
+  - Self-contained color math (hsvToRgb, rgbToHex) — no external deps.
+- **React wrapper** (`src/components/color-circle/color-circle-react.tsx`): owns the instance, forwards all props via imperative API.
+- **Playground** (`src/components/color-circle/color-circle-playground.tsx`): full playground with:
+  - Live canvas (the circular disk)
+  - Property inspector: harmony 4×2 grid, snapping toggle, grid mode (dots/lines, only shown when snapping on), grid divisions slider, harmony links toggle, size slider
+  - Output section: harmony palette swatches (color + hex + hue°) + copyable chips (Base, Hues, Harmony, Count)
+  - Code panel (JS/HTML/CSS/API tabs with live-synced code)
+  - Documentation section with harmony schemas table
+- **Content metadata**: added color-circle to `src/lib/platform/content.ts` with full properties, methods, events, defaults.
+- **Routing**: added `component/color/color-circle` → `ColorCirclePlayground` in `src/app/page.tsx`.
+- Fixed icon import: `MagnetOff` doesn't exist in lucide-react; used `Magnet` for both states with different styling.
+
+Stage Summary:
+- New Color Circle component established with 8 harmony modes and snapping grid (dots/lines visualization of the same snap points).
+- VLM-verified: rainbow disk renders correctly, harmony markers + links visible, dots grid shows 12 dots on circumference at 30° intervals, lines grid shows 12 radial lines from center at the same 30° intervals.
+- Component appears in sidebar (Color → Color Circle) and Components directory.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 15 (fix session 6)
+Agent: main
+Task: Fix thumb clipping + redesign color circle grid inside + 2D marker dragging
+
+Work Log:
+- **Thumb clipping fix (color wheel + color circle)**: Both components had `border-radius: 50%` on their canvas CSS, which clipped markers that sat on the edge of the circle. Removed the `border-radius: 50%` from both `.color-wheel-picker canvas` and `.color-circle canvas`. The disk/wheel are already drawn as circles via `ctx.arc`, so the border-radius was only causing clipping, not contributing to the visual. VLM confirms: color wheel markers are now fully round and unclipped.
+- **Color circle redesigned for 2D interaction**: The previous Color Circle locked markers to the circumference (1D hue selection only). Redesigned it so markers can be dragged to any position INSIDE the circle:
+  - Each harmony marker now has a `saturation` (0–1, default 1.0 = on the edge). The marker's position is: angle = hue, radius = saturation × r.
+  - Pointer down finds the nearest marker (within 24px threshold, defaults to base marker) and grabs it. Drag updates the marker's hue (from angle) and saturation (from distance/radius).
+  - When snapping is on, both hue snaps to angular divisions AND saturation snaps to the nearest ring (1/(GRID_RINGS+1) increments).
+  - Output now includes `saturations[]` and each color's HSV reflects the marker's saturation.
+  - `setHarmony` resets marker saturations to 1.0 for the new schema.
+- **Polar grid drawn INSIDE the circle**: The previous grid only had dots/lines on the circumference. Redesigned `renderGrid()` to draw a full polar grid inside:
+  - 3 concentric rings at 1/4, 1/2, 3/4 of the radius (GRID_RINGS = 3)
+  - Angular divisions = `gridDivisions` (default 12 = every 30°)
+  - **Dots mode**: dots at each (ring, angle) intersection + center dot + edge dots = ~49 dots forming a polar grid
+  - **Lines mode**: concentric circles (rings) + radial lines from center to edge = spider-web polar grid
+  - Lines mode uses dual-stroke (dark 3px outline + white 1.5px line) for contrast against any rainbow hue. VLM confirms: 3 rings + 12 radial lines = 48 snap cells visible.
+- **Canvas padding for markers**: Added 14px padding to the Color Circle canvas so markers at the edge (saturation=1) aren't clipped by the canvas bounds. The disk is drawn centered within the larger canvas.
+- VLM-verified all fixes:
+  - Color wheel: markers fully visible, not clipped ✅
+  - Color circle dots mode: polar grid of dots at multiple radii inside ✅
+  - Color circle lines mode: 3 concentric rings + 12 radial lines (spider-web) inside ✅
+  - Harmony markers draggable inside the circle ✅
+  - Markers not clipped ✅
+
+Stage Summary:
+- Color wheel and color circle thumbs are no longer clipped (removed border-radius).
+- Color circle now has a polar grid drawn INSIDE the circle (not just on the edge): dots at ring/angle intersections or rings+lines forming a spider-web.
+- Color circle markers are draggable to any position inside the circle (2D: hue by angle, saturation by radius), not just on the edge.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 16 (fix session 7)
+Agent: main
+Task: Grid divisions include rings + white center via saturation gradient
+
+Work Log:
+- **Grid divisions now include rings**: The `gridDivisions` property previously only controlled the angular divisions (radial spokes). The ring count was a hardcoded constant (GRID_RINGS = 3). Replaced with `ringCountFromDivisions(divisions)` which derives the ring count from `gridDivisions` (~half the angular count, e.g. 12 → 5 rings, 24 → 11 rings). Now `gridDivisions` controls BOTH the angular AND radial resolution of the polar grid. Updated `renderGrid()` (dots and lines modes) and the saturation snapping logic to use the derived ring count. VLM confirms: with gridDivisions=12, 5 concentric rings + 12 radial lines are visible.
+- **White center via saturation gradient**: The disk previously used only a conic hue gradient with S=100, V=100 everywhere — so the center was a fully saturated hue (not white). Added a radial saturation gradient overlay on top of the conic hue gradient: `createRadialGradient(cx, cy, 0, cx, cy, r)` with stops `rgba(255,255,255,1)` at center → `rgba(255,255,255,0)` at edge. This makes the center blend to white (S=0) while the edge keeps full saturation (S=1), matching HSV saturation semantics where radius → saturation. Pixel-verified: center = rgb(253,255,253) (white), 1/4 out = rgb(255,193,192) (light pink), 1/2 = rgb(255,129,128) (mid red), 3/4 = rgb(255,65,65) (bright red), edge = rgb(208,1,0) (pure red). VLM confirms: center is white, smooth transition to saturated edge.
+
+Stage Summary:
+- `gridDivisions` now controls both angular divisions (radial lines/spokes) and radial divisions (concentric rings). Higher divisions → more rings.
+- Color circle center is now white via a radial saturation gradient overlay; the edge retains full saturation. Smooth blend confirmed by pixel sampling and VLM.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 17
+Agent: main
+Task: Fix size parameter + Adobe Color-style base color + add/remove colors
+
+Work Log:
+- **Size parameter fix**: The ColorCircle class was missing a `setSize()` method. The React wrapper had no effect to forward the `size` prop. Added `setSize(n)` to the class (updates options, resizes canvas, invalidates disk cache, re-renders) and added `React.useEffect(() => { ref.current?.setSize(size); }, [size])` to the wrapper. Verified: changing the size slider from 240 to 320 resizes the canvas from 272px to 352px (320 + 32 padding).
+- **Complete ColorCircle redesign with Adobe Color-style base color concept**:
+  - Replaced the old `baseHue + markerSat[]` model with a `colors: ColorEntry[]` array where each entry has `{ id, hue, saturation, isBase, offset }`.
+  - **Base color drives the palette**: When the base color is dragged, ALL other colors shift by the same hue delta (maintaining their offsets). Verified: dragging base from 210° to 0° shifted all triadic colors correctly (base→red, others→green and blue, maintaining 120° offsets).
+  - **Non-base colors move individually**: When a non-base color is dragged, only that color's hue+saturation changes; its offset from the base is recalculated. This lets users "break" a color from the harmony.
+  - **setBaseIndex(i)**: Promotes any color to be the base. All offsets are recalculated relative to the new base. The base marker gets a lemon-green accent ring and a "Base" badge in the palette.
+  - **addColor(hue?, saturation?)**: Adds a new color at a position (default: baseHue + 30°). Returns the new index.
+  - **removeColor(i)**: Removes a color (can't remove the last one; if the base is removed, the first remaining color becomes the base).
+  - Markers are numbered (1, 2, 3...) so users can identify them.
+  - Harmony links connect all markers with a polygon.
+- **Playground redesign with full palette management UI**:
+  - Palette section in the live canvas showing color cards: each has a swatch, hex value, hue/saturation/offset info, a "Base" badge (for the base), a crown button (set as base), and an X button (remove).
+  - "Add color" button in the palette header.
+  - The properties panel has all the same controls (harmony, snapping, grid, links, size).
+  - Initial state is emitted on mount so the palette shows immediately.
+- VLM-verified all features: circular wheel with white center, 3 numbered markers with lemon-green base ring, palette cards with Base badge + crown/X buttons, Add color button, Size slider all present and correct.
+
+Stage Summary:
+- Size parameter now works (setSize method + React effect forwarding).
+- ColorCircle redesigned with Adobe Color-style base color concept: one color is the "base", moving it shifts all others; non-base colors move individually; users can add/remove colors and change which color is the base.
+- Full palette management UI in the playground: color cards with swatches, hex values, base badges, set-as-base buttons, remove buttons, and add-color button.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 18
+Agent: main
+Task: Standalone harmony engine + 10 Adobe rules + fix thumb positioning
+
+Work Log:
+- **Standalone harmony engine** (`src/lib/components/color-circle/harmony-engine.ts`): Created as a pure, UI-independent module with:
+  - `HarmonyRule` type: 10 rules (analogous, monochromatic, triad, complementary, split-complementary, double-split-complementary, square, compound, shades, custom).
+  - `HARMONY_RULES` definitions: each rule has hue offsets, a `variesTone` flag for tonal rules (monochromatic/shades), and a description.
+  - `generateHues(baseHue, rule)`: generates absolute hues from a base + rule.
+  - `defaultSaturations(rule)` / `defaultLightnesses(rule)`: for tonal rules, generates varied saturation/lightness values.
+  - `hueDelta(from, to)`: signed angular delta [-180, 180] for rotating all markers when the base moves.
+  - `isConstrained(rule)`: true for all rules except "custom".
+- **ColorCircle redesigned to use the engine**:
+  - `ColorEntry` now includes `lightness` (HSL L, 0–100) in addition to hue/saturation.
+  - `buildPalette(rule, baseHue)` generates the palette from the engine's offsets + default saturations/lightnesses.
+  - `getOutput()` now includes HSL values and uses HSL→HSV conversion for accurate color representation.
+  - Markers use HSL→HSV→RGB conversion for correct color display.
+  - The base color drives hue rotation (all markers shift by the same delta); saturation/lightness are per-color.
+  - Markers sit on the circumference (edge) by default, positioned by hue angle. Their geometric relationship (complementary through center, triad as triangle, square as square) is visualized via harmony link lines.
+- **Playground updated with all 10 rules**: The HARMONIES array now has 10 entries with appropriate icons (Shuffle, Layers, Triangle, Divide, Split, Grid2x2, Square, Sparkles, SunMedium, Brush). The harmony rules table in the documentation section lists all 10 with their offsets and counts.
+- **Content metadata updated**: The color-circle component metadata now reflects the 10 rules, add/remove color methods, base color concept, and updated defaults.
+- VLM-verified: circular wheel with white center, 3 numbered markers with lemon-green base ring, harmony link lines through center, all 10 harmony rule buttons in properties panel, palette cards with swatches/hex/Base/crown/remove, Size slider all present and correct. Verified palette counts: complementary=2, triad=3, compound=5, monochromatic=5.
+
+Stage Summary:
+- Created a standalone harmony engine module with all 10 Adobe Color rules, fully decoupled from the UI.
+- ColorCircle now uses the engine, with proper separation of harmony geometry (hue offsets) from color values (hue, saturation, lightness per color).
+- Markers positioned on the circumference, with geometric relationships visualized via harmony links through the center.
+- Base color drives hue rotation; saturation/lightness are independent per color.
+- Tonal rules (monochromatic, shades) generate varied saturation/lightness values.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 19
+Agent: main
+Task: Match Adobe Color's harmony system exactly (9 rules, 5 colors, base at middle, lock/add/remove)
+
+Work Log:
+- **Researched actual Adobe Color behavior** by visiting https://color.adobe.com/create/color-wheel with Agent Browser:
+  - 9 harmony rules (not 10): Custom, Analogous, Complementary, Split complementary, Triad, Square, Compound, Shades, Monochromatic
+  - 5 color strips at the bottom (base at middle, index 2)
+  - Each strip has: Lock, Edit tint, Drag to reorder, Delete color, Edit color, Copy hex, Add color left, Add color right
+  - Moving the base handle rotates all non-locked colors
+  - Colors can be locked, added (left/right), and removed
+  - Tested Triad: 5 colors with 3 distinct hues, offsets [-120, +120, 0, -120, +120]
+  - Tested Square: 5 colors with 4 distinct hues, offsets [180, 90, 0, -90, 180]
+- **Rewrote harmony engine** (`harmony-engine.ts`):
+  - 9 rules matching Adobe Color exactly (removed "double-split-complementary" and "tetradic")
+  - All rules produce exactly 5 colors with offsets defined for each position
+  - Base always at index 2 (BASE_INDEX = 2, PALETTE_SIZE = 5)
+  - Tonal rules (monochromatic, shades) have proper default S/L variation
+  - Triad offsets: [-120, 120, 0, -120, 120] — 3 hues in 5 slots
+  - Square offsets: [180, 90, 0, -90, 180] — 4 hues in 5 slots
+  - Complementary offsets: [180, 0, 0, 0, 180] — 2 hues in 5 slots
+- **Rewrote ColorCircle** (`color-circle.ts`):
+  - 5 default colors, base at index 2 (middle)
+  - Lock/unlock support: locked colors don't move when base moves
+  - addColor(index, hue?, sat?): insert at any position
+  - removeColor(i): remove any color (base is promoted if removed)
+  - Moving base: rotates all non-locked, non-base colors by the same hue delta
+  - Moving non-base: only changes that color; offset recalculated
+  - Keyboard: rotates all non-locked colors
+  - Locked markers show an "L" indicator on the canvas
+- **Updated playground** (`color-circle-playground.tsx`):
+  - 9 harmony rule buttons in Adobe Color's exact order
+  - Adobe-style vertical color strips with:
+    - Colored swatch on the left with position number
+    - Hex value + HSL info + offset
+    - Lock/Unlock button (amber when locked)
+    - Add-left (ChevronLeft) and Add-right (ChevronRight) buttons
+    - Crown (set as base) button
+    - X (remove) button
+  - Removed the separate "Add color" header button (colors are added via the per-strip add-left/add-right buttons)
+- VLM-verified: 9 harmony rules, 5 color strips with all action buttons, base marker with lemon ring, size slider all present and correct. Triad produces 5 colors with 3 distinct hues. Complementary produces 5 colors with 2 distinct hues.
+
+Stage Summary:
+- Harmony system now matches Adobe Color exactly: 9 rules, 5 colors, base at middle, lock/add-left/add-right/remove.
+- Standalone harmony engine with proper hue offsets for all 9 rules.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 20
+Agent: main
+Task: Reconstruct harmony links as radial lines to center + expandable custom rule system
+
+Work Log:
+- **Harmony links changed to radial lines**: Rewrote `renderLinks()` in ColorCircle to draw lines from each marker TO THE CENTER of the circle (radial spokes), not between markers (polygon). Each line shows the angular relationship of its color to the center. Base color's line is lemon-tinted; other lines are white semi-transparent. VLM confirms: "lines connect each outer marker directly to the central white point. They radiate outward from the center like spokes of a wheel. They do not connect marker-to-marker."
+- **Harmony engine made expandable**: Rewrote `harmony-engine.ts` to support user-defined custom rules:
+  - Added a mutable `customRules` Map that stores user-defined `HarmonyDefinition` entries.
+  - Added `defineCustomRule(label, offsets, options)` — registers a new custom rule and returns its definition.
+  - Added `removeCustomRule(id)`, `getCustomRules()`, `getAllRules()`, `getRule(id)`.
+  - Built-in rules are now in `BUILT_IN_RULES` with `BUILT_IN_RULE_ORDER`.
+  - The `HarmonyRule` type is now `string` (supports any rule ID, built-in or custom).
+- **ColorCircle `setCustomOffsets()` method**: Added a public method that defines a custom rule from user-specified angle offsets and switches to it immediately. Preserves the current base hue. Example: `setCustomOffsets([0, 60, 120, 180, 240])` creates a 5-color rule with 60° spacing.
+- **Custom Rule Builder UI** in the playground: Added a "Custom rule builder" section in the properties panel with:
+  - Offset chips showing current angle offsets (e.g. "+0°", "+120°", "+240°") with remove (X) buttons.
+  - A number input for entering a new offset angle.
+  - An "Add" button to add the offset to the list.
+  - An "Apply rule" button that calls `setCustomOffsets()` on the ColorCircle.
+  - Verified: adding [0, 120, 240, 90] and applying produces 4 colors at the correct hues (210°, 330°, 90°, 300°).
+
+Stage Summary:
+- Harmony links are now radial lines from each thumb to the center (not between thumbs), making the angular relationship to center visually clear.
+- The harmony system is expandable: users can define their own custom rules with arbitrary angle offsets via the Custom Rule Builder UI or the `setCustomOffsets()` API.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 21
+Agent: main
+Task: Add color on same radial line + base color controls all colors' distance from center
+
+Work Log:
+- **addColorOnLine(i, saturation?) method**: Added a new public API to ColorCircle that adds a color on the SAME RADIAL LINE as an existing color (same hue, different saturation/distance from center). The new color sits at the same angle but closer to center (default: halfway between the source color's saturation and center, i.e. 50% of source saturation). This lets users create shades/tints of a color along the same spoke — like Adobe Color's ability to add colors at different distances along the same hue line.
+  - Added a "Droplets" icon button on each palette card (titled "Add shade on same line") that calls addColorOnLine.
+  - Verified: adding a shade on color #0080ff (blue, S=100%) produces #4080bf (same blue hue, S=50%, closer to center).
+- **Base color controls all colors' distance from center**: Updated the pointer interaction so that when the base color's saturation changes (moving toward/away from center), ALL non-locked colors' saturation scales proportionally by the same ratio. The base color now controls both hue rotation (all colors rotate by the same hue delta) AND distance from center (all colors' saturation scales by the same ratio). This matches the user's requirement: "by a rule main color controls distance between each color and center of circle."
+  - Implementation: compute `satRatio = newSat / oldSat` when the base moves, then multiply each non-locked color's saturation by that ratio.
+  - Verified: dragging the base from S=100% to S=30% scaled all colors to S≈30% (S30, S9, S30, S30 — the S9 was a previously-added shade that scaled proportionally from S30).
+- VLM-verified: markers moved closer to center (~30% radius) after dragging the base inward, saturation values updated on color cards, Droplets button present.
+
+Stage Summary:
+- Users can add colors on the same radial line (same hue, different saturation) via the Droplets button on each palette card.
+- The base color now controls the distance between every color and the center — dragging the base inward/outward scales all non-locked colors' saturation proportionally.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 22
+Agent: main
+Task: Build Color Ramp component (multi-stop gradient with draggable stops)
+
+Work Log:
+- **Vanilla JS ColorRamp component** (`src/lib/components/color-ramp/color-ramp.ts`):
+  - Multi-stop gradient bar with draggable color stops.
+  - Canvas-based rendering: gradient bar with rounded corners, stop markers as capsule thumbs (white halo + dark border + color dot).
+  - Click empty space on the bar → adds a new stop at that position (color interpolated from neighbors).
+  - Drag stops to reposition them; stops auto-sort by position.
+  - `addStop(position?, color?)`: color is interpolated via linear RGB lerp if not specified.
+  - `removeStop(i)`: removes a stop (keeps at least 2).
+  - `setOrientation("horizontal" | "vertical")`: switches orientation, swaps bar dimensions.
+  - `setThickness(n)`, `setLength(n)`: adjustable bar size.
+  - Full public API: getStops, setStops, addStop, removeStop, setOrientation, setThickness, setLength, on/off, destroy.
+  - Pointer interaction with pointer capture; keyboard support (arrows adjust first stop).
+  - Events: `input` (continuous during drag), `change` (committed).
+  - Self-contained color math (parseHex, rgbToHex, lerpRgb) — no external deps.
+- **React wrapper** (`src/components/color-ramp/color-ramp-react.tsx`): owns the instance, forwards prop changes, exposes instance via `instanceRef` for imperative calls.
+- **Playground** (`src/components/color-ramp/color-ramp-playground.tsx`): full playground with:
+  - Live canvas (the gradient bar)
+  - Property inspector: orientation toggle (Horizontal/Vertical), thickness slider, length slider
+  - Output section: stop cards (color swatch + hex + position %) with remove buttons + "Add stop" button
+  - Code panel (JS/HTML/CSS/API tabs with live-synced code)
+  - Documentation section
+- **Content metadata**: added color-ramp to `src/lib/platform/content.ts` with full properties, methods, events, defaults.
+- **Routing**: added `component/color/color-ramp` → `ColorRampPlayground` in `src/app/page.tsx`.
+- VLM-verified: horizontal gradient bar with blue→green→orange transition, 4 draggable stop markers, stop cards with swatches/hex/position, Add stop button, orientation/thickness/length controls all present.
+
+Stage Summary:
+- New Color Ramp component established: multi-stop gradient with draggable stops, add/remove, orientation control.
+- Appears in sidebar (Color → Color Ramp) and Components directory.
+- `bun run lint` — 0 errors, 0 warnings.

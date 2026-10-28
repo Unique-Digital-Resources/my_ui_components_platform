@@ -1,0 +1,455 @@
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-1.5 text-[12px] font-medium">
+                                {isNone ? (
+                                  <Ban className="h-3 w-3 text-muted-foreground" />
+                                ) : (
+                                  <LayoutTemplate className="h-3 w-3 text-brand-lemon" />
+                                )}
+                                {t.name}
+                              </span>
+                              <code className="font-mono text-[10px] text-muted-foreground/80">{t.id}</code>
+                            </div>
+                            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                              {t.description}
+                            </p>
+                            {t.slots.length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                {t.slots.map((s) => (
+                                  <span
+                                    key={`${t.id}-${s.field}-${s.renderer}`}
+                                    className="inline-flex items-center rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground"
+                                  >
+                                    {s.field}
+                                    <span className="mx-1 text-muted-foreground/40">·</span>
+                                    <span className="text-brand-lemon/80">{s.renderer}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {isNone && (
+                              <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground/80">
+                                The board works with zero templates registered — content templates are an opt-in layer on top.
+                              </p>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">
+                    Templates live in <code className="font-mono text-brand-lemon/80">src/lib/templates/</code> and
+                    are reusable across components. Switching swaps the card content layout without touching the data.
+                  </p>
+                </div>
+
+                {/* How to create custom templates */}
+                <div className="rounded-md border border-border bg-muted/10 p-4">
+                  <h4 className="flex items-center gap-1.5 text-[12px] font-semibold text-foreground">
+                    <BookOpen className="h-3.5 w-3.5 text-brand-lemon" />
+                    Creating custom templates
+                  </h4>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                    The board is independent of templates — it works with <code className="font-mono text-brand-lemon/80">&quot;none&quot;</code> or
+                    any registered ID. Templates are declarative: an ordered list of slots, each naming a field and a renderer.
+                  </p>
+                  <ol className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                    <li>
+                      <span className="font-mono text-brand-lemon">1.</span> Register a renderer (or reuse a built-in one
+                      like <code className="font-mono text-brand-lemon/80">title</code>, <code className="font-mono text-brand-lemon/80">priority-row</code>,
+                      <code className="font-mono text-brand-lemon/80">label-chips</code>):
+                    </li>
+                  </ol>
+                  <pre className="mt-1.5 overflow-x-auto rounded border border-border bg-background/60 p-2 font-mono text-[10px] text-foreground"><code>{`import { defineRenderer } from "@/lib/templates";
+
+defineRenderer("my-prefix", (ctx) => {
+  const v = ctx.item[ctx.slot.field];
+  if (!v) return null;
+  const el = document.createElement("div");
+  el.className = "ctpl-meta-line";
+  el.textContent = String(v);
+  return el;
+});`}</code></pre>
+                  <ol className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-muted-foreground" start={2}>
+                    <li>
+                      <span className="font-mono text-brand-lemon">2.</span> Register a template that references your
+                      renderers (or the built-in ones):
+                    </li>
+                  </ol>
+                  <pre className="mt-1.5 overflow-x-auto rounded border border-border bg-background/60 p-2 font-mono text-[10px] text-foreground"><code>{`import { defineTemplate } from "@/lib/templates";
+
+defineTemplate({
+  id: "kanban.my-card",
+  name: "My Card",
+  category: "Kanban",
+  description: "Title + custom prefix line.",
+  slots: [
+    { field: "title",  renderer: "title",      visibleIn: ["compact","standard","detailed"] },
+    { field: "myField", renderer: "my-prefix", visibleIn: ["standard","detailed"], props: { prefix: "MY" } },
+  ],
+});`}</code></pre>
+                  <ol className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-muted-foreground" start={3}>
+                    <li>
+                      <span className="font-mono text-brand-lemon">3.</span> Switch the board to your template:
+                    </li>
+                  </ol>
+                  <pre className="mt-1.5 overflow-x-auto rounded border border-border bg-background/60 p-2 font-mono text-[10px] text-foreground"><code>{`board.setTemplateId("kanban.my-card");
+// or at construction:
+new KanbanBoard(el, { templateId: "kanban.my-card", ... });`}</code></pre>
+                  <p className="mt-2 text-[10px] leading-snug text-muted-foreground/80">
+                    The renderer contract is <code className="font-mono text-brand-lemon/80">{"(ctx: { item, slot, density, host }) => HTMLElement | null"}</code>.
+                    Return <code className="font-mono text-brand-lemon/80">null</code> to skip the slot. See the
+                    SKILL tab for the full renderer registry API.
+                  </p>
+                </div>
+              </>
+            }
+          >
+            {/* Mode */}
+            <div>
+              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Mode</label>
+              <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+                {(["editable", "read_only"] as const).map((m) => (
+                  <button key={m} type="button" onClick={() => update("mode", m)} aria-pressed={state.mode === m}
+                    className={cn("rounded px-2 py-2 text-[11px] font-medium transition-colors",
+                      state.mode === m ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+                    {m === "editable" ? "Editable" : "Read-only"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Layout */}
+            <div>
+              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Layout</label>
+              <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+                {(["horizontal", "vertical"] as const).map((l) => (
+                  <button key={l} type="button" onClick={() => update("layout", l)} aria-pressed={state.layout === l}
+                    className={cn("rounded px-2 py-2 text-[11px] font-medium transition-colors",
+                      state.layout === l ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+                    {l === "horizontal" ? "Horizontal" : "Vertical"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Card layout */}
+            <div>
+              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Card layout</label>
+              <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+                {(["compact", "standard", "detailed"] as const).map((c) => (
+                  <button key={c} type="button" onClick={() => update("cardLayout", c)} aria-pressed={state.cardLayout === c}
+                    className={cn("rounded px-2 py-2 text-[11px] font-medium capitalize transition-colors",
+                      state.cardLayout === c ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Toggles */}
+            <div className="flex flex-col gap-2">
+              {([
+                { k: "dragEnabled" as const, l: "Drag enabled" },
+                { k: "reorderWithinColumn" as const, l: "Reorder within column" },
+                { k: "moveBetweenColumns" as const, l: "Move between columns" },
+                { k: "showCardBorder" as const, l: "Show card border" },
+                { k: "showItemCount" as const, l: "Show item count" },
+                { k: "showDropPreview" as const, l: "Show drop preview" },
+              ]).map(({ k, l }) => (
+                <div key={k} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+                  <span className="text-[12px] text-foreground">{l}</span>
+                  <button type="button" role="switch" aria-checked={state[k]} onClick={() => update(k, !state[k])}
+                    className={cn("relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+                      state[k] ? "bg-brand-lemon" : "bg-muted-foreground/30")}>
+                    <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform",
+                      state[k] ? "translate-x-4" : "translate-x-0.5")} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Sliders */}
+            <div>
+              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Column width: <span className="font-mono text-brand-lemon">{state.columnWidth}px</span></label>
+              <input type="range" min={220} max={400} step={10} value={state.columnWidth} onChange={(e) => update("columnWidth", Number(e.target.value))}
+                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.columnWidth - 220) / 180 * 100}%, var(--muted) ${(state.columnWidth - 220) / 180 * 100}%)` }} />
+              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+                <span>220</span><span>400</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Card gap: <span className="font-mono text-brand-lemon">{state.cardGap}px</span></label>
+              <input type="range" min={2} max={20} step={1} value={state.cardGap} onChange={(e) => update("cardGap", Number(e.target.value))}
+                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.cardGap - 2) / 18 * 100}%, var(--muted) ${(state.cardGap - 2) / 18 * 100}%)` }} />
+              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+                <span>2</span><span>20</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Column gap: <span className="font-mono text-brand-lemon">{state.columnGap}px</span></label>
+              <input type="range" min={4} max={32} step={1} value={state.columnGap} onChange={(e) => update("columnGap", Number(e.target.value))}
+                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.columnGap - 4) / 28 * 100}%, var(--muted) ${(state.columnGap - 4) / 28 * 100}%)` }} />
+              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+                <span>4</span><span>32</span>
+              </div>
+            </div>
+
+            {/* Quick actions */}
+            <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const id = `t-${Math.random().toString(36).slice(2, 7)}`;
+                  instanceRef.current?.createItem("todo", { id, title: "Quick task", priority: "low" });
+                  syncFromBoard();
+                  toast.success("Added", { description: id });
+                }}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-brand-lemon/40 hover:bg-accent"
+              >
+                <Plus className="h-3 w-3 text-brand-lemon" /> Add to To Do
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedId) {
+                    toast.error("No selection", { description: "Select a card first." });
+                    return;
+                  }
+                  instanceRef.current?.removeItem(selectedId);
+                  syncFromBoard();
+                  toast.success("Removed", { description: selectedId });
+                }}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-destructive/40 hover:bg-accent"
+              >
+                <Trash2 className="h-3 w-3 text-destructive" /> Remove selected
+              </button>
+            </div>
+          </AgentSkillTabs>
+        </div>
+
+        {/* Code panel */}
+        <section className="panel mt-6 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border px-2">
+            <div className="flex">
+              {([["javascript","JavaScript"],["html","HTML"],["css","CSS"],["api","API"]] as const).map(([k, l]) => (
+                <button key={k} type="button" onClick={() => setActiveTab(k)}
+                  className={cn("relative h-9 px-3 text-[12px] font-medium transition-colors",
+                    activeTab === k ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+                  {l}
+                  {activeTab === k && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="p-4">
+            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+            {activeTab === "html" && <CodeBlock code={'<div id="kanban" style="height: 600px;"></div>\n<script type="module" src="init.js"></script>'} language="html" filename="index.html" />}
+            {activeTab === "css" && <CodeBlock code={".kanban-board {\n  /* Override tokens to retheme the board */\n  --kb-accent: #D9FF66;\n  --kb-surface: #211A30;\n  --kb-border: #383343;\n  --kb-text: #F4F1FF;\n  --kb-muted: #B8B2CA;\n}\n\n/* Compact density for side panels */\n.kanban-board.kanban-card-compact .kanban-card {\n  padding: 4px 8px;\n}"} language="css" filename="styles.css" />}
+            {activeTab === "api" && <CodeBlock code={"class KanbanBoard {\n  constructor(container, options)\n  setItems(items): void\n  setColumns(columns): void\n  selectItem(itemId | null, source?): void\n  clearSelection(): void\n  getSelectedItem(): string | null\n  moveItem(itemId, targetColumnId, position, source?): void\n  reorderItem(itemId, position, source?): void\n  createItem(columnId, partial): string\n  updateItem(itemId, changes): void\n  removeItem(itemId): void\n  collapseColumn(columnId): void\n  expandColumn(columnId): void\n  getItems(): KanbanItem[]\n  getColumns(): KanbanColumn[]\n\n  // Content templates (see src/lib/templates/)\n  getTemplate(): ContentTemplate | undefined\n  getTemplateId(): string\n  setTemplateId(id): void\n\n  setProperty(name, value): void\n  on(event, handler): void\n  off(event, handler): void\n  destroy(): void\n}\n\n// Events:\n//   item_selected, selection_changed, item_activated,\n//   item_create_requested, item_edit_requested,\n//   item_moved, item_move_rejected, item_reordered,\n//   item_delete_requested, drag_started, drag_cancelled,\n//   drop_target_changed, column_selected, column_create_requested\n\n// Content templates are registered in a singleton registry:\n//   import { registerBuiltinTemplates, templateRegistry } from \"@/lib/templates\";\n//   registerBuiltinTemplates();\n//   templateRegistry.byCategory(\"Kanban\");\n//   // → [{ id: \"kanban.standard-task\", ... }, { id: \"kanban.minimal\", ... }, ...]"} language="typescript" filename="api.ts" />}
+          </div>
+        </section>
+
+        {/* Documentation */}
+        <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_220px]">
+          <div className="flex flex-col gap-6">
+            <div className="panel p-6">
+              <h2 className="text-lg font-semibold text-foreground">Overview</h2>
+              <p className="mt-2 text-[14px] text-muted-foreground">{meta.description}</p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <h3 className="text-[12px] font-semibold uppercase tracking-wide text-brand-lemon">When to use</h3>
+                  <ul className="mt-2 space-y-1 text-[13px] text-muted-foreground">
+                    {meta.whenToUse.map((u) => <li key={u} className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />{u}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Not for</h3>
+                  <ul className="mt-2 space-y-1 text-[13px] text-muted-foreground">
+                    {meta.whenNotToUse.map((u) => <li key={u} className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />{u}</li>)}
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel p-6">
+              <h2 className="text-lg font-semibold text-foreground">Properties</h2>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-[12px]">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="py-2 pr-4 font-mono font-medium">Property</th>
+                      <th className="py-2 pr-4 font-mono font-medium">Type</th>
+                      <th className="py-2 pr-4 font-mono font-medium">Default</th>
+                      <th className="py-2 font-mono font-medium">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {meta.properties.map((p) => (
+                      <tr key={p.name} className="border-b border-border/60 align-top">
+                        <td className="py-2 pr-4 font-mono text-brand-lemon">{p.name}</td>
+                        <td className="py-2 pr-4 font-mono text-foreground">{p.type}</td>
+                        <td className="py-2 pr-4 font-mono text-muted-foreground">{p.default}</td>
+                        <td className="py-2 text-muted-foreground">{p.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div className="panel p-6">
+                <h2 className="text-lg font-semibold text-foreground">Methods</h2>
+                <ul className="mt-3 space-y-2">
+                  {meta.methods.slice(0, 12).map((m) => (
+                    <li key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+                      <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+                      <p className="mt-1 text-[12px] text-muted-foreground">{m.description}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="panel p-6">
+                <h2 className="text-lg font-semibold text-foreground">Events</h2>
+                <ul className="mt-3 space-y-2">
+                  {meta.events.map((e) => (
+                    <li key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+                      <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+                      <p className="mt-1 text-[12px] text-muted-foreground">{e.description}</p>
+                      <p className="mt-1 font-mono text-[11px] text-muted-foreground/80">payload: {e.payload}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="panel p-6">
+              <h2 className="text-lg font-semibold text-foreground">Accessibility</h2>
+              <ul className="mt-3 space-y-1.5 text-[13px] text-muted-foreground">
+                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Cards are real DOM elements with <code className="font-mono text-brand-lemon">tabindex=&quot;0&quot;</code> and <code className="font-mono text-brand-lemon">role=&quot;button&quot;</code>.</li>
+                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Visible focus ring (lemon) on every card and column control.</li>
+                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" /><kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Space</kbd> selects, <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Enter</kbd> activates, <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">M</kbd> opens the Move menu.</li>
+                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Arrow keys reorder (Up/Down) and move between columns (Left/Right).</li>
+                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Drop indicator and column highlighting use color + outline, never color alone.</li>
+                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" /><code className="font-mono text-brand-lemon">prefers-reduced-motion</code> disables the drop-indicator pulse.</li>
+              </ul>
+            </div>
+
+            <div className="panel p-6">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                <LayoutTemplate className="h-4 w-4 text-brand-lemon" />
+                Content templates
+              </h2>
+              <p className="mt-2 text-[14px] text-muted-foreground">
+                Card content is laid out by a registered content template (see <code className="font-mono text-brand-lemon">src/lib/templates/</code>).
+                The board is independent of templates — pass <code className="font-mono text-brand-lemon">&quot;none&quot;</code> as
+                the <code className="font-mono text-brand-lemon">templateId</code> to render cards with their native
+                content (a bare title). Templates are an opt-in layer; the board works with zero templates registered.
+              </p>
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-left text-[12px]">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="py-2 pr-4 font-mono font-medium">Template ID</th>
+                      <th className="py-2 pr-4 font-mono font-medium">Name</th>
+                      <th className="py-2 font-mono font-medium">Slots</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-border/60 align-top">
+                      <td className="py-2 pr-4 font-mono text-muted-foreground">none</td>
+                      <td className="py-2 pr-4 font-medium text-foreground">None</td>
+                      <td className="py-2 text-muted-foreground">— (native rendering: title only)</td>
+                    </tr>
+                    {kanbanTemplates.map((t) => (
+                      <tr key={t.id} className="border-b border-border/60 align-top">
+                        <td className="py-2 pr-4 font-mono text-brand-lemon">{t.id}</td>
+                        <td className="py-2 pr-4 font-medium text-foreground">{t.name}</td>
+                        <td className="py-2 text-muted-foreground">
+                          {t.slots.map((s) => s.field).join(" → ")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <h3 className="mt-5 text-[12px] font-semibold uppercase tracking-wide text-brand-lemon">Creating a custom template</h3>
+              <p className="mt-1.5 text-[13px] text-muted-foreground">
+                The component does not know which templates exist — it looks them up by ID in the
+                singleton registry at render time. To add a custom template:
+              </p>
+              <ol className="mt-2 space-y-2 text-[13px] text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-lemon/10 font-mono text-[10px] font-semibold text-brand-lemon">1</span>
+                  <span>Register a slot renderer (a pure function from <code className="font-mono text-brand-lemon">{ "{ item, slot, density, host }" }</code> to <code className="font-mono text-brand-lemon">HTMLElement | null</code>), or reuse one of the 12 built-in renderers (<code className="font-mono text-brand-lemon">title</code>, <code className="font-mono text-brand-lemon">priority-row</code>, <code className="font-mono text-brand-lemon">label-chips</code>, etc.).</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-lemon/10 font-mono text-[10px] font-semibold text-brand-lemon">2</span>
+                  <span>Register a template that references your renderers by name, with per-slot <code className="font-mono text-brand-lemon">visibleIn</code> density filters and optional <code className="font-mono text-brand-lemon">props</code>.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-lemon/10 font-mono text-[10px] font-semibold text-brand-lemon">3</span>
+                  <span>Pass the template ID to the board (<code className="font-mono text-brand-lemon">{ "templateId" }</code> option or <code className="font-mono text-brand-lemon">setTemplateId()</code>). Switch at any time — the data is untouched.</span>
+                </li>
+              </ol>
+              <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-background/60 p-3 font-mono text-[11px] text-foreground"><code>{`import { defineRenderer, defineTemplate } from "@/lib/templates";
+
+// 1. Optional: register a custom renderer (or reuse a built-in one).
+defineRenderer("my-prefix", (ctx) => {
+  const v = ctx.item[ctx.slot.field];
+  if (!v) return null;
+  const el = document.createElement("div");
+  el.className = "ctpl-meta-line";
+  el.textContent = String(v);
+  return el;
+});
+
+// 2. Register a template that references renderers by name.
+defineTemplate({
+  id: "kanban.my-card",
+  name: "My Card",
+  category: "Kanban",
+  description: "Title + custom prefix line.",
+  slots: [
+    { field: "title",   renderer: "title",      visibleIn: ["compact", "standard", "detailed"] },
+    { field: "myField", renderer: "my-prefix",  visibleIn: ["standard", "detailed"], props: { prefix: "MY" } },
+  ],
+});
+
+// 3. Use it — the board looks up the template by ID at render time.
+const board = new KanbanBoard(el, { templateId: "kanban.my-card", ... });
+// or switch at runtime:
+board.setTemplateId("kanban.my-card");
+// or go template-free:
+board.setTemplateId("none");`}</code></pre>
+              <p className="mt-3 text-[12px] text-muted-foreground">
+                See the Templates tab (right) for the live picker, or the SKILL tab for the full
+                renderer registry API and the complete list of built-in renderers.
+              </p>
+            </div>
+          </div>
+
+          <aside className="hidden lg:block">
+            <div className="sticky top-6 panel p-4">
+              <h3 className="eyebrow mb-3">On this page</h3>
+              <ul className="space-y-2 text-[12px] text-muted-foreground">
+                <li><a href="#" className="hover:text-foreground">Overview</a></li>
+                <li><a href="#" className="hover:text-foreground">Properties</a></li>
+                <li><a href="#" className="hover:text-foreground">Methods</a></li>
+                <li><a href="#" className="hover:text-foreground">Events</a></li>
+                <li><a href="#" className="hover:text-foreground">Accessibility</a></li>
+                <li><a href="#" className="hover:text-foreground">Content templates</a></li>
+              </ul>
+            </div>
+          </aside>
+        </section>
+      </div>
+    </div>
+  );
+}

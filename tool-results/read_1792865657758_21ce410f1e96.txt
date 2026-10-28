@@ -1,0 +1,841 @@
+     1→/**
+     2→ * ColorRange — a 1D color slider component (vanilla TypeScript).
+     3→ *
+     4→ * Renders a horizontal or vertical gradient track for a single color
+     5→ * dimension, with a draggable thumb. Supports four modes:
+     6→ *
+     7→ *   hue       — 0..360, the full hue spectrum
+     8→ *   lightness — 0..100, from black → the base color → white
+     9→ *   contrast  — 0..100, the base color mixed toward black (0) or white (100)
+    10→ *   alpha     — 0..1, transparent → opaque over a checkerboard
+    11→ *
+    12→ * Public API:
+    13→ *   new ColorRange(container, { mode, value, color, orientation, thickness, length })
+    14→ *   getValue(): number
+    15→ *   setValue(v: number): void
+    16→ *   setMode(mode): void
+    17→ *   setColor(color: string): void
+    18→ *   setOrientation(orientation): void
+    19→ *   setThickness(n): void
+    20→ *   setLength(n): void
+    21→ *   on("input" | "change", handler): void
+    22→ *   off(event, handler): void
+    23→ *   destroy(): void
+    24→ *
+    25→ * Framework-independent. Canvas-based. No React or other UI framework.
+    26→ */
+    27→
+    28→export type ColorRangeMode = "hue" | "lightness" | "contrast" | "alpha";
+    29→export type ColorRangeOrientation = "horizontal" | "vertical";
+    30→
+    31→export interface ColorRangeOptions {
+    32→  /** Which color dimension the track represents. Default "hue". */
+    33→  mode?: ColorRangeMode;
+    34→  /** Initial value: 0..360 for hue, 0..100 for lightness/contrast, 0..1 for alpha. Default: mode-dependent. */
+    35→  value?: number;
+    36→  /**
+    37→   * The base color used by lightness/contrast/alpha modes. For hue mode it
+    38→   * is ignored (the track always shows the full spectrum). Accepts hex,
+    39→   * rgb(), hsl(), or named colors. Default "#4287f5".
+    40→   */
+    41→  color?: string;
+    42→  /** Track orientation. Default "horizontal". */
+    43→  orientation?: ColorRangeOrientation;
+    44→  /** Track thickness in CSS pixels (the short dimension). Default 16. */
+    45→  thickness?: number;
+    46→  /** Track length in CSS pixels (the long dimension). Default 260. */
+    47→  length?: number;
+    48→}
+    49→
+    50→export interface ColorRangeResultColor {
+    51→  /** #RRGGBB (no alpha channel). */
+    52→  hex: string;
+    53→  /** CSS rgba() string, e.g. "rgba(66,135,245,1)". */
+    54→  rgba: string;
+    55→  r: number;
+    56→  g: number;
+    57→  b: number;
+    58→  /** Alpha 0..1. */
+    59→  a: number;
+    60→}
+    61→
+    62→export interface ColorRangeValueOutput {
+    63→  mode: ColorRangeMode;
+    64→  value: number;
+    65→  /** Human-readable label, e.g. "210°" or "45%" or "0.80". */
+    66→  label: string;
+    67→  /** The actual color produced by applying the mode's value to the base color. */
+    68→  color: ColorRangeResultColor;
+    69→}
+    70→
+    71→interface Geometry {
+    72→  /** Total component width in CSS pixels (including padding). */
+    73→  totalW: number;
+    74→  /** Total component height in CSS pixels. */
+    75→  totalH: number;
+    76→  /** Track x origin (left). */
+    77→  tx: number;
+    78→  /** Track y origin (top). */
+    79→  ty: number;
+    80→  /** Track length (long dimension). */
+    81→  tLen: number;
+    82→  /** Track thickness (short dimension). */
+    83→  tThick: number;
+    84→  /** Thumb center along the track axis (0..tLen). */
+    85→  thumbPos: number;
+    86→}
+    87→
+    88→const DEFAULTS: Required<ColorRangeOptions> = {
+    89→  mode: "hue",
+    90→  value: 210,
+    91→  color: "#4287f5",
+    92→  orientation: "horizontal",
+    93→  thickness: 16,
+    94→  length: 260,
+    95→};
+    96→
+    97→const STYLE_ID = "color-range-styles";
+    98→
+    99→function injectStyles(): void {
+   100→  if (typeof document === "undefined") return;
+   101→  if (document.getElementById(STYLE_ID)) return;
+   102→  const style = document.createElement("style");
+   103→  style.id = STYLE_ID;
+   104→  style.textContent = `
+   105→.color-range {
+   106→  display: inline-block;
+   107→  position: relative;
+   108→  font-family: inherit;
+   109→  --color-range-focus-ring: rgba(217, 255, 102, 0.55);
+   110→}
+   111→.color-range canvas {
+   112→  display: block;
+   113→  touch-action: none;
+   114→  outline: none;
+   115→  cursor: pointer;
+   116→  border-radius: 8px;
+   117→}
+   118→.color-range canvas:focus-visible {
+   119→  box-shadow: 0 0 0 3px var(--color-range-focus-ring);
+   120→}
+   121→`;
+   122→  document.head.appendChild(style);
+   123→}
+   124→
+   125→// ---- Tiny color helpers (self-contained, no external deps) ----
+   126→
+   127→function clamp(v: number, min: number, max: number): number {
+   128→  return v < min ? min : v > max ? max : v;
+   129→}
+   130→
+   131→function clampHue(h: number): number {
+   132→  return ((h % 360) + 360) % 360;
+   133→}
+   134→
+   135→function parseHex(hex: string): { r: number; g: number; b: number } {
+   136→  let s = hex.trim().replace(/^#/, "");
+   137→  if (s.length === 3) {
+   138→    s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
+   139→  }
+   140→  if (s.length !== 6) {
+   141→    return { r: 66, g: 135, b: 245 }; // fallback
+   142→  }
+   143→  const r = parseInt(s.slice(0, 2), 16);
+   144→  const g = parseInt(s.slice(2, 4), 16);
+   145→  const b = parseInt(s.slice(4, 6), 16);
+   146→  if (isNaN(r) || isNaN(g) || isNaN(b)) return { r: 66, g: 135, b: 245 };
+   147→  return { r, g, b };
+   148→}
+   149→
+   150→function rgbToHex(r: number, g: number, b: number): string {
+   151→  const h = (n: number) =>
+   152→    clamp(Math.round(n), 0, 255).toString(16).padStart(2, "0");
+   153→  return `#${h(r)}${h(g)}${h(b)}`;
+   154→}
+   155→
+   156→function hsvToRgb(h: number, s: number, v: number): { r: number; g: number; b: number } {
+   157→  h = clampHue(h);
+   158→  s = clamp(s, 0, 100) / 100;
+   159→  v = clamp(v, 0, 100) / 100;
+   160→  const c = v * s;
+   161→  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+   162→  const m = v - c;
+   163→  let r = 0, g = 0, b = 0;
+   164→  if (h < 60) { r = c; g = x; b = 0; }
+   165→  else if (h < 120) { r = x; g = c; b = 0; }
+   166→  else if (h < 180) { r = 0; g = c; b = x; }
+   167→  else if (h < 240) { r = 0; g = x; b = c; }
+   168→  else if (h < 300) { r = x; g = 0; b = c; }
+   169→  else { r = c; g = 0; b = x; }
+   170→  return {
+   171→    r: Math.round((r + m) * 255),
+   172→    g: Math.round((g + m) * 255),
+   173→    b: Math.round((b + m) * 255),
+   174→  };
+   175→}
+   176→
+   177→function rgbToHsv(r: number, g: number, b: number): { h: number; s: number; v: number } {
+   178→  r /= 255; g /= 255; b /= 255;
+   179→  const max = Math.max(r, g, b);
+   180→  const min = Math.min(r, g, b);
+   181→  const d = max - min;
+   182→  let h = 0;
+   183→  if (d !== 0) {
+   184→    if (max === r) h = ((g - b) / d) % 6;
+   185→    else if (max === g) h = (b - r) / d + 2;
+   186→    else h = (r - g) / d + 4;
+   187→    h *= 60;
+   188→    if (h < 0) h += 360;
+   189→  }
+   190→  const s = max === 0 ? 0 : d / max;
+   191→  return { h, s: s * 100, v: max * 100 };
+   192→}
+   193→
+   194→type Handler = (v: ColorRangeValueOutput) => void;
+   195→
+   196→export class ColorRange {
+   197→  private readonly container: HTMLElement;
+   198→  private readonly canvas: HTMLCanvasElement;
+   199→  private readonly ctx: CanvasRenderingContext2D;
+   200→
+   201→  private options: Required<ColorRangeOptions>;
+   202→  /** Base color in HSV (for lightness/contrast modes that need hue+sat). */
+   203→  private baseHsv: { h: number; s: number; v: number };
+   204→  /** Base color in RGB (for alpha mode compositing). */
+   205→  private baseRgb: { r: number; g: number; b: number };
+   206→
+   207→  private readonly listeners: Map<string, Set<Handler>> = new Map();
+   208→  private pointerState: { pointerId: number } | null = null;
+   209→  private _destroyed = false;
+   210→
+   211→  /** Cached track canvas (depends on mode, color, orientation, geometry). */
+   212→  private trackCache: HTMLCanvasElement | null = null;
+   213→  private trackCacheCtx: CanvasRenderingContext2D | null = null;
+   214→  private trackCacheKey = "";
+   215→
+   216→  private readonly _onPointerDown: (e: PointerEvent) => void;
+   217→  private readonly _onPointerMove: (e: PointerEvent) => void;
+   218→  private readonly _onPointerUp: (e: PointerEvent) => void;
+   219→  private readonly _onKeyDown: (e: KeyboardEvent) => void;
+   220→
+   221→  constructor(container: HTMLElement, options: ColorRangeOptions = {}) {
+   222→    if (!container) throw new Error("ColorRange: container is required");
+   223→    this.container = container;
+   224→
+   225→    this.options = {
+   226→      mode: options.mode ?? DEFAULTS.mode,
+   227→      value: options.value ?? defaultValueForMode(options.mode ?? DEFAULTS.mode),
+   228→      color: options.color ?? DEFAULTS.color,
+   229→      orientation: options.orientation ?? DEFAULTS.orientation,
+   230→      thickness: Math.max(6, options.thickness ?? DEFAULTS.thickness),
+   231→      length: Math.max(40, options.length ?? DEFAULTS.length),
+   232→    };
+   233→
+   234→    const rgb = parseHex(this.options.color);
+   235→    this.baseRgb = rgb;
+   236→    this.baseHsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+   237→
+   238→    injectStyles();
+   239→
+   240→    this.canvas = document.createElement("canvas");
+   241→    this.canvas.className = "color-range-canvas";
+   242→    this.canvas.setAttribute("role", "slider");
+   243→    this.canvas.setAttribute(
+   244→      "aria-label",
+   245→      `${this.options.mode} color range`,
+   246→    );
+   247→    this.canvas.tabIndex = 0;
+   248→
+   249→    const ctx = this.canvas.getContext("2d");
+   250→    if (!ctx) throw new Error("ColorRange: 2D canvas context unavailable");
+   251→    this.ctx = ctx;
+   252→
+   253→    this.container.classList.add("color-range");
+   254→    this.container.appendChild(this.canvas);
+   255→
+   256→    this._onPointerDown = this.onPointerDown.bind(this);
+   257→    this._onPointerMove = this.onPointerMove.bind(this);
+   258→    this._onPointerUp = this.onPointerUp.bind(this);
+   259→    this._onKeyDown = this.onKeyDown.bind(this);
+   260→
+   261→    this.canvas.addEventListener("pointerdown", this._onPointerDown);
+   262→    this.canvas.addEventListener("pointermove", this._onPointerMove);
+   263→    this.canvas.addEventListener("pointerup", this._onPointerUp);
+   264→    this.canvas.addEventListener("pointercancel", this._onPointerUp);
+   265→    this.canvas.addEventListener("keydown", this._onKeyDown);
+   266→
+   267→    this.updateCanvasSize();
+   268→    this.render();
+   269→    this.updateAria();
+   270→  }
+   271→
+   272→  // ---- Public API ----
+   273→
+   274→  getValue(): number {
+   275→    return this.options.value;
+   276→  }
+   277→
+   278→  /**
+   279→   * The actual color produced by applying the current mode's value to the
+   280→   * base color. All modes process the same base color object, so the result
+   281→   * is always a concrete, visible color.
+   282→   */
+   283→  getResultColor(): ColorRangeResultColor {
+   284→    return computeResultColor(this.options.mode, this.options.value, this.baseRgb, this.baseHsv);
+   285→  }
+   286→
+   287→  getValueOutput(): ColorRangeValueOutput {
+   288→    return {
+   289→      mode: this.options.mode,
+   290→      value: this.options.value,
+   291→      label: this.formatLabel(),
+   292→      color: this.getResultColor(),
+   293→    };
+   294→  }
+   295→
+   296→  setValue(value: number): void {
+   297→    this.options.value = this.clampValue(value);
+   298→    this.invalidateTrackCache(); // thumb moves, but cache key includes value? No — thumb is drawn on top, track doesn't depend on value. Skip invalidation.
+   299→    this.updateAria();
+   300→    this.scheduleRender();
+   301→    const out = this.getValueOutput();
+   302→    this.emit("input", out);
+   303→    this.emit("change", out);
+   304→  }
+   305→
+   306→  setMode(mode: ColorRangeMode): void {
+   307→    if (this.options.mode === mode) return;
+   308→    this.options.mode = mode;
+   309→    this.options.value = defaultValueForMode(mode);
+   310→    this.invalidateTrackCache();
+   311→    this.canvas.setAttribute("aria-label", `${mode} color range`);
+   312→    this.updateAria();
+   313→    this.scheduleRender();
+   314→  }
+   315→
+   316→  setColor(color: string): void {
+   317→    const rgb = parseHex(color);
+   318→    this.baseRgb = rgb;
+   319→    this.baseHsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+   320→    this.options.color = color;
+   321→    this.invalidateTrackCache();
+   322→    this.scheduleRender();
+   323→  }
+   324→
+   325→  setOrientation(orientation: ColorRangeOrientation): void {
+   326→    if (this.options.orientation === orientation) return;
+   327→    this.options.orientation = orientation;
+   328→    this.updateCanvasSize();
+   329→    this.invalidateTrackCache();
+   330→    this.scheduleRender();
+   331→  }
+   332→
+   333→  setThickness(thickness: number): void {
+   334→    const t = Math.max(6, Math.round(thickness));
+   335→    if (this.options.thickness === t) return;
+   336→    this.options.thickness = t;
+   337→    this.updateCanvasSize();
+   338→    this.invalidateTrackCache();
+   339→    this.scheduleRender();
+   340→  }
+   341→
+   342→  setLength(length: number): void {
+   343→    const l = Math.max(40, Math.round(length));
+   344→    if (this.options.length === l) return;
+   345→    this.options.length = l;
+   346→    this.updateCanvasSize();
+   347→    this.invalidateTrackCache();
+   348→    this.scheduleRender();
+   349→  }
+   350→
+   351→  on(event: "input" | "change", handler: Handler): void;
+   352→  on(event: string, handler: Handler): void {
+   353→    let set = this.listeners.get(event);
+   354→    if (!set) {
+   355→      set = new Set<Handler>();
+   356→      this.listeners.set(event, set);
+   357→    }
+   358→    set.add(handler);
+   359→  }
+   360→
+   361→  off(event: string, handler: Handler): void {
+   362→    const set = this.listeners.get(event);
+   363→    if (set) set.delete(handler);
+   364→  }
+   365→
+   366→  destroy(): void {
+   367→    if (this._destroyed) return;
+   368→    this._destroyed = true;
+   369→    this.canvas.removeEventListener("pointerdown", this._onPointerDown);
+   370→    this.canvas.removeEventListener("pointermove", this._onPointerMove);
+   371→    this.canvas.removeEventListener("pointerup", this._onPointerUp);
+   372→    this.canvas.removeEventListener("pointercancel", this._onPointerUp);
+   373→    this.canvas.removeEventListener("keydown", this._onKeyDown);
+   374→    if (this.pointerState) {
+   375→      try {
+   376→        this.canvas.releasePointerCapture(this.pointerState.pointerId);
+   377→      } catch { /* ignore */ }
+   378→      this.pointerState = null;
+   379→    }
+   380→    this.listeners.clear();
+   381→    if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
+   382→    this.container.classList.remove("color-range");
+   383→    this.trackCache = null;
+   384→    this.trackCacheCtx = null;
+   385→  }
+   386→
+   387→  // ---- Geometry & rendering ----
+   388→
+   389→  private getGeometry(): Geometry {
+   390→    const { orientation, thickness, length, value } = this.options;
+   391→    const pad = 8; // padding so the thumb fits within the canvas
+   392→    if (orientation === "horizontal") {
+   393→      const totalW = length + pad * 2;
+   394→      const totalH = thickness + pad * 2;
+   395→      const tLen = length;
+   396→      const tThick = thickness;
+   397→      const tx = pad;
+   398→      const ty = pad;
+   399→      const thumbPos = (valueToFraction(value, this.options.mode) * tLen);
+   400→      return { totalW, totalH, tx, ty, tLen, tThick, thumbPos };
+   401→    } else {
+   402→      const totalW = thickness + pad * 2;
+   403→      const totalH = length + pad * 2;
+   404→      const tLen = length;
+   405→      const tThick = thickness;
+   406→      const tx = pad;
+   407→      const ty = pad;
+   408→      const thumbPos = valueToFraction(value, this.options.mode) * tLen;
+   409→      return { totalW, totalH, tx, ty, tLen, tThick, thumbPos };
+   410→    }
+   411→  }
+   412→
+   413→  private updateCanvasSize(): void {
+   414→    const geom = this.getGeometry();
+   415→    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   416→    this.canvas.style.width = `${geom.totalW}px`;
+   417→    this.canvas.style.height = `${geom.totalH}px`;
+   418→    this.canvas.width = Math.round(geom.totalW * dpr);
+   419→    this.canvas.height = Math.round(geom.totalH * dpr);
+   420→    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   421→  }
+   422→
+   423→  private scheduleRender(): void {
+   424→    if (this._destroyed) return;
+   425→    requestAnimationFrame(() => {
+   426→      if (!this._destroyed) this.render();
+   427→    });
+   428→  }
+   429→
+   430→  private invalidateTrackCache(): void {
+   431→    this.trackCacheKey = "";
+   432→  }
+   433→
+   434→  private render(): void {
+   435→    const geom = this.getGeometry();
+   436→    this.ctx.clearRect(0, 0, geom.totalW, geom.totalH);
+   437→    this.renderTrack(geom);
+   438→    this.renderThumb(geom);
+   439→  }
+   440→
+   441→  private renderTrack(geom: Geometry): void {
+   442→    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   443→    const key = `track-${this.options.mode}-${this.options.orientation}-${geom.tLen}-${geom.tThick}-${dpr}-${this.options.color}`;
+   444→    if (key !== this.trackCacheKey || !this.trackCache || !this.trackCacheCtx) {
+   445→      if (!this.trackCache) {
+   446→        this.trackCache = document.createElement("canvas");
+   447→        this.trackCacheCtx = this.trackCache.getContext("2d");
+   448→      }
+   449→      const cache = this.trackCache;
+   450→      const cctx = this.trackCacheCtx!;
+   451→      const bw = Math.round(geom.totalW * dpr);
+   452→      const bh = Math.round(geom.totalH * dpr);
+   453→      if (cache.width !== bw || cache.height !== bh) {
+   454→        cache.width = bw;
+   455→        cache.height = bh;
+   456→      }
+   457→      cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   458→      cctx.clearRect(0, 0, geom.totalW, geom.totalH);
+   459→      this.drawTrackTo(cctx, geom);
+   460→      this.trackCacheKey = key;
+   461→    }
+   462→    this.ctx.drawImage(this.trackCache, 0, 0, geom.totalW, geom.totalH);
+   463→  }
+   464→
+   465→  /** Draw the gradient track + border into a target context. */
+   466→  private drawTrackTo(ctx: CanvasRenderingContext2D, geom: Geometry): void {
+   467→    const { mode, orientation } = this.options;
+   468→    const { tx, ty, tLen, tThick } = geom;
+   469→    const horizontal = orientation === "horizontal";
+   470→
+   471→    // Track rectangle dimensions: for horizontal, width=length height=thickness;
+   472→    // for vertical, width=thickness height=length.
+   473→    const trackW = horizontal ? tLen : tThick;
+   474→    const trackH = horizontal ? tThick : tLen;
+   475→
+   476→    // Rounded-rect clip for the track.
+   477→    const r = Math.min(tThick / 2, 6);
+   478→    ctx.save();
+   479→    ctx.beginPath();
+   480→    roundRect(ctx, tx, ty, trackW, trackH, r);
+   481→    ctx.clip();
+   482→
+   483→    if (mode === "alpha") {
+   484→      // Checkerboard first, then alpha gradient.
+   485→      this.drawCheckerboard(ctx, tx, ty, trackW, trackH);
+   486→    }
+   487→
+   488→    // Build the gradient along the track axis.
+   489→    let grad: CanvasGradient;
+   490→    if (horizontal) {
+   491→      grad = ctx.createLinearGradient(tx, 0, tx + tLen, 0);
+   492→    } else {
+   493→      grad = ctx.createLinearGradient(0, ty, 0, ty + tLen);
+   494→    }
+   495→
+   496→    if (mode === "hue") {
+   497→      for (let h = 0; h <= 360; h += 15) {
+   498→        const rgb = hsvToRgb(h, 100, 100);
+   499→        grad.addColorStop(h / 360, `rgb(${rgb.r},${rgb.g},${rgb.b})`);
+   500→      }
+   501→    } else if (mode === "lightness") {
+   502→      // Black → base color → white
+   503→      const { r, g, b } = this.baseRgb;
+   504→      grad.addColorStop(0, "#000000");
+   505→      grad.addColorStop(0.5, `rgb(${r},${g},${b})`);
+   506→      grad.addColorStop(1, "#ffffff");
+   507→    } else if (mode === "contrast") {
+   508→      // Base color mixed: 0 = black, 100 = white, 50 = base color
+   509→      const { r, g, b } = this.baseRgb;
+   510→      grad.addColorStop(0, "#000000");
+   511→      grad.addColorStop(0.5, `rgb(${r},${g},${b})`);
+   512→      grad.addColorStop(1, "#ffffff");
+   513→    } else if (mode === "alpha") {
+   514→      const { r, g, b } = this.baseRgb;
+   515→      grad.addColorStop(0, `rgba(${r},${g},${b},0)`);
+   516→      grad.addColorStop(1, `rgba(${r},${g},${b},1)`);
+   517→    }
+   518→
+   519→    ctx.fillStyle = grad;
+   520→    ctx.fillRect(tx, ty, trackW, trackH);
+   521→    ctx.restore();
+   522→
+   523→    // Track border.
+   524→    ctx.save();
+   525→    ctx.beginPath();
+   526→    roundRect(ctx, tx, ty, trackW, trackH, r);
+   527→    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+   528→    ctx.lineWidth = 1;
+   529→    ctx.stroke();
+   530→    ctx.restore();
+   531→  }
+   532→
+   533→  /** Draw a checkerboard pattern (for alpha mode). */
+   534→  private drawCheckerboard(
+   535→    ctx: CanvasRenderingContext2D,
+   536→    x: number,
+   537→    y: number,
+   538→    w: number,
+   539→    h: number,
+   540→  ): void {
+   541→    const cell = 6;
+   542→    ctx.save();
+   543→    for (let py = 0; py < h; py += cell) {
+   544→      for (let px = 0; px < w; px += cell) {
+   545→        const odd = (Math.floor(px / cell) + Math.floor(py / cell)) % 2 === 1;
+   546→        ctx.fillStyle = odd ? "#cccccc" : "#ffffff";
+   547→        ctx.fillRect(x + px, y + py, cell, cell);
+   548→      }
+   549→    }
+   550→    ctx.restore();
+   551→  }
+   552→
+   553→  /** Draw the draggable thumb at the current value position. */
+   554→  private renderThumb(geom: Geometry): void {
+   555→    const { orientation, thickness } = this.options;
+   556→    const { tx, ty, tLen, tThick, thumbPos } = geom;
+   557→    const ctx = this.ctx;
+   558→    const horizontal = orientation === "horizontal";
+   559→
+   560→    let cx: number, cy: number;
+   561→    if (horizontal) {
+   562→      cx = tx + thumbPos;
+   563→      cy = ty + tThick / 2;
+   564→    } else {
+   565→      cx = tx + tThick / 2;
+   566→      cy = ty + thumbPos;
+   567→    }
+   568→
+   569→    // Thumb is a rounded capsule. For horizontal: narrow width, tall height
+   570→    // (spans the track thickness + grip). For vertical: swap so it's wide
+   571→    // (spans the thickness) and short along the track axis.
+   572→    const thumbW = horizontal ? 10 : thickness + 8;
+   573→    const thumbH = horizontal ? thickness + 8 : 10;
+   574→
+   575→    ctx.save();
+   576→    // White halo.
+   577→    ctx.beginPath();
+   578→    roundRect(
+   579→      ctx,
+   580→      cx - thumbW / 2,
+   581→      cy - thumbH / 2,
+   582→      thumbW,
+   583→      thumbH,
+   584→      Math.min(thumbW, thumbH) / 2,
+   585→    );
+   586→    ctx.fillStyle = "rgba(255,255,255,0.95)";
+   587→    ctx.fill();
+   588→    // Dark border.
+   589→    ctx.beginPath();
+   590→    roundRect(
+   591→      ctx,
+   592→      cx - thumbW / 2,
+   593→      cy - thumbH / 2,
+   594→      thumbW,
+   595→      thumbH,
+   596→      Math.min(thumbW, thumbH) / 2,
+   597→    );
+   598→    ctx.strokeStyle = "rgba(0,0,0,0.7)";
+   599→    ctx.lineWidth = 1.5;
+   600→    ctx.stroke();
+   601→    ctx.restore();
+   602→  }
+   603→
+   604→  // ---- Pointer interaction ----
+   605→
+   606→  private getCanvasPoint(e: PointerEvent): { x: number; y: number } {
+   607→    const rect = this.canvas.getBoundingClientRect();
+   608→    const geom = this.getGeometry();
+   609→    const scaleX = geom.totalW / (rect.width || geom.totalW);
+   610→    const scaleY = geom.totalH / (rect.height || geom.totalH);
+   611→    return {
+   612→      x: (e.clientX - rect.left) * scaleX,
+   613→      y: (e.clientY - rect.top) * scaleY,
+   614→    };
+   615→  }
+   616→
+   617→  private onPointerDown(e: PointerEvent): void {
+   618→    if (this._destroyed) return;
+   619→    const { x, y } = this.getCanvasPoint(e);
+   620→    const geom = this.getGeometry();
+   621→    this.pointerState = { pointerId: e.pointerId };
+   622→    try {
+   623→      this.canvas.setPointerCapture(e.pointerId);
+   624→    } catch { /* ignore */ }
+   625→    this.updateValueFromPoint(x, y, geom);
+   626→    e.preventDefault();
+   627→  }
+   628→
+   629→  private onPointerMove(e: PointerEvent): void {
+   630→    if (!this.pointerState) return;
+   631→    const { x, y } = this.getCanvasPoint(e);
+   632→    const geom = this.getGeometry();
+   633→    this.updateValueFromPoint(x, y, geom);
+   634→    e.preventDefault();
+   635→  }
+   636→
+   637→  private onPointerUp(e: PointerEvent): void {
+   638→    if (!this.pointerState) return;
+   639→    try {
+   640→      this.canvas.releasePointerCapture(this.pointerState.pointerId);
+   641→    } catch { /* ignore */ }
+   642→    this.pointerState = null;
+   643→    this.emit("change", this.getValueOutput());
+   644→  }
+   645→
+   646→  private updateValueFromPoint(x: number, y: number, geom: Geometry): void {
+   647→    const { orientation } = this.options;
+   648→    let frac: number;
+   649→    if (orientation === "horizontal") {
+   650→      frac = clamp((x - geom.tx) / geom.tLen, 0, 1);
+   651→    } else {
+   652→      frac = clamp((y - geom.ty) / geom.tLen, 0, 1);
+   653→    }
+   654→    this.options.value = fractionToValue(frac, this.options.mode);
+   655→    this.updateAria();
+   656→    this.scheduleRender();
+   657→    this.emit("input", this.getValueOutput());
+   658→  }
+   659→
+   660→  // ---- Keyboard ----
+   661→
+   662→  private onKeyDown(e: KeyboardEvent): void {
+   663→    if (this._destroyed) return;
+   664→    const step = e.shiftKey ? 10 : 1;
+   665→    const { mode, value } = this.options;
+   666→    const range = modeRange(mode);
+   667→    let next = value;
+   668→    let handled = false;
+   669→
+   670→    switch (e.key) {
+   671→      case "ArrowLeft":
+   672→      case "ArrowDown":
+   673→        next = value - step * range.step;
+   674→        handled = true;
+   675→        break;
+   676→      case "ArrowRight":
+   677→      case "ArrowUp":
+   678→        next = value + step * range.step;
+   679→        handled = true;
+   680→        break;
+   681→      case "Home":
+   682→        next = range.min;
+   683→        handled = true;
+   684→        break;
+   685→      case "End":
+   686→        next = range.max;
+   687→        handled = true;
+   688→        break;
+   689→    }
+   690→    if (handled) {
+   691→      e.preventDefault();
+   692→      this.options.value = this.clampValue(next);
+   693→      this.updateAria();
+   694→      this.scheduleRender();
+   695→      const out = this.getValueOutput();
+   696→      this.emit("input", out);
+   697→      this.emit("change", out);
+   698→    }
+   699→  }
+   700→
+   701→  // ---- Helpers ----
+   702→
+   703→  private clampValue(v: number): number {
+   704→    const r = modeRange(this.options.mode);
+   705→    return clamp(v, r.min, r.max);
+   706→  }
+   707→
+   708→  private formatLabel(): string {
+   709→    const { mode, value } = this.options;
+   710→    if (mode === "hue") return `${Math.round(value)}°`;
+   711→    if (mode === "alpha") return value.toFixed(2);
+   712→    return `${Math.round(value)}%`;
+   713→  }
+   714→
+   715→  private updateAria(): void {
+   716→    this.canvas.setAttribute("aria-valuenow", String(this.options.value));
+   717→    this.canvas.setAttribute(
+   718→      "aria-valuemin",
+   719→      String(modeRange(this.options.mode).min),
+   720→    );
+   721→    this.canvas.setAttribute(
+   722→      "aria-valuemax",
+   723→      String(modeRange(this.options.mode).max),
+   724→    );
+   725→    this.canvas.setAttribute(
+   726→      "aria-valuetext",
+   727→      `${this.options.mode} ${this.formatLabel()}`,
+   728→    );
+   729→  }
+   730→
+   731→  private emit(event: string, v: ColorRangeValueOutput): void {
+   732→    const set = this.listeners.get(event);
+   733→    if (!set) return;
+   734→    for (const h of Array.from(set)) {
+   735→      try { h(v); } catch (err) { console.error("ColorRange listener error:", err); }
+   736→    }
+   737→  }
+   738→}
+   739→
+   740→// ---- Module helpers ----
+   741→
+   742→function defaultValueForMode(mode: ColorRangeMode): number {
+   743→  switch (mode) {
+   744→    case "hue": return 210;
+   745→    case "lightness": return 50;
+   746→    case "contrast": return 50;
+   747→    case "alpha": return 1;
+   748→  }
+   749→}
+   750→
+   751→function modeRange(mode: ColorRangeMode): { min: number; max: number; step: number } {
+   752→  switch (mode) {
+   753→    case "hue": return { min: 0, max: 360, step: 1 };
+   754→    case "lightness": return { min: 0, max: 100, step: 1 };
+   755→    case "contrast": return { min: 0, max: 100, step: 1 };
+   756→    case "alpha": return { min: 0, max: 1, step: 0.01 };
+   757→  }
+   758→}
+   759→
+   760→function valueToFraction(value: number, mode: ColorRangeMode): number {
+   761→  const r = modeRange(mode);
+   762→  return (value - r.min) / (r.max - r.min);
+   763→}
+   764→
+   765→function fractionToValue(frac: number, mode: ColorRangeMode): number {
+   766→  const r = modeRange(mode);
+   767→  return r.min + frac * (r.max - r.min);
+   768→}
+   769→
+   770→/**
+   771→ * Compute the concrete result color produced by applying the current mode's
+   772→ * value to the base color. All modes process the same base color object.
+   773→ *
+   774→ *   hue        — replace the base color's hue, keep its S and V.
+   775→ *   lightness  — mix: 0 = black, 50 = base color, 100 = white.
+   776→ *   contrast   — same as lightness (black → base → white gradient).
+   777→ *   alpha      — the base color with alpha = value.
+   778→ */
+   779→function computeResultColor(
+   780→  mode: ColorRangeMode,
+   781→  value: number,
+   782→  baseRgb: { r: number; g: number; b: number },
+   783→  baseHsv: { h: number; s: number; v: number },
+   784→): ColorRangeResultColor {
+   785→  const { r, g, b } = baseRgb;
+   786→
+   787→  if (mode === "hue") {
+   788→    const rgb = hsvToRgb(clampHue(value), baseHsv.s, baseHsv.v);
+   789→    return {
+   790→      hex: rgbToHex(rgb.r, rgb.g, rgb.b),
+   791→      rgba: `rgba(${rgb.r},${rgb.g},${rgb.b},1)`,
+   792→      r: rgb.r, g: rgb.g, b: rgb.b, a: 1,
+   793→    };
+   794→  }
+   795→
+   796→  if (mode === "lightness" || mode === "contrast") {
+   797→    let rr: number, gg: number, bb: number;
+   798→    if (value <= 50) {
+   799→      const t = value / 50; // 0..1: black → base
+   800→      rr = Math.round(r * t);
+   801→      gg = Math.round(g * t);
+   802→      bb = Math.round(b * t);
+   803→    } else {
+   804→      const t = (value - 50) / 50; // 0..1: base → white
+   805→      rr = Math.round(r + (255 - r) * t);
+   806→      gg = Math.round(g + (255 - g) * t);
+   807→      bb = Math.round(b + (255 - b) * t);
+   808→    }
+   809→    return {
+   810→      hex: rgbToHex(rr, gg, bb),
+   811→      rgba: `rgba(${rr},${gg},${bb},1)`,
+   812→      r: rr, g: gg, b: bb, a: 1,
+   813→    };
+   814→  }
+   815→
+   816→  // alpha
+   817→  return {
+   818→    hex: rgbToHex(r, g, b),
+   819→    rgba: `rgba(${r},${g},${b},${value})`,
+   820→    r, g, b, a: value,
+   821→  };
+   822→}
+   823→
+   824→/** Rounded-rectangle path helper (CanvasRenderingContext2D.roundRect may not exist in older browsers). */
+   825→function roundRect(
+   826→  ctx: CanvasRenderingContext2D,
+   827→  x: number,
+   828→  y: number,
+   829→  w: number,
+   830→  h: number,
+   831→  r: number,
+   832→): void {
+   833→  const radius = Math.min(r, w / 2, h / 2);
+   834→  ctx.moveTo(x + radius, y);
+   835→  ctx.arcTo(x + w, y, x + w, y + h, radius);
+   836→  ctx.arcTo(x + w, y + h, x, y + h, radius);
+   837→  ctx.arcTo(x, y + h, x, y, radius);
+   838→  ctx.arcTo(x, y, x + w, y, radius);
+   839→  ctx.closePath();
+   840→}
+   841→

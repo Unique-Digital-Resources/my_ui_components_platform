@@ -1,0 +1,1138 @@
+     1→/**
+     2→ * Calendar — a full-featured date picker calendar (vanilla TypeScript).
+     3→ *
+     4→ * DOM-based (no canvas, no external date library). Renders a month grid with
+     5→ * weekday headers, optional week numbers, prev/next navigation, optional
+     6→ * "Today" button, and three selection modes: single, range, multi.
+     7→ *
+     8→ * Public API:
+     9→ *   new Calendar(container, options?)
+    10→ *   getSelectedDate(): Date | null
+    11→ *   getSelectedRange(): { start: Date | null; end: Date | null }
+    12→ *   getSelectedDates(): Date[]
+    13→ *   setSelectedDate(date | null): void
+    14→ *   setSelectedRange(start, end): void
+    15→ *   setSelectedDates(dates): void
+    16→ *   setMode(mode): void
+    17→ *   setMinDate(date): void
+    18→ *   setMaxDate(date): void
+    19→ *   setFirstDayOfWeek(day): void
+    20→ *   setShowWeekNumbers(on): void
+    21→ *   setCellSize(n): void
+    22→ *   today(): void
+    23→ *   on(event: "select" | "change" | "navigate", handler): void
+    24→ *   off(event, handler): void
+    25→ *   destroy(): void
+    26→ *
+    27→ * Framework-independent. DOM-based. No React. No external dependencies.
+    28→ * Only accent color used is the brand lemon (#D9FF66) — no indigo/blue.
+    29→ */
+    30→
+    31→export type CalendarMode = "single" | "range" | "multi";
+    32→export type WeekdayFormat = "narrow" | "short" | "long";
+    33→
+    34→export interface CalendarRange {
+    35→  start: Date | null;
+    36→  end: Date | null;
+    37→}
+    38→
+    39→export interface CalendarOptions {
+    40→  // Date selection
+    41→  selectedDate?: Date | null;
+    42→  minDate?: Date;
+    43→  maxDate?: Date;
+    44→  // Multi-selection
+    45→  mode?: CalendarMode;
+    46→  selectedRange?: CalendarRange;
+    47→  selectedDates?: Date[];
+    48→  // Display
+    49→  firstDayOfWeek?: number; // 0 = Sunday, 1 = Monday. Default 0
+    50→  weekdayFormat?: WeekdayFormat; // Default "short"
+    51→  showWeekNumbers?: boolean; // Default false
+    52→  showTodayButton?: boolean; // Default true
+    53→  showAdjacentMonths?: boolean; // Default true
+    54→  // Behavior
+    55→  disabledDates?: Date[];
+    56→  disabledDaysOfWeek?: number[]; // 0–6
+    57→  // Visual
+    58→  todayHighlight?: boolean; // Default true
+    59→  weekendHighlight?: boolean; // Default false
+    60→  // Size
+    61→  cellSize?: number; // Default 36
+    62→}
+    63→
+    64→export type CalendarHandler = (payload: CalendarEventPayload) => void;
+    65→
+    66→export interface CalendarEventPayload {
+    67→  /** The date that was just clicked (if the event was user-initiated). */
+    68→  date?: Date | null;
+    69→  /** Current single-mode selection (mirrors getSelectedDate). */
+    70→  selectedDate: Date | null;
+    71→  /** Current range selection (mirrors getSelectedRange). */
+    72→  selectedRange: CalendarRange;
+    73→  /** Current multi-mode selection (mirrors getSelectedDates). */
+    74→  selectedDates: Date[];
+    75→  /** The visible month/year (first day of the visible month). */
+    76→  viewDate: Date;
+    77→  mode: CalendarMode;
+    78→  /** Which event fires — useful for a single "change" listener. */
+    79→  source: "select" | "navigate" | "programmatic";
+    80→}
+    81→
+    82→const STYLE_ID = "calendar-component-styles";
+    83→
+    84→const WEEKDAY_LABELS: Record<WeekdayFormat, string[]> = {
+    85→  narrow: ["S", "M", "T", "W", "T", "F", "S"],
+    86→  short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    87→  long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    88→};
+    89→
+    90→const MONTH_NAMES = [
+    91→  "January", "February", "March", "April", "May", "June",
+    92→  "July", "August", "September", "October", "November", "December",
+    93→];
+    94→
+    95→function injectStyles(): void {
+    96→  if (typeof document === "undefined") return;
+    97→  if (document.getElementById(STYLE_ID)) return;
+    98→  const style = document.createElement("style");
+    99→  style.id = STYLE_ID;
+   100→  style.textContent = `
+   101→.calendar {
+   102→  --cal-cell: 36px;
+   103→  --cal-focus-ring: rgba(217, 255, 102, 0.55);
+   104→  display: inline-flex;
+   105→  flex-direction: column;
+   106→  gap: 10px;
+   107→  padding: 14px;
+   108→  background: var(--calendar-bg, #15131c);
+   109→  border: 1px solid var(--calendar-border, #2a2438);
+   110→  border-radius: 12px;
+   111→  color: var(--calendar-fg, #F4F1FF);
+   112→  font-family: var(--font-inter, system-ui, sans-serif);
+   113→  font-size: 13px;
+   114→  user-select: none;
+   115→  -webkit-user-select: none;
+   116→  outline: none;
+   117→}
+   118→.calendar * { box-sizing: border-box; }
+   119→
+   120→/* ---- Header ---- */
+   121→.calendar__header {
+   122→  display: flex;
+   123→  align-items: center;
+   124→  justify-content: space-between;
+   125→  gap: 8px;
+   126→}
+   127→.calendar__title {
+   128→  font-size: 14px;
+   129→  font-weight: 600;
+   130→  letter-spacing: -0.01em;
+   131→  color: var(--calendar-fg, #F4F1FF);
+   132→  white-space: nowrap;
+   133→}
+   134→.calendar__nav {
+   135→  display: flex;
+   136→  align-items: center;
+   137→  gap: 4px;
+   138→}
+   139→.calendar__btn {
+   140→  display: inline-flex;
+   141→  align-items: center;
+   142→  justify-content: center;
+   143→  width: 28px;
+   144→  height: 28px;
+   145→  border-radius: 6px;
+   146→  border: 1px solid transparent;
+   147→  background: transparent;
+   148→  color: var(--calendar-fg, #F4F1FF);
+   149→  cursor: pointer;
+   150→  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+   151→  padding: 0;
+   152→}
+   153→.calendar__btn:hover {
+   154→  background: rgba(255, 255, 255, 0.06);
+   155→  border-color: var(--calendar-border, #2a2438);
+   156→}
+   157→.calendar__btn:focus-visible {
+   158→  outline: 2px solid var(--brand-lemon, #D9FF66);
+   159→  outline-offset: 1px;
+   160→}
+   161→.calendar__btn svg {
+   162→  width: 14px;
+   163→  height: 14px;
+   164→}
+   165→.calendar__btn--today {
+   166→  width: auto;
+   167→  padding: 0 10px;
+   168→  font-size: 11px;
+   169→  font-weight: 600;
+   170→  letter-spacing: 0.02em;
+   171→  text-transform: uppercase;
+   172→  color: #17151D;
+   173→  background: var(--brand-lemon, #D9FF66);
+   174→  border-color: var(--brand-lemon, #D9FF66);
+   175→}
+   176→.calendar__btn--today:hover {
+   177→  background: var(--brand-lemon-hover, #C8F34F);
+   178→  border-color: var(--brand-lemon-hover, #C8F34F);
+   179→}
+   180→
+   181→/* ---- Grid ---- */
+   182→.calendar__grid {
+   183→  display: grid;
+   184→  grid-template-columns: var(--cal-cell);
+   185→  grid-auto-columns: var(--cal-cell);
+   186→  grid-auto-rows: var(--cal-cell);
+   187→  grid-auto-flow: column;
+   188→  gap: 2px;
+   189→}
+   190→.calendar__grid--with-weeks {
+   191→  grid-template-columns: calc(var(--cal-cell) * 0.72) repeat(7, var(--cal-cell));
+   192→  grid-auto-flow: row;
+   193→}
+   194→.calendar__weekday,
+   195→.calendar__weeknum,
+   196→.calendar__day {
+   197→  width: var(--cal-cell);
+   198→  height: var(--cal-cell);
+   199→  display: inline-flex;
+   200→  align-items: center;
+   201→  justify-content: center;
+   202→  border-radius: 6px;
+   203→  font-size: 12px;
+   204→  line-height: 1;
+   205→}
+   206→.calendar__weekday {
+   207→  color: var(--calendar-muted, #8a8298);
+   208→  font-weight: 600;
+   209→  font-size: 10px;
+   210→  text-transform: uppercase;
+   211→  letter-spacing: 0.04em;
+   212→}
+   213→.calendar__weekday--weekend {
+   214→  color: var(--calendar-muted-strong, #b09cd6);
+   215→}
+   216→.calendar__weeknum {
+   217→  color: var(--calendar-muted, #6c6480);
+   218→  font-size: 10px;
+   219→  font-weight: 600;
+   220→  font-variant-numeric: tabular-nums;
+   221→  background: rgba(255, 255, 255, 0.02);
+   222→  border: 1px solid rgba(255, 255, 255, 0.04);
+   223→  width: calc(var(--cal-cell) * 0.72);
+   224→}
+   225→
+   226→/* ---- Day cells ---- */
+   227→.calendar__day {
+   228→  position: relative;
+   229→  cursor: pointer;
+   230→  color: var(--calendar-fg, #F4F1FF);
+   231→  background: transparent;
+   232→  border: 1px solid transparent;
+   233→  font-variant-numeric: tabular-nums;
+   234→  padding: 0;
+   235→  transition: background-color 100ms ease, border-color 100ms ease, color 100ms ease, box-shadow 100ms ease;
+   236→}
+   237→.calendar__day:hover:not(.calendar__day--disabled) {
+   238→  background: rgba(255, 255, 255, 0.06);
+   239→  border-color: var(--calendar-border, #2a2438);
+   240→}
+   241→.calendar__day:focus-visible {
+   242→  outline: 2px solid var(--brand-lemon, #D9FF66);
+   243→  outline-offset: 1px;
+   244→}
+   245→.calendar__day--adjacent {
+   246→  color: var(--calendar-muted, #5e566f);
+   247→}
+   248→.calendar__day--weekend {
+   249→  color: var(--calendar-muted-strong, #b09cd6);
+   250→}
+   251→.calendar__day--adjacent.calendar__day--weekend {
+   252→  color: var(--calendar-muted, #4d4660);
+   253→}
+   254→.calendar__day--disabled {
+   255→  color: var(--calendar-muted, #3a3450) !important;
+   256→  cursor: not-allowed;
+   257→  text-decoration: line-through;
+   258→  text-decoration-thickness: 1px;
+   259→  text-decoration-color: rgba(255, 255, 255, 0.12);
+   260→}
+   261→.calendar__day--today {
+   262→  font-weight: 700;
+   263→}
+   264→.calendar__day--today::after {
+   265→  content: "";
+   266→  position: absolute;
+   267→  bottom: 4px;
+   268→  left: 50%;
+   269→  transform: translateX(-50%);
+   270→  width: 4px;
+   271→  height: 4px;
+   272→  border-radius: 999px;
+   273→  background: var(--brand-lemon, #D9FF66);
+   274→  opacity: 0.9;
+   275→}
+   276→.calendar__day--today.calendar__day--selected::after {
+   277→  background: #17151D;
+   278→  opacity: 0.85;
+   279→}
+   280→
+   281→/* ---- Selection states ---- */
+   282→.calendar__day--selected {
+   283→  background: var(--brand-lemon, #D9FF66);
+   284→  color: #17151D;
+   285→  font-weight: 700;
+   286→  border-color: var(--brand-lemon, #D9FF66);
+   287→  box-shadow: 0 0 0 1px var(--brand-lemon, #D9FF66);
+   288→}
+   289→.calendar__day--selected:hover {
+   290→  background: var(--brand-lemon-hover, #C8F34F);
+   291→  border-color: var(--brand-lemon-hover, #C8F34F);
+   292→}
+   293→.calendar__day--range-start,
+   294→.calendar__day--range-end {
+   295→  background: var(--brand-lemon, #D9FF66);
+   296→  color: #17151D;
+   297→  font-weight: 700;
+   298→  border-color: var(--brand-lemon, #D9FF66);
+   299→  box-shadow: 0 0 0 1px var(--brand-lemon, #D9FF66);
+   300→  z-index: 2;
+   301→}
+   302→.calendar__day--in-range {
+   303→  background: rgba(217, 255, 102, 0.16);
+   304→  color: var(--calendar-fg, #F4F1FF);
+   305→  border-color: rgba(217, 255, 102, 0.18);
+   306→}
+   307→.calendar__day--in-range:hover {
+   308→  background: rgba(217, 255, 102, 0.24);
+   309→}
+   310→.calendar__day--preview {
+   311→  background: rgba(217, 255, 102, 0.10);
+   312→  border-color: rgba(217, 255, 102, 0.16);
+   313→  color: var(--calendar-fg, #F4F1FF);
+   314→}
+   315→
+   316→/* Reduced motion */
+   317→@media (prefers-reduced-motion: reduce) {
+   318→  .calendar__btn, .calendar__day { transition: none; }
+   319→}
+   320→`;
+   321→  document.head.appendChild(style);
+   322→}
+   323→
+   324→// ---- Date helpers (pure, no side effects) ----
+   325→
+   326→/** Strip time components — returns a new Date at local midnight. */
+   327→function atMidnight(d: Date): Date {
+   328→  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+   329→}
+   330→
+   331→/** Returns 0 if same day, -1 if a < b, 1 if a > b (date-only comparison). */
+   332→function compareDate(a: Date, b: Date): number {
+   333→  const aT = atMidnight(a).getTime();
+   334→  const bT = atMidnight(b).getTime();
+   335→  if (aT === bT) return 0;
+   336→  return aT < bT ? -1 : 1;
+   337→}
+   338→
+   339→function isSameDay(a: Date | null, b: Date | null): boolean {
+   340→  if (!a || !b) return false;
+   341→  return compareDate(a, b) === 0;
+   342→}
+   343→
+   344→/** Clone a Date (or null). */
+   345→function cloneDate(d: Date | null): Date | null {
+   346→  return d ? new Date(d.getTime()) : null;
+   347→}
+   348→
+   349→/**
+   350→ * ISO week number (Mon = first day, week 1 contains the year's first Thursday).
+   351→ * Matches the week-numbering used by most desktop calendar apps.
+   352→ */
+   353→function isoWeek(date: Date): number {
+   354→  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+   355→  const dayNum = d.getUTCDay() || 7;
+   356→  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+   357→  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+   358→  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+   359→}
+   360→
+   361→/** Returns a stable key like "2024-06-12" for a date — used for set lookups. */
+   362→function dateKey(d: Date): string {
+   363→  const y = d.getFullYear();
+   364→  const m = String(d.getMonth() + 1).padStart(2, "0");
+   365→  const day = String(d.getDate()).padStart(2, "0");
+   366→  return `${y}-${m}-${day}`;
+   367→}
+   368→
+   369→/** Format a Date as YYYY-MM-DD for the host's output. */
+   370→export function formatDateISO(d: Date | null): string {
+   371→  if (!d) return "";
+   372→  const y = d.getFullYear();
+   373→  const m = String(d.getMonth() + 1).padStart(2, "0");
+   374→  const day = String(d.getDate()).padStart(2, "0");
+   375→  return `${y}-${m}-${day}`;
+   376→}
+   377→
+   378→interface DayCell {
+   379→  el: HTMLButtonElement;
+   380→  date: Date;
+   381→  isAdjacent: boolean;
+   382→  isDisabled: boolean;
+   383→  dayOfWeek: number; // 0–6 (Sunday = 0)
+   384→}
+   385→
+   386→export class Calendar {
+   387→  private container: HTMLElement;
+   388→  private root: HTMLElement;
+   389→  private headerEl: HTMLElement;
+   390→  private titleEl: HTMLElement;
+   391→  private navEl: HTMLElement;
+   392→  private prevBtn: HTMLButtonElement;
+   393→  private nextBtn: HTMLButtonElement;
+   394→  private todayBtn: HTMLButtonElement | null = null;
+   395→  private gridEl: HTMLElement;
+   396→
+   397→  // ---- State ----
+   398→  private mode: CalendarMode = "single";
+   399→  private viewDate: Date; // first day of the visible month
+   400→  private selectedDate: Date | null = null;
+   401→  private range: CalendarRange = { start: null, end: null };
+   402→  private multi: Date[] = [];
+   403→  private minDate: Date | null = null;
+   404→  private maxDate: Date | null = null;
+   405→  private firstDayOfWeek: number = 0;
+   406→  private weekdayFormat: WeekdayFormat = "short";
+   407→  private showWeekNumbers: boolean = false;
+   408→  private showTodayButton: boolean = true;
+   409→  private showAdjacentMonths: boolean = true;
+   410→  private disabledDates: Set<string> = new Set();
+   411→  private disabledDaysOfWeek: Set<number> = new Set();
+   412→  private todayHighlight: boolean = true;
+   413→  private weekendHighlight: boolean = false;
+   414→  private cellSize: number = 36;
+   415→
+   416→  // Range preview while hovering after start is set.
+   417→  private hoverPreviewDate: Date | null = null;
+   418→  private isRangeAwaitingEnd: boolean = false;
+   419→
+   420→  private listeners: Map<string, Set<CalendarHandler>> = new Map();
+   421→  private cells: DayCell[] = [];
+   422→  private destroyed: boolean = false;
+   423→
+   424→  // Bound handlers (for clean removal).
+   425→  private _onPrev = (): void => this.navigateMonth(-1);
+   426→  private _onNext = (): void => this.navigateMonth(1);
+   427→  private _onToday = (): void => this.today();
+   428→  private _onKeyDown = (e: KeyboardEvent): void => this.handleKeyDown(e);
+   429→  private _onGridPointerLeave = (): void => this.setHoverPreview(null);
+   430→
+   431→  constructor(container: HTMLElement, options?: CalendarOptions) {
+   432→    if (!container) throw new Error("Calendar: container is required");
+   433→    this.container = container;
+   434→    injectStyles();
+   435→
+   436→    const opts = options || {};
+   437→    this.mode = opts.mode ?? "single";
+   438→    this.firstDayOfWeek = opts.firstDayOfWeek ?? 0;
+   439→    this.weekdayFormat = opts.weekdayFormat ?? "short";
+   440→    this.showWeekNumbers = opts.showWeekNumbers ?? false;
+   441→    this.showTodayButton = opts.showTodayButton ?? true;
+   442→    this.showAdjacentMonths = opts.showAdjacentMonths ?? true;
+   443→    this.todayHighlight = opts.todayHighlight ?? true;
+   444→    this.weekendHighlight = opts.weekendHighlight ?? false;
+   445→    this.cellSize = opts.cellSize ?? 36;
+   446→
+   447→    if (opts.minDate) this.minDate = atMidnight(opts.minDate);
+   448→    if (opts.maxDate) this.maxDate = atMidnight(opts.maxDate);
+   449→
+   450→    if (opts.disabledDates) {
+   451→      for (const d of opts.disabledDates) this.disabledDates.add(dateKey(atMidnight(d)));
+   452→    }
+   453→    if (opts.disabledDaysOfWeek) {
+   454→      for (const day of opts.disabledDaysOfWeek) {
+   455→        if (day >= 0 && day <= 6) this.disabledDaysOfWeek.add(day);
+   456→      }
+   457→    }
+   458→
+   459→    // Initial selection — start from the most relevant date.
+   460→    if (this.mode === "range" && opts.selectedRange) {
+   461→      this.range = {
+   462→        start: cloneDate(opts.selectedRange.start),
+   463→        end: cloneDate(opts.selectedRange.end),
+   464→      };
+   465→    } else if (this.mode === "multi" && opts.selectedDates) {
+   466→      this.multi = opts.selectedDates.map(atMidnight);
+   467→    } else if (opts.selectedDate !== undefined) {
+   468→      this.selectedDate = opts.selectedDate ? atMidnight(opts.selectedDate) : null;
+   469→    } else if (this.mode === "range" && opts.selectedRange) {
+   470→      // already handled
+   471→    }
+   472→
+   473→    // Pick the initial view month:
+   474→    //   1. range.start, 2. selectedDates[0], 3. selectedDate, 4. today.
+   475→    const initialAnchor =
+   476→      (this.mode === "range" ? this.range.start : null) ||
+   477→      (this.mode === "multi" && this.multi.length > 0 ? this.multi[0] : null) ||
+   478→      this.selectedDate ||
+   479→      new Date();
+   480→    this.viewDate = new Date(initialAnchor.getFullYear(), initialAnchor.getMonth(), 1);
+   481→
+   482→    // Build DOM.
+   483→    this.root = document.createElement("div");
+   484→    this.root.className = "calendar";
+   485→    this.root.setAttribute("role", "group");
+   486→    this.root.setAttribute("aria-label", "Calendar");
+   487→
+   488→    this.headerEl = document.createElement("div");
+   489→    this.headerEl.className = "calendar__header";
+   490→
+   491→    this.titleEl = document.createElement("div");
+   492→    this.titleEl.className = "calendar__title";
+   493→    this.titleEl.setAttribute("aria-live", "polite");
+   494→
+   495→    this.navEl = document.createElement("div");
+   496→    this.navEl.className = "calendar__nav";
+   497→
+   498→    this.prevBtn = this.makeNavButton("chevron-left", "Previous month");
+   499→    this.nextBtn = this.makeNavButton("chevron-right", "Next month");
+   500→
+   501→    if (this.showTodayButton) {
+   502→      this.todayBtn = document.createElement("button");
+   503→      this.todayBtn.type = "button";
+   504→      this.todayBtn.className = "calendar__btn calendar__btn--today";
+   505→      this.todayBtn.textContent = "Today";
+   506→      this.todayBtn.setAttribute("aria-label", "Go to today");
+   507→      this.todayBtn.addEventListener("click", this._onToday);
+   508→    }
+   509→
+   510→    this.navEl.appendChild(this.prevBtn);
+   511→    if (this.todayBtn) this.navEl.appendChild(this.todayBtn);
+   512→    this.navEl.appendChild(this.nextBtn);
+   513→
+   514→    this.headerEl.appendChild(this.titleEl);
+   515→    this.headerEl.appendChild(this.navEl);
+   516→
+   517→    this.gridEl = document.createElement("div");
+   518→    this.gridEl.className = "calendar__grid";
+   519→    this.gridEl.setAttribute("role", "grid");
+   520→    this.gridEl.addEventListener("pointerleave", this._onGridPointerLeave);
+   521→
+   522→    this.root.appendChild(this.headerEl);
+   523→    this.root.appendChild(this.gridEl);
+   524→    this.root.addEventListener("keydown", this._onKeyDown);
+   525→
+   526→    this.container.appendChild(this.root);
+   527→    this.applyCellSize();
+   528→    this.render();
+   529→  }
+   530→
+   531→  // ---- Public API: getters ----
+   532→
+   533→  getSelectedDate(): Date | null {
+   534→    return cloneDate(this.selectedDate);
+   535→  }
+   536→
+   537→  getSelectedRange(): CalendarRange {
+   538→    return { start: cloneDate(this.range.start), end: cloneDate(this.range.end) };
+   539→  }
+   540→
+   541→  getSelectedDates(): Date[] {
+   542→    return this.multi.map((d) => new Date(d.getTime()));
+   543→  }
+   544→
+   545→  // ---- Public API: setters ----
+   546→
+   547→  setSelectedDate(date: Date | null): void {
+   548→    const next = date ? atMidnight(date) : null;
+   549→    this.selectedDate = next;
+   550→    this.multi = next ? [next] : [];
+   551→    this.range = { start: null, end: null };
+   552→    this.isRangeAwaitingEnd = false;
+   553→    this.render();
+   554→    this.emit("change", { source: "programmatic" });
+   555→  }
+   556→
+   557→  setSelectedRange(start: Date | null, end: Date | null): void {
+   558→    let s = start ? atMidnight(start) : null;
+   559→    let e = end ? atMidnight(end) : null;
+   560→    if (s && e && compareDate(s, e) > 0) {
+   561→      const tmp = s; s = e; e = tmp;
+   562→    }
+   563→    this.range = { start: s, end: e };
+   564→    this.selectedDate = null;
+   565→    this.multi = [];
+   566→    this.isRangeAwaitingEnd = !!s && !e;
+   567→    this.render();
+   568→    this.emit("change", { source: "programmatic" });
+   569→  }
+   570→
+   571→  setSelectedDates(dates: Date[]): void {
+   572→    this.multi = dates.map(atMidnight);
+   573→    this.selectedDate = this.multi[0] ? new Date(this.multi[0].getTime()) : null;
+   574→    this.range = { start: null, end: null };
+   575→    this.isRangeAwaitingEnd = false;
+   576→    this.render();
+   577→    this.emit("change", { source: "programmatic" });
+   578→  }
+   579→
+   580→  setMode(mode: CalendarMode): void {
+   581→    if (this.mode === mode) return;
+   582→    this.mode = mode;
+   583→    // Normalize selection state when switching modes — keep what's relevant.
+   584→    if (mode === "single") {
+   585→      this.range = { start: null, end: null };
+   586→      if (this.multi.length > 0) {
+   587→        this.selectedDate = new Date(this.multi[0].getTime());
+   588→      }
+   589→      this.multi = this.selectedDate ? [new Date(this.selectedDate.getTime())] : [];
+   590→    } else if (mode === "range") {
+   591→      this.multi = [];
+   592→      if (this.selectedDate) {
+   593→        this.range = { start: new Date(this.selectedDate.getTime()), end: null };
+   594→        this.isRangeAwaitingEnd = true;
+   595→      }
+   596→      this.selectedDate = null;
+   597→    } else if (mode === "multi") {
+   598→      this.range = { start: null, end: null };
+   599→      this.isRangeAwaitingEnd = false;
+   600→      if (this.selectedDate) {
+   601→        this.multi = [new Date(this.selectedDate.getTime())];
+   602→      }
+   603→      this.selectedDate = null;
+   604→    }
+   605→    this.render();
+   606→    this.emit("change", { source: "programmatic" });
+   607→  }
+   608→
+   609→  setMinDate(date: Date): void {
+   610→    this.minDate = date ? atMidnight(date) : null;
+   611→    this.render();
+   612→    this.emit("change", { source: "programmatic" });
+   613→  }
+   614→
+   615→  setMaxDate(date: Date): void {
+   616→    this.maxDate = date ? atMidnight(date) : null;
+   617→    this.render();
+   618→    this.emit("change", { source: "programmatic" });
+   619→  }
+   620→
+   621→  setFirstDayOfWeek(day: number): void {
+   622→    const d = ((Math.trunc(day) % 7) + 7) % 7;
+   623→    this.firstDayOfWeek = d;
+   624→    this.render();
+   625→    this.emit("change", { source: "programmatic" });
+   626→  }
+   627→
+   628→  setShowWeekNumbers(on: boolean): void {
+   629→    this.showWeekNumbers = !!on;
+   630→    this.render();
+   631→    this.emit("change", { source: "programmatic" });
+   632→  }
+   633→
+   634→  setCellSize(n: number): void {
+   635→    const clamped = Math.max(20, Math.min(80, Math.trunc(n)));
+   636→    this.cellSize = clamped;
+   637→    this.applyCellSize();
+   638→    this.render();
+   639→    this.emit("change", { source: "programmatic" });
+   640→  }
+   641→
+   642→  /** Navigate to the current month with today selected. */
+   643→  today(): void {
+   644→    const now = atMidnight(new Date());
+   645→    this.viewDate = new Date(now.getFullYear(), now.getMonth(), 1);
+   646→    if (this.mode === "single") {
+   647→      this.selectedDate = now;
+   648→    } else if (this.mode === "range") {
+   649→      this.range = { start: now, end: null };
+   650→      this.isRangeAwaitingEnd = true;
+   651→    } else if (this.mode === "multi") {
+   652→      // Don't auto-add today to multi; just navigate.
+   653→    }
+   654→    this.render();
+   655→    this.emit("navigate", { source: "programmatic" });
+   656→    this.emit("change", { source: "programmatic" });
+   657→  }
+   658→
+   659→  // ---- Public API: events ----
+   660→
+   661→  on(event: "select" | "change" | "navigate", handler: CalendarHandler): void;
+   662→  on(event: string, handler: CalendarHandler): void {
+   663→    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+   664→    this.listeners.get(event)!.add(handler);
+   665→  }
+   666→
+   667→  off(event: string, handler: CalendarHandler): void {
+   668→    const set = this.listeners.get(event);
+   669→    if (set) set.delete(handler);
+   670→  }
+   671→
+   672→  destroy(): void {
+   673→    if (this.destroyed) return;
+   674→    this.destroyed = true;
+   675→    this.prevBtn.removeEventListener("click", this._onPrev);
+   676→    this.nextBtn.removeEventListener("click", this._onNext);
+   677→    if (this.todayBtn) this.todayBtn.removeEventListener("click", this._onToday);
+   678→    this.gridEl.removeEventListener("pointerleave", this._onGridPointerLeave);
+   679→    this.root.removeEventListener("keydown", this._onKeyDown);
+   680→    for (const cell of this.cells) {
+   681→      cell.el.removeEventListener("click", cell.el._calClick as EventListener);
+   682→      cell.el.removeEventListener("pointerenter", cell.el._calEnter as EventListener);
+   683→    }
+   684→    this.cells = [];
+   685→    this.listeners.clear();
+   686→    if (this.root.parentNode) {
+   687→      this.root.parentNode.removeChild(this.root);
+   688→    }
+   689→    this.container.classList.remove("calendar-host");
+   690→  }
+   691→
+   692→  // ---- Internal: rendering ----
+   693→
+   694→  private applyCellSize(): void {
+   695→    this.root.style.setProperty("--cal-cell", `${this.cellSize}px`);
+   696→  }
+   697→
+   698→  private makeNavButton(direction: "chevron-left" | "chevron-right", label: string): HTMLButtonElement {
+   699→    const btn = document.createElement("button");
+   700→    btn.type = "button";
+   701→    btn.className = "calendar__btn";
+   702→    btn.setAttribute("aria-label", label);
+   703→    btn.innerHTML =
+   704→      direction === "chevron-left"
+   705→        ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>`
+   706→        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;
+   707→    if (direction === "chevron-left") btn.addEventListener("click", this._onPrev);
+   708→    else btn.addEventListener("click", this._onNext);
+   709→    return btn;
+   710→  }
+   711→
+   712→  private navigateMonth(delta: number): void {
+   713→    const m = this.viewDate.getMonth() + delta;
+   714→    const y = this.viewDate.getFullYear();
+   715→    const next = new Date(y, m, 1);
+   716→    this.viewDate = next;
+   717→    this.render();
+   718→    this.emit("navigate", { source: "select" });
+   719→  }
+   720→
+   721→  private buildPayload(date?: Date | null): CalendarEventPayload {
+   722→    return {
+   723→      date: date !== undefined ? cloneDate(date) : null,
+   724→      selectedDate: this.getSelectedDate(),
+   725→      selectedRange: this.getSelectedRange(),
+   726→      selectedDates: this.getSelectedDates(),
+   727→      viewDate: new Date(this.viewDate.getTime()),
+   728→      mode: this.mode,
+   729→      source: "select",
+   730→    };
+   731→  }
+   732→
+   733→  private emit(event: "select" | "change" | "navigate", opts: { source: CalendarEventPayload["source"] }): void {
+   734→    if (this.destroyed) return;
+   735→    const set = this.listeners.get(event);
+   736→    if (!set || set.size === 0) return;
+   737→    const payload: CalendarEventPayload = {
+   738→      date: null,
+   739→      selectedDate: this.getSelectedDate(),
+   740→      selectedRange: this.getSelectedRange(),
+   741→      selectedDates: this.getSelectedDates(),
+   742→      viewDate: new Date(this.viewDate.getTime()),
+   743→      mode: this.mode,
+   744→      source: opts.source,
+   745→    };
+   746→    // Clone the set so a handler unsubscribing during dispatch doesn't skip siblings.
+   747→    for (const h of Array.from(set)) {
+   748→      try {
+   749→        h(payload);
+   750→      } catch (err) {
+   751→        // Log but don't crash the dispatch.
+   752→        console.error("Calendar handler error:", err);
+   753→      }
+   754→    }
+   755→  }
+   756→
+   757→  private render(): void {
+   758→    // Title
+   759→    const monthName = MONTH_NAMES[this.viewDate.getMonth()];
+   760→    this.titleEl.textContent = `${monthName} ${this.viewDate.getFullYear()}`;
+   761→    this.titleEl.setAttribute("aria-label", `${monthName} ${this.viewDate.getFullYear()}`);
+   762→
+   763→    // Clear grid
+   764→    this.gridEl.innerHTML = "";
+   765→    this.gridEl.classList.toggle("calendar__grid--with-weeks", this.showWeekNumbers);
+   766→    this.cells = [];
+   767→
+   768→    // Build weekday header row
+   769→    const labels = WEEKDAY_LABELS[this.weekdayFormat];
+   770→    for (let i = 0; i < 7; i++) {
+   771→      const idx = (this.firstDayOfWeek + i) % 7;
+   772→      const cell = document.createElement("div");
+   773→      cell.className = "calendar__weekday";
+   774→      if (idx === 0 || idx === 6) cell.classList.add("calendar__weekday--weekend");
+   775→      cell.textContent = labels[idx];
+   776→      cell.setAttribute("aria-hidden", "true");
+   777→      this.gridEl.appendChild(cell);
+   778→    }
+   779→
+   780→    // Compute the first visible day
+   781→    const year = this.viewDate.getFullYear();
+   782→    const month = this.viewDate.getMonth();
+   783→    const firstOfMonth = new Date(year, month, 1);
+   784→    const offset = (firstOfMonth.getDay() - this.firstDayOfWeek + 7) % 7;
+   785→    const startDate = new Date(year, month, 1 - offset);
+   786→
+   787→    // 6 rows × 7 days is enough for every month.
+   788→    const today = atMidnight(new Date());
+   789→
+   790→    // Track week numbers per row (only when enabled).
+   791→    for (let row = 0; row < 6; row++) {
+   792→      if (this.showWeekNumbers) {
+   793→        const weekCell = document.createElement("div");
+   794→        weekCell.className = "calendar__weeknum";
+   795→        const weekStartDate = new Date(startDate);
+   796→        weekStartDate.setDate(startDate.getDate() + row * 7);
+   797→        weekCell.textContent = String(isoWeek(weekStartDate));
+   798→        weekCell.setAttribute("aria-hidden", "true");
+   799→        this.gridEl.appendChild(weekCell);
+   800→      }
+   801→      for (let col = 0; col < 7; col++) {
+   802→        const idx = row * 7 + col;
+   803→        const date = new Date(startDate);
+   804→        date.setDate(startDate.getDate() + idx);
+   805→        this.appendDayCell(date, month, today);
+   806→      }
+   807→    }
+   808→  }
+   809→
+   810→  private appendDayCell(date: Date, visibleMonth: number, today: Date): void {
+   811→    const dayOfWeek = date.getDay();
+   812→    const isAdjacent = date.getMonth() !== visibleMonth;
+   813→    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+   814→    const isDisabled = this.isDateDisabled(date);
+   815→    const isToday = compareDate(date, today) === 0;
+   816→
+   817→    const btn = document.createElement("button");
+   818→    btn.type = "button";
+   819→    btn.className = "calendar__day";
+   820→    btn.textContent = String(date.getDate());
+   821→    btn.setAttribute("data-date", dateKey(date));
+   822→
+   823→    if (isAdjacent) {
+   824→      btn.classList.add("calendar__day--adjacent");
+   825→      if (!this.showAdjacentMonths) {
+   826→        btn.classList.add("calendar__day--disabled");
+   827→        btn.setAttribute("aria-hidden", "true");
+   828→        btn.tabIndex = -1;
+   829→        btn.disabled = true;
+   830→        btn.style.visibility = "hidden";
+   831→      }
+   832→    }
+   833→    if (isWeekend && this.weekendHighlight) {
+   834→      btn.classList.add("calendar__day--weekend");
+   835→    } else if (isWeekend && !isAdjacent) {
+   836→      // Default: subtle weekend treatment even without weekendHighlight, so the
+   837→      // weekend column reads as a unit. (Overridden by selected/in-range.)
+   838→      btn.classList.add("calendar__day--weekend");
+   839→    }
+   840→    if (isDisabled) {
+   841→      btn.classList.add("calendar__day--disabled");
+   842→      btn.setAttribute("aria-disabled", "true");
+   843→      btn.disabled = true;
+   844→    }
+   845→    if (isToday && this.todayHighlight) {
+   846→      btn.classList.add("calendar__day--today");
+   847→    }
+   848→    // Don't bother applying selection state to hidden adjacent days.
+   849→    if (!(isAdjacent && !this.showAdjacentMonths)) {
+   850→      this.applySelectionState(btn, date, isDisabled);
+   851→    }
+   852→
+   853→    // Label for screen readers
+   854→    const labelStr = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+   855→    btn.setAttribute("aria-label", labelStr);
+   856→    if (this.isCellSelected(date)) {
+   857→      btn.setAttribute("aria-selected", "true");
+   858→    } else {
+   859→      btn.removeAttribute("aria-selected");
+   860→    }
+   861→
+   862→    const cell: DayCell = { el: btn, date, isAdjacent, isDisabled, dayOfWeek };
+   863→
+   864→    const onClick = (e: MouseEvent): void => {
+   865→      e.preventDefault();
+   866→      this.handleDayClick(cell);
+   867→    };
+   868→    const onEnter = (): void => {
+   869→      if (this.mode === "range" && this.isRangeAwaitingEnd && !isDisabled) {
+   870→        this.setHoverPreview(date);
+   871→      }
+   872→    };
+   873→    // Stash handlers on the element so destroy() can remove them.
+   874→    (btn as HTMLButtonElement & { _calClick?: EventListener })._calClick = onClick as EventListener;
+   875→    (btn as HTMLButtonElement & { _calEnter?: EventListener })._calEnter = onEnter as EventListener;
+   876→    btn.addEventListener("click", onClick);
+   877→    btn.addEventListener("pointerenter", onEnter);
+   878→
+   879→    this.gridEl.appendChild(btn);
+   880→    this.cells.push(cell);
+   881→  }
+   882→
+   883→  private applySelectionState(el: HTMLButtonElement, date: Date, isDisabled: boolean): void {
+   884→    if (this.mode === "single") {
+   885→      if (isSameDay(this.selectedDate, date)) {
+   886→        el.classList.add("calendar__day--selected");
+   887→      }
+   888→    } else if (this.mode === "range") {
+   889→      const start = this.range.start;
+   890→      const end = this.range.end;
+   891→      if (isSameDay(start, date)) {
+   892→        el.classList.add("calendar__day--range-start");
+   893→      }
+   894→      if (isSameDay(end, date)) {
+   895→        el.classList.add("calendar__day--range-end");
+   896→      }
+   897→      if (start && end && compareDate(date, start) > 0 && compareDate(date, end) < 0) {
+   898→        el.classList.add("calendar__day--in-range");
+   899→      }
+   900→      // Hover preview (only when start is set but end isn't).
+   901→      if (
+   902→        this.isRangeAwaitingEnd &&
+   903→        this.hoverPreviewDate &&
+   904→        start &&
+   905→        !end &&
+   906→        !isSameDay(start, date) &&
+   907→        !isDisabled
+   908→      ) {
+   909→        const lo = compareDate(start, this.hoverPreviewDate) < 0 ? start : this.hoverPreviewDate;
+   910→        const hi = compareDate(start, this.hoverPreviewDate) < 0 ? this.hoverPreviewDate : start;
+   911→        if (compareDate(date, lo) > 0 && compareDate(date, hi) < 0) {
+   912→          el.classList.add("calendar__day--preview");
+   913→        }
+   914→      }
+   915→    } else if (this.mode === "multi") {
+   916→      for (const d of this.multi) {
+   917→        if (isSameDay(d, date)) {
+   918→          el.classList.add("calendar__day--selected");
+   919→          break;
+   920→        }
+   921→      }
+   922→    }
+   923→  }
+   924→
+   925→  private isCellSelected(date: Date): boolean {
+   926→    if (this.mode === "single") return isSameDay(this.selectedDate, date);
+   927→    if (this.mode === "range") {
+   928→      return isSameDay(this.range.start, date) || isSameDay(this.range.end, date);
+   929→    }
+   930→    if (this.mode === "multi") return this.multi.some((d) => isSameDay(d, date));
+   931→    return false;
+   932→  }
+   933→
+   934→  private isDateDisabled(date: Date): boolean {
+   935→    if (this.disabledDates.has(dateKey(date))) return true;
+   936→    if (this.disabledDaysOfWeek.has(date.getDay())) return true;
+   937→    if (this.minDate && compareDate(date, this.minDate) < 0) return true;
+   938→    if (this.maxDate && compareDate(date, this.maxDate) > 0) return true;
+   939→    return false;
+   940→  }
+   941→
+   942→  private setHoverPreview(date: Date | null): void {
+   943→    if (this.mode !== "range" || !this.isRangeAwaitingEnd) return;
+   944→    this.hoverPreviewDate = date ? atMidnight(date) : null;
+   945→    this.refreshSelectionClasses();
+   946→  }
+   947→
+   948→  /**
+   949→   * Re-apply selection/preview classes without rebuilding the grid.
+   950→   * Used on hover so the cursor doesn't lose its target cell.
+   951→   */
+   952→  private refreshSelectionClasses(): void {
+   953→    const today = atMidnight(new Date());
+   954→    for (const cell of this.cells) {
+   955→      const el = cell.el;
+   956→      // Clear only the selection-related classes; keep state classes (adjacent,
+   957→      // weekend, today, disabled) which depend on the date, not the selection.
+   958→      el.classList.remove(
+   959→        "calendar__day--selected",
+   960→        "calendar__day--range-start",
+   961→        "calendar__day--range-end",
+   962→        "calendar__day--in-range",
+   963→        "calendar__day--preview",
+   964→      );
+   965→      if (cell.isAdjacent && !this.showAdjacentMonths) continue;
+   966→      this.applySelectionState(el, cell.date, cell.isDisabled);
+   967→      // Re-sync aria-selected + today-dot visibility.
+   968→      if (this.isCellSelected(cell.date)) {
+   969→        el.setAttribute("aria-selected", "true");
+   970→      } else {
+   971→        el.removeAttribute("aria-selected");
+   972→      }
+   973→      // Suppress unused warning for `today` when no refresh path uses it.
+   974→      void today;
+   975→    }
+   976→  }
+   977→
+   978→  // ---- Internal: interaction ----
+   979→
+   980→  private handleDayClick(cell: DayCell): void {
+   981→    if (cell.isDisabled) return;
+   982→    if (cell.isAdjacent && !this.showAdjacentMonths) return;
+   983→    const date = cell.date;
+   984→
+   985→    if (this.mode === "single") {
+   986→      this.selectedDate = date;
+   987→      // Snap the view to the clicked month in case it was an adjacent-day click.
+   988→      this.snapViewToMonth(date);
+   989→      this.render();
+   990→      this.emit("select", { source: "select" });
+   991→      this.emit("change", { source: "select" });
+   992→      return;
+   993→    }
+   994→
+   995→    if (this.mode === "range") {
+   996→      if (!this.range.start || (this.range.start && this.range.end)) {
+   997→        // Start a fresh range.
+   998→        this.range = { start: date, end: null };
+   999→        this.isRangeAwaitingEnd = true;
+  1000→        this.hoverPreviewDate = null;
+  1001→        this.snapViewToMonth(date);
+  1002→        this.render();
+  1003→        this.emit("select", { source: "select" });
+  1004→        this.emit("change", { source: "select" });
+  1005→        return;
+  1006→      }
+  1007→      // We have a start, set the end. Swap if end < start.
+  1008→      let start = this.range.start;
+  1009→      let end = date;
+  1010→      if (compareDate(end, start) < 0) {
+  1011→        const tmp = start; start = end; end = tmp;
+  1012→      }
+  1013→      this.range = { start, end };
+  1014→      this.isRangeAwaitingEnd = false;
+  1015→      this.hoverPreviewDate = null;
+  1016→      this.snapViewToMonth(date);
+  1017→      this.render();
+  1018→      this.emit("select", { source: "select" });
+  1019→      this.emit("change", { source: "select" });
+  1020→      return;
+  1021→    }
+  1022→
+  1023→    if (this.mode === "multi") {
+  1024→      const idx = this.multi.findIndex((d) => isSameDay(d, date));
+  1025→      if (idx >= 0) {
+  1026→        this.multi.splice(idx, 1);
+  1027→      } else {
+  1028→        this.multi.push(new Date(date.getTime()));
+  1029→      }
+  1030→      this.snapViewToMonth(date);
+  1031→      this.render();
+  1032→      this.emit("select", { source: "select" });
+  1033→      this.emit("change", { source: "select" });
+  1034→      return;
+  1035→    }
+  1036→  }
+  1037→
+  1038→  /** If the clicked date is in an adjacent month, snap the view to it. */
+  1039→  private snapViewToMonth(date: Date): void {
+  1040→    if (date.getMonth() !== this.viewDate.getMonth() || date.getFullYear() !== this.viewDate.getFullYear()) {
+  1041→      this.viewDate = new Date(date.getFullYear(), date.getMonth(), 1);
+  1042→      this.emit("navigate", { source: "select" });
+  1043→    }
+  1044→  }
+  1045→
+  1046→  private handleKeyDown(e: KeyboardEvent): void {
+  1047→    // Find the focused cell, if any.
+  1048→    const target = e.target as HTMLElement;
+  1049→    const cell = this.cells.find((c) => c.el === target);
+  1050→    if (!cell) return;
+  1051→    if (cell.isDisabled) return;
+  1052→
+  1053→    let deltaDays = 0;
+  1054→    let deltaMonths = 0;
+  1055→    switch (e.key) {
+  1056→      case "ArrowRight": deltaDays = 1; break;
+  1057→      case "ArrowLeft": deltaDays = -1; break;
+  1058→      case "ArrowDown": deltaDays = 7; break;
+  1059→      case "ArrowUp": deltaDays = -7; break;
+  1060→      case "PageDown":
+  1061→        deltaMonths = e.shiftKey ? 12 : 1;
+  1062→        break;
+  1063→      case "PageUp":
+  1064→        deltaMonths = e.shiftKey ? -12 : -1;
+  1065→        break;
+  1066→      case "Home": {
+  1067→        // First day of the visible week
+  1068→        e.preventDefault();
+  1069→        const firstOfWeek = this.firstOfDayInWeek(cell.date);
+  1070→        this.focusDate(firstOfWeek);
+  1071→        return;
+  1072→      }
+  1073→      case "End": {
+  1074→        e.preventDefault();
+  1075→        const lastOfWeek = this.lastOfDayInWeek(cell.date);
+  1076→        this.focusDate(lastOfWeek);
+  1077→        return;
+  1078→      }
+  1079→      case "Enter":
+  1080→      case " ": {
+  1081→        e.preventDefault();
+  1082→        this.handleDayClick(cell);
+  1083→        return;
+  1084→      }
+  1085→      default:
+  1086→        return;
+  1087→    }
+  1088→
+  1089→    e.preventDefault();
+  1090→    let next: Date;
+  1091→    if (deltaDays !== 0) {
+  1092→      next = new Date(cell.date.getTime());
+  1093→      next.setDate(next.getDate() + deltaDays);
+  1094→    } else {
+  1095→      next = new Date(cell.date.getFullYear(), cell.date.getMonth() + deltaMonths, 1);
+  1096→    }
+  1097→    this.focusDate(next);
+  1098→  }
+  1099→
+  1100→  private firstOfDayInWeek(date: Date): Date {
+  1101→    const offset = (date.getDay() - this.firstDayOfWeek + 7) % 7;
+  1102→    const d = new Date(date.getTime());
+  1103→    d.setDate(d.getDate() - offset);
+  1104→    return d;
+  1105→  }
+  1106→
+  1107→  private lastOfDayInWeek(date: Date): Date {
+  1108→    const first = this.firstOfDayInWeek(date);
+  1109→    const d = new Date(first.getTime());
+  1110→    d.setDate(d.getDate() + 6);
+  1111→    return d;
+  1112→  }
+  1113→
+  1114→  /**
+  1115→   * Focus a specific date. If it's outside the visible month, navigate to it.
+  1116→   * Disabled cells receive focus but are not clickable.
+  1117→   */
+  1118→  private focusDate(date: Date): void {
+  1119→    if (date.getMonth() !== this.viewDate.getMonth() || date.getFullYear() !== this.viewDate.getFullYear()) {
+  1120→      this.viewDate = new Date(date.getFullYear(), date.getMonth(), 1);
+  1121→      this.render();
+  1122→      this.emit("navigate", { source: "select" });
+  1123→    }
+  1124→    const target = this.cells.find((c) => isSameDay(c.date, date));
+  1125→    if (target) {
+  1126→      target.el.focus();
+  1127→    }
+  1128→  }
+  1129→}
+  1130→
+  1131→// Augment HTMLButtonElement to stash per-cell listeners (clean removal on destroy).
+  1132→declare global {
+  1133→  interface HTMLButtonElement {
+  1134→    _calClick?: EventListener;
+  1135→    _calEnter?: EventListener;
+  1136→  }
+  1137→}
+  1138→

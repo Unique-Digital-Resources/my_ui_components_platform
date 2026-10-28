@@ -1,0 +1,833 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  RotateCcw,
+     6→  Circle,
+     7→  Divide,
+     8→  Shuffle,
+     9→  Triangle,
+    10→  Grid2x2,
+    11→  Split,
+    12→  Square,
+    13→  Layers,
+    14→  Link2,
+    15→  Link2Off,
+    16→  Magnet,
+    17→  Dot,
+    18→  Minus,
+    19→  Plus,
+    20→  X,
+    21→  Crown,
+    22→  Lock,
+    23→  Unlock,
+    24→  ChevronLeft,
+    25→  ChevronRight,
+    26→  Brush,
+    27→  Sparkles,
+    28→  SunMedium,
+    29→  Droplets,
+    30→} from "lucide-react";
+    31→import { useNavigation } from "@/store/navigation";
+    32→import { getComponent } from "@/lib/platform/content";
+    33→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+    34→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+    35→import {
+    36→  ColorCircleReact,
+    37→  type HarmonyRule,
+    38→  type GridMode,
+    39→  type ColorCircleOutput,
+    40→} from "./color-circle-react";
+    41→import type { ColorCircle } from "@/lib/components/color-circle";
+    42→import { cn } from "@/lib/utils";
+    43→import { toast } from "sonner";
+    44→
+    45→const HARMONIES: {
+    46→  value: HarmonyRule;
+    47→  label: string;
+    48→  icon: React.ElementType;
+    49→  hint: string;
+    50→}[] = [
+    51→  { value: "custom", label: "Custom", icon: Brush, hint: "Each color independent — no constraints" },
+    52→  { value: "analogous", label: "Analogous", icon: Shuffle, hint: "Colors neighboring the base (±30°)" },
+    53→  { value: "complementary", label: "Complementary", icon: Divide, hint: "Base + opposite (180°)" },
+    54→  { value: "split-complementary", label: "Split Comp.", icon: Split, hint: "Base + 2 near complement" },
+    55→  { value: "triad", label: "Triad", icon: Triangle, hint: "3 hues at 120° intervals" },
+    56→  { value: "square", label: "Square", icon: Square, hint: "4 hues at 90° intervals" },
+    57→  { value: "compound", label: "Compound", icon: Sparkles, hint: "Mix of related & contrasting hues" },
+    58→  { value: "shades", label: "Shades", icon: SunMedium, hint: "Base hue, different darkness" },
+    59→  { value: "monochromatic", label: "Monochromatic", icon: Layers, hint: "One hue, varied saturation/lightness" },
+    60→];
+    61→
+    62→const GRID_MODES: { value: GridMode; label: string; icon: React.ElementType }[] = [
+    63→  { value: "dots", label: "Dots", icon: Dot },
+    64→  { value: "lines", label: "Lines", icon: Minus },
+    65→];
+    66→
+    67→interface PlaygroundState {
+    68→  harmony: HarmonyRule;
+    69→  size: number;
+    70→  snapping: boolean;
+    71→  gridMode: GridMode;
+    72→  gridDivisions: number;
+    73→  showHarmonyLinks: boolean;
+    74→}
+    75→
+    76→const DEFAULTS: PlaygroundState = {
+    77→  harmony: "triad",
+    78→  size: 240,
+    79→  snapping: false,
+    80→  gridMode: "dots",
+    81→  gridDivisions: 12,
+    82→  showHarmonyLinks: true,
+    83→};
+    84→
+    85→export function ColorCirclePlayground() {
+    86→  const meta = getComponent("color-circle")!;
+    87→  const [state, setState] = React.useState<PlaygroundState>(DEFAULTS);
+    88→  const [out, setOut] = React.useState<ColorCircleOutput | null>(null);
+    89→  const [activeTab, setActiveTab] = React.useState<
+    90→    "javascript" | "html" | "css" | "api"
+    91→  >("javascript");
+    92→  const instanceRef = React.useRef<ColorCircle | null>(null);
+    93→  // Custom rule builder state
+    94→  const [customOffsets, setCustomOffsets] = React.useState<number[]>([0, 120, 240]);
+    95→  const [newOffset, setNewOffset] = React.useState<number>(60);
+    96→
+    97→  const onInput = React.useCallback((o: ColorCircleOutput) => {
+    98→    setOut(o);
+    99→  }, []);
+   100→
+   101→  const update = React.useCallback(
+   102→    <K extends keyof PlaygroundState>(key: K, value: PlaygroundState[K]) => {
+   103→      setState((s) => ({ ...s, [key]: value }));
+   104→    },
+   105→    [],
+   106→  );
+   107→
+   108→  const reset = React.useCallback(() => {
+   109→    setState(DEFAULTS);
+   110→    instanceRef.current?.setHarmony(DEFAULTS.harmony);
+   111→    toast.success("Reset to defaults");
+   112→  }, []);
+   113→
+   114→  const setBaseIndex = React.useCallback((i: number) => {
+   115→    instanceRef.current?.setBaseIndex(i);
+   116→  }, []);
+   117→
+   118→  const removeColor = React.useCallback((i: number) => {
+   119→    instanceRef.current?.removeColor(i);
+   120→  }, []);
+   121→
+   122→  const addColorLeft = React.useCallback((i: number) => {
+   123→    instanceRef.current?.addColor(i);
+   124→  }, []);
+   125→
+   126→  const addColorRight = React.useCallback((i: number) => {
+   127→    instanceRef.current?.addColor(i + 1);
+   128→  }, []);
+   129→
+   130→  const addColorOnLine = React.useCallback((i: number) => {
+   131→    instanceRef.current?.addColorOnLine(i);
+   132→  }, []);
+   133→
+   134→  const toggleLock = React.useCallback((i: number) => {
+   135→    const inst = instanceRef.current;
+   136→    if (!inst) return;
+   137→    if (inst.isLocked(i)) inst.unlockColor(i);
+   138→    else inst.lockColor(i);
+   139→  }, []);
+   140→
+   141→  const addCustomOffset = React.useCallback(() => {
+   142→    setCustomOffsets((prev) => [...prev, newOffset]);
+   143→  }, [newOffset]);
+   144→
+   145→  const removeCustomOffset = React.useCallback((idx: number) => {
+   146→    setCustomOffsets((prev) => prev.filter((_, i) => i !== idx));
+   147→  }, []);
+   148→
+   149→  const applyCustomRule = React.useCallback(() => {
+   150→    instanceRef.current?.setCustomOffsets(customOffsets);
+   151→    toast.success("Custom rule applied");
+   152→  }, [customOffsets]);
+   153→
+   154→  // Code generation
+   155→  const jsCode = React.useMemo(() => generateJsCode(state, out), [state, out]);
+   156→  const htmlCode = React.useMemo(() => generateHtmlCode(state), [state]);
+   157→  const cssCode = React.useMemo(() => generateCssCode(), []);
+   158→  const apiCode = React.useMemo(() => generateApiCode(), []);
+   159→
+   160→  const palette = out?.colors ?? [];
+   161→
+   162→  return (
+   163→    <div>
+   164→      {/* Page header */}
+   165→      <div className="border-b border-border bg-background">
+   166→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   167→          <Breadcrumbs />
+   168→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   169→            <div>
+   170→              <PageOverline>Components / Color</PageOverline>
+   171→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+   172→                {meta.name}
+   173→              </h1>
+   174→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">
+   175→                {meta.longDescription}
+   176→              </p>
+   177→            </div>
+   178→            <div className="flex flex-wrap items-center gap-2">
+   179→              {meta.tags.map((tag) => (
+   180→                <span
+   181→                  key={tag}
+   182→                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground"
+   183→                >
+   184→                  {tag}
+   185→                </span>
+   186→              ))}
+   187→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   188→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />
+   189→                {meta.status}
+   190→              </span>
+   191→            </div>
+   192→          </div>
+   193→        </div>
+   194→      </div>
+   195→
+   196→      {/* Playground workspace */}
+   197→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   198→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
+   199→          {/* Live preview */}
+   200→          <section
+   201→            aria-label="Live preview"
+   202→            className="panel relative flex min-h-[480px] flex-col"
+   203→          >
+   204→            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+   205→              <div className="flex items-center gap-2">
+   206→                <span className="h-2 w-2 rounded-full bg-brand-lemon animate-pulse" />
+   207→                <span className="eyebrow">Live canvas</span>
+   208→              </div>
+   209→              <div className="flex items-center gap-1">
+   210→                <button
+   211→                  type="button"
+   212→                  onClick={reset}
+   213→                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   214→                >
+   215→                  <RotateCcw className="h-3 w-3" />
+   216→                  Reset
+   217→                </button>
+   218→              </div>
+   219→            </div>
+   220→            <div className="flex flex-1 items-center justify-center bg-grid p-8">
+   221→              <ColorCircleReact
+   222→                harmony={state.harmony}
+   223→                size={state.size}
+   224→                snapping={state.snapping}
+   225→                gridMode={state.gridMode}
+   226→                gridDivisions={state.gridDivisions}
+   227→                showHarmonyLinks={state.showHarmonyLinks}
+   228→                onInput={onInput}
+   229→                instanceRef={instanceRef}
+   230→              />
+   231→            </div>
+   232→            {/* Output section — Adobe Color-style palette strips */}
+   233→            <div className="border-t border-border p-4">
+   234→              <div className="mb-3 flex items-center justify-between">
+   235→                <span className="eyebrow">Palette ({palette.length} colors)</span>
+   236→              </div>
+   237→              {/* Vertical color strips — Adobe Color style */}
+   238→              <div className="flex flex-col gap-1.5">
+   239→                {palette.map((c, i) => (
+   240→                  <div
+   241→                    key={i}
+   242→                    className={cn(
+   243→                      "group relative flex items-stretch overflow-hidden rounded-md border transition-colors",
+   244→                      c.isBase ? "border-brand-lemon/50" : "border-border"
+   245→                    )}
+   246→                  >
+   247→                    {/* Color swatch strip */}
+   248→                    <div
+   249→                      className="flex h-12 w-16 shrink-0 items-center justify-center"
+   250→                      style={{ backgroundColor: c.hex }}
+   251→                    >
+   252→                      <span className="text-[10px] font-bold text-white/80 drop-shadow" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
+   253→                        {i + 1}
+   254→                      </span>
+   255→                    </div>
+   256→                    {/* Color info + actions */}
+   257→                    <div className="flex min-w-0 flex-1 items-center gap-2 bg-muted/20 px-3 py-1.5">
+   258→                      {/* Hex value */}
+   259→                      <div className="min-w-0 flex-1">
+   260→                        <div className="flex items-center gap-1.5">
+   261→                          <span className="font-mono text-[12px] text-foreground">{c.hex}</span>
+   262→                          {c.isBase && (
+   263→                            <span className="inline-flex items-center gap-0.5 rounded bg-brand-lemon/20 px-1 py-0.5 text-[9px] font-bold uppercase text-brand-lemon">
+   264→                              <Crown className="h-2.5 w-2.5" /> Base
+   265→                            </span>
+   266→                          )}
+   267→                          {c.isLocked && (
+   268→                            <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-bold uppercase text-amber-400">
+   269→                              <Lock className="h-2.5 w-2.5" /> Locked
+   270→                            </span>
+   271→                          )}
+   272→                        </div>
+   273→                        <div className="font-mono text-[10px] text-muted-foreground">
+   274→                          H{Math.round(c.hsv.h)}° · S{Math.round(c.saturation * 100)} · L{Math.round(c.lightness)}
+   275→                          {c.offset !== 0 && ` · off ${c.offset > 0 ? "+" : ""}${Math.round(c.offset)}°`}
+   276→                        </div>
+   277→                      </div>
+   278→                      {/* Action buttons — Adobe Color style */}
+   279→                      <div className="flex shrink-0 items-center gap-0.5">
+   280→                        <button
+   281→                          type="button"
+   282→                          onClick={() => toggleLock(i)}
+   283→                          title={c.isLocked ? "Unlock color" : "Lock color"}
+   284→                          className={cn(
+   285→                            "inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors",
+   286→                            c.isLocked
+   287→                              ? "border-amber-500/40 bg-amber-500/10 text-amber-400"
+   288→                              : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+   289→                          )}
+   290→                        >
+   291→                          {c.isLocked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+   292→                        </button>
+   293→                        <button
+   294→                          type="button"
+   295→                          onClick={() => addColorLeft(i)}
+   296→                          title="Add color left"
+   297→                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   298→                        >
+   299→                          <ChevronLeft className="h-3 w-3" />
+   300→                        </button>
+   301→                        <button
+   302→                          type="button"
+   303→                          onClick={() => addColorRight(i)}
+   304→                          title="Add color right"
+   305→                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   306→                        >
+   307→                          <ChevronRight className="h-3 w-3" />
+   308→                        </button>
+   309→                        <button
+   310→                          type="button"
+   311→                          onClick={() => addColorOnLine(i)}
+   312→                          title="Add shade on same line (same hue, different saturation)"
+   313→                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   314→                        >
+   315→                          <Droplets className="h-3 w-3" />
+   316→                        </button>
+   317→                        {!c.isBase && (
+   318→                          <button
+   319→                            type="button"
+   320→                            onClick={() => setBaseIndex(i)}
+   321→                            title="Set as base color"
+   322→                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   323→                          >
+   324→                            <Crown className="h-3 w-3" />
+   325→                          </button>
+   326→                        )}
+   327→                        {palette.length > 1 && (
+   328→                          <button
+   329→                            type="button"
+   330→                            onClick={() => removeColor(i)}
+   331→                            title="Remove color"
+   332→                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
+   333→                          >
+   334→                            <X className="h-3 w-3" />
+   335→                          </button>
+   336→                        )}
+   337→                      </div>
+   338→                    </div>
+   339→                  </div>
+   340→                ))}
+   341→              </div>
+   342→            </div>
+   343→          </section>
+   344→
+   345→          {/* Property inspector */}
+   346→          <aside aria-label="Property inspector" className="panel flex flex-col">
+   347→            <div className="border-b border-border px-4 py-2.5">
+   348→              <span className="eyebrow">Properties</span>
+   349→            </div>
+   350→            <div className="flex flex-col gap-5 p-4">
+   351→              {/* Harmony */}
+   352→              <PropertyField label="Harmony" hint="Color relationship schema">
+   353→                <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   354→                  {HARMONIES.map((h) => {
+   355→                    const Icon = h.icon;
+   356→                    const active = state.harmony === h.value;
+   357→                    return (
+   358→                      <button
+   359→                        key={h.value}
+   360→                        type="button"
+   361→                        onClick={() => update("harmony", h.value)}
+   362→                        title={h.hint}
+   363→                        aria-pressed={active}
+   364→                        className={cn(
+   365→                          "flex items-center gap-2 rounded px-2 py-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   366→                          active
+   367→                            ? "bg-brand-purple-strong text-foreground"
+   368→                            : "text-muted-foreground hover:text-foreground hover:bg-accent"
+   369→                        )}
+   370→                      >
+   371→                        <Icon className="h-3.5 w-3.5" />
+   372→                        {h.label}
+   373→                      </button>
+   374→                    );
+   375→                  })}
+   376→                </div>
+   377→              </PropertyField>
+   378→
+   379→              {/* Custom Rule Builder */}
+   380→              <PropertyField
+   381→                label="Custom rule builder"
+   382→                hint="Define your own harmony with angle offsets"
+   383→              >
+   384→                <div className="rounded-md border border-border bg-muted/20 p-3">
+   385→                  {/* Offset chips */}
+   386→                  <div className="mb-2 flex flex-wrap gap-1.5">
+   387→                    {customOffsets.map((offset, i) => (
+   388→                      <div
+   389→                        key={i}
+   390→                        className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground"
+   391→                      >
+   392→                        {offset > 0 ? "+" : ""}{offset}°
+   393→                        <button
+   394→                          type="button"
+   395→                          onClick={() => removeCustomOffset(i)}
+   396→                          className="text-muted-foreground hover:text-destructive"
+   397→                          aria-label={`Remove offset ${offset}`}
+   398→                        >
+   399→                          <X className="h-2.5 w-2.5" />
+   400→                        </button>
+   401→                      </div>
+   402→                    ))}
+   403→                  </div>
+   404→                  {/* Add offset control */}
+   405→                  <div className="flex items-center gap-2">
+   406→                    <input
+   407→                      type="number"
+   408→                      value={newOffset}
+   409→                      onChange={(e) => setNewOffset(Number(e.target.value))}
+   410→                      min={-360}
+   411→                      max={360}
+   412→                      className="h-7 w-16 rounded-md border border-border bg-background px-1.5 text-center font-mono text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   413→                    />
+   414→                    <span className="text-[11px] text-muted-foreground">°</span>
+   415→                    <button
+   416→                      type="button"
+   417→                      onClick={addCustomOffset}
+   418→                      className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   419→                    >
+   420→                      <Plus className="h-3 w-3" />
+   421→                      Add
+   422→                    </button>
+   423→                    <button
+   424→                      type="button"
+   425→                      onClick={applyCustomRule}
+   426→                      className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-brand-lemon/40 bg-brand-lemon/10 px-2.5 text-[11px] font-medium text-brand-lemon transition-colors hover:bg-brand-lemon/20"
+   427→                    >
+   428→                      Apply rule
+   429→                    </button>
+   430→                  </div>
+   431→                </div>
+   432→              </PropertyField>
+   433→
+   434→              {/* Snapping toggle */}
+   435→              <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2.5">
+   436→                <div className="min-w-0">
+   437→                  <div className="flex items-center gap-2 text-[12px] font-medium text-foreground">
+   438→                    <Magnet className={cn("h-3.5 w-3.5", state.snapping ? "text-brand-lemon" : "text-muted-foreground")} />
+   439→                    Snapping
+   440→                  </div>
+   441→                  <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+   442→                    Snap to grid divisions
+   443→                  </p>
+   444→                </div>
+   445→                <button
+   446→                  type="button"
+   447→                  role="switch"
+   448→                  aria-checked={state.snapping}
+   449→                  aria-label="Toggle snapping"
+   450→                  onClick={() => update("snapping", !state.snapping)}
+   451→                  className={cn(
+   452→                    "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   453→                    state.snapping ? "bg-brand-lemon" : "bg-muted-foreground/30"
+   454→                  )}
+   455→                >
+   456→                  <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform", state.snapping ? "translate-x-4" : "translate-x-0.5")} />
+   457→                </button>
+   458→              </div>
+   459→
+   460→              {/* Grid mode */}
+   461→              {state.snapping && (
+   462→                <PropertyField label="Grid mode" hint="Visualization of snap points">
+   463→                  <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   464→                    {GRID_MODES.map((g) => {
+   465→                      const Icon = g.icon;
+   466→                      const active = state.gridMode === g.value;
+   467→                      return (
+   468→                        <button
+   469→                          key={g.value}
+   470→                          type="button"
+   471→                          onClick={() => update("gridMode", g.value)}
+   472→                          aria-pressed={active}
+   473→                          className={cn(
+   474→                            "flex items-center justify-center gap-2 rounded px-2 py-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   475→                            active ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent"
+   476→                          )}
+   477→                        >
+   478→                          <Icon className="h-3.5 w-3.5" />
+   479→                          {g.label}
+   480→                        </button>
+   481→                      );
+   482→                    })}
+   483→                  </div>
+   484→                </PropertyField>
+   485→              )}
+   486→
+   487→              {/* Grid divisions */}
+   488→              {state.snapping && (
+   489→                <PropertyField label="Grid divisions" hint="Angular + radial divisions" value={`${state.gridDivisions}`}>
+   490→                  <RangeInput min={2} max={36} step={1} value={state.gridDivisions} onChange={(v) => update("gridDivisions", v)} />
+   491→                </PropertyField>
+   492→              )}
+   493→
+   494→              {/* Harmony links */}
+   495→              <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2.5">
+   496→                <div className="min-w-0">
+   497→                  <div className="flex items-center gap-2 text-[12px] font-medium text-foreground">
+   498→                    {state.showHarmonyLinks ? <Link2 className="h-3.5 w-3.5 text-brand-lemon" /> : <Link2Off className="h-3.5 w-3.5 text-muted-foreground" />}
+   499→                    Harmony links
+   500→                  </div>
+   501→                  <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+   502→                    Connect markers with lines
+   503→                  </p>
+   504→                </div>
+   505→                <button
+   506→                  type="button"
+   507→                  role="switch"
+   508→                  aria-checked={state.showHarmonyLinks}
+   509→                  aria-label="Toggle harmony links"
+   510→                  onClick={() => update("showHarmonyLinks", !state.showHarmonyLinks)}
+   511→                  className={cn(
+   512→                    "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   513→                    state.showHarmonyLinks ? "bg-brand-lemon" : "bg-muted-foreground/30"
+   514→                  )}
+   515→                >
+   516→                  <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform", state.showHarmonyLinks ? "translate-x-4" : "translate-x-0.5")} />
+   517→                </button>
+   518→              </div>
+   519→
+   520→              {/* Size */}
+   521→              <PropertyField label="Size" hint="Disk diameter (px)" value={`${state.size} px`}>
+   522→                <RangeInput min={120} max={400} step={2} value={state.size} onChange={(v) => update("size", v)} />
+   523→              </PropertyField>
+   524→            </div>
+   525→          </aside>
+   526→        </div>
+   527→
+   528→        {/* Code panel */}
+   529→        <section className="panel mt-6 overflow-hidden">
+   530→          <div className="flex items-center justify-between border-b border-border px-2">
+   531→            <div className="flex">
+   532→              {([["javascript","JavaScript"],["html","HTML"],["css","CSS"],["api","API"]] as const).map(([key, label]) => (
+   533→                <button
+   534→                  key={key}
+   535→                  type="button"
+   536→                  onClick={() => setActiveTab(key)}
+   537→                  className={cn(
+   538→                    "relative h-9 px-3 text-[12px] font-medium transition-colors focus-visible:outline-none",
+   539→                    activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+   540→                  )}
+   541→                >
+   542→                  {label}
+   543→                  {activeTab === key && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   544→                </button>
+   545→              ))}
+   546→            </div>
+   547→            <span className="pr-2 text-[11px] font-mono text-muted-foreground/70">Synchronized with live configuration</span>
+   548→          </div>
+   549→          <div className="p-4">
+   550→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   551→            {activeTab === "html" && <CodeBlock code={htmlCode} language="html" filename="index.html" />}
+   552→            {activeTab === "css" && <CodeBlock code={cssCode} language="css" filename="styles.css" />}
+   553→            {activeTab === "api" && <CodeBlock code={apiCode} language="typescript" filename="api.ts" />}
+   554→          </div>
+   555→        </section>
+   556→
+   557→        {/* Documentation */}
+   558→        <ComponentDocumentation />
+   559→      </div>
+   560→    </div>
+   561→  );
+   562→}
+   563→
+   564→function PropertyField({ label, hint, value, children }: { label: string; hint?: string; value?: string; children: React.ReactNode }) {
+   565→  return (
+   566→    <div>
+   567→      <div className="mb-1.5 flex items-center justify-between">
+   568→        <label className="text-[12px] font-medium text-foreground">{label}</label>
+   569→        {value && <span className="font-mono text-[11px] text-brand-lemon">{value}</span>}
+   570→      </div>
+   571→      {children}
+   572→      {hint && <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p>}
+   573→    </div>
+   574→  );
+   575→}
+   576→
+   577→function RangeInput({ min, max, step, value, onChange }: { min: number; max: number; step: number; value: number; onChange: (v: number) => void }) {
+   578→  return (
+   579→    <div className="flex items-center gap-2">
+   580→      <input
+   581→        type="range" min={min} max={max} step={step} value={value}
+   582→        onChange={(e) => onChange(Number(e.target.value))}
+   583→        className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-brand-lemon"
+   584→        style={{ background: `linear-gradient(to right, var(--brand-lemon) 0%, var(--brand-lemon) ${((value - min) / (max - min)) * 100}%, var(--muted) ${((value - min) / (max - min)) * 100}%, var(--muted) 100%)` }}
+   585→      />
+   586→      <input
+   587→        type="number" min={min} max={max} value={value}
+   588→        onChange={(e) => onChange(Number(e.target.value))}
+   589→        className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center font-mono text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   590→      />
+   591→    </div>
+   592→  );
+   593→}
+   594→
+   595→// ---- Code generators ----
+   596→
+   597→function generateJsCode(state: PlaygroundState, out: ColorCircleOutput | null): string {
+   598→  const colors = out?.colors ?? [];
+   599→  const colorLines = colors.length > 0
+   600→    ? colors.map((c, i) => `  // ${i + 1}${c.isBase ? " (base)" : ""}: ${c.hex} — hue ${Math.round(c.hsv.h)}°, sat ${Math.round(c.saturation * 100)}%`).join("\n")
+   601→    : "  // (drag the circle to pick colors)";
+   602→  return `import { ColorCircle } from "@workshop/color-circle";
+   603→
+   604→const container = document.querySelector("#color-circle");
+   605→
+   606→const circle = new ColorCircle(container, {
+   607→  harmony: "${state.harmony}",
+   608→  size: ${state.size},
+   609→  snapping: ${state.snapping},
+   610→  gridMode: "${state.gridMode}",
+   611→  gridDivisions: ${state.gridDivisions},
+   612→  showHarmonyLinks: ${state.showHarmonyLinks},
+   613→});
+   614→
+   615→circle.on("input", ({ colors, baseIndex }) => {
+   616→  // Fires continuously while dragging
+   617→  console.log("base:", baseIndex, "palette:", colors.map(c => c.hex));
+   618→});
+   619→
+   620→circle.on("change", ({ colors }) => {
+   621→  // Fires when the selection is committed
+   622→});
+   623→
+   624→// Current palette:
+   625→${colorLines}
+   626→
+   627→// Palette management:
+   628→// circle.setBaseIndex(1);       // make color #2 the base
+   629→// circle.addColor(120, 1.0);    // add a color at hue 120°, full saturation
+   630→// circle.removeColor(2);        // remove the 3rd color
+   631→// circle.setHarmony("tetradic"); // change harmony schema`;
+   632→}
+   633→
+   634→function generateHtmlCode(state: PlaygroundState): string {
+   635→  return `<!DOCTYPE html>
+   636→<html>
+   637→  <head><link rel="stylesheet" href="color-circle.css" /></head>
+   638→  <body>
+   639→    <div id="color-circle"></div>
+   640→    <script type="module" src="init.js"></script>
+   641→  </body>
+   642→</html>
+   643→
+   644→<!-- Configuration:
+   645→  harmony:          "${state.harmony}"
+   646→  size:             ${state.size}px
+   647→  snapping:         ${state.snapping}
+   648→  gridMode:         "${state.gridMode}"
+   649→  gridDivisions:    ${state.gridDivisions}
+   650→  showHarmonyLinks: ${state.showHarmonyLinks}
+   651→-->`;
+   652→}
+   653→
+   654→function generateCssCode(): string {
+   655→  return `:root {
+   656→  --color-circle-focus-ring: rgba(217, 255, 102, 0.55);
+   657→}
+   658→.color-circle { display: inline-block; position: relative; }
+   659→.color-circle canvas { display: block; touch-action: none; outline: none; cursor: pointer; }
+   660→.color-circle canvas:focus-visible { box-shadow: 0 0 0 3px var(--color-circle-focus-ring); }`;
+   661→}
+   662→
+   663→function generateApiCode(): string {
+   664→  return `type Harmony = "none" | "complementary" | "analogous" | "triadic" | "tetradic" | "split-complementary" | "square" | "monochromatic";
+   665→type GridMode = "dots" | "lines";
+   666→
+   667→interface ColorEntry {
+   668→  id: number;
+   669→  hue: number;        // 0–360 absolute
+   670→  saturation: number; // 0–1
+   671→  isBase: boolean;
+   672→  offset: number;     // hue offset from base (degrees)
+   673→}
+   674→
+   675→interface ColorCircleOutput {
+   676→  baseHue: number;
+   677→  baseIndex: number;
+   678→  harmony: Harmony;
+   679→  colors: (ColorCircleColor & { isBase: boolean; saturation: number; offset: number })[];
+   680→}
+   681→
+   682→class ColorCircle {
+   683→  constructor(container: HTMLElement, options?: ColorCircleOptions);
+   684→  // Palette
+   685→  getColors(): ColorEntry[];
+   686→  getBaseIndex(): number;
+   687→  setBaseIndex(i: number): void;       // change which color drives the palette
+   688→  addColor(hue?: number, saturation?: number): number;  // returns new index
+   689→  removeColor(i: number): void;
+   690→  // Configuration
+   691→  setHarmony(h: Harmony): void;
+   692→  setSize(n: number): void;
+   693→  setSnapping(on: boolean): void;
+   694→  setGridMode(mode: GridMode): void;
+   695→  setGridDivisions(n: number): void;
+   696→  setShowHarmonyLinks(on: boolean): void;
+   697→  // Output
+   698→  getOutput(): ColorCircleOutput;
+   699→  // Events
+   700→  on(event: "input" | "change", handler: (o: ColorCircleOutput) => void): void;
+   701→  off(event: string, handler: Function): void;
+   702→  destroy(): void;
+   703→}
+   704→
+   705→// Behavior:
+   706→//   - Moving the BASE color shifts all other colors (they maintain offsets).
+   707→//   - Moving a NON-BASE color changes only that color (offset recalculated).
+   708→//   - addColor/removeColor let users edit the palette dynamically.
+   709→//   - setBaseIndex lets users choose which color drives the palette.`;
+   710→}
+   711→
+   712→// ---- Documentation ----
+   713→
+   714→function ComponentDocumentation() {
+   715→  const meta = getComponent("color-circle")!;
+   716→  return (
+   717→    <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_200px]">
+   718→      <div className="min-w-0 max-w-[760px]">
+   719→        <h2 className="text-2xl font-semibold tracking-tight">Documentation</h2>
+   720→        <p className="mt-2 text-sm text-muted-foreground">
+   721→          The Color Circle is a framework-independent vanilla JavaScript component — no React or Next.js required.
+   722→        </p>
+   723→
+   724→        <section className="mt-8">
+   725→          <h3 className="text-lg font-semibold">Overview</h3>
+   726→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   727→            {meta.longDescription} The circle is a 2D color space: angle → hue, radius → saturation (white at center, full saturation at edge). One color is the &quot;base&quot; — moving it shifts all others to maintain their harmony offsets. Non-base colors can be dragged individually. Colors can be added or removed dynamically.
+   728→          </p>
+   729→        </section>
+   730→
+   731→        <section className="mt-8">
+   732→          <h3 className="text-lg font-semibold">Base color concept</h3>
+   733→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   734→            Every palette has one &quot;base&quot; color (marked with a lemon ring + crown badge). Dragging the base color shifts all other colors by the same hue delta — they maintain their geometric relationship. Dragging a non-base color changes only that color; its offset from the base is recalculated. Use the crown button on any palette card to promote it to the base.
+   735→          </p>
+   736→        </section>
+   737→
+   738→        <section className="mt-8">
+   739→          <h3 className="text-lg font-semibold">Harmony rules (10)</h3>
+   740→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   741→            <table className="w-full text-left text-[13px]">
+   742→              <thead className="bg-muted/30">
+   743→                <tr>
+   744→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Rule</th>
+   745→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Offsets</th>
+   746→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Count</th>
+   747→                </tr>
+   748→              </thead>
+   749→              <tbody className="divide-y divide-border">
+   750→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">analogous</td><td className="px-3 py-2 font-mono text-muted-foreground">[-30, 0, 30]</td><td className="px-3 py-2">3</td></tr>
+   751→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">monochromatic</td><td className="px-3 py-2 font-mono text-muted-foreground">[0, 0, 0, 0, 0] (tonal)</td><td className="px-3 py-2">5</td></tr>
+   752→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">triad</td><td className="px-3 py-2 font-mono text-muted-foreground">[0, 120, 240]</td><td className="px-3 py-2">3</td></tr>
+   753→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">complementary</td><td className="px-3 py-2 font-mono text-muted-foreground">[0, 180]</td><td className="px-3 py-2">2</td></tr>
+   754→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">split-complementary</td><td className="px-3 py-2 font-mono text-muted-foreground">[0, 150, 210]</td><td className="px-3 py-2">3</td></tr>
+   755→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">double-split-complementary</td><td className="px-3 py-2 font-mono text-muted-foreground">[0, 150, 180, 210]</td><td className="px-3 py-2">4</td></tr>
+   756→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">square</td><td className="px-3 py-2 font-mono text-muted-foreground">[0, 90, 180, 270]</td><td className="px-3 py-2">4</td></tr>
+   757→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">compound</td><td className="px-3 py-2 font-mono text-muted-foreground">[0, 30, 150, 180, 210]</td><td className="px-3 py-2">5</td></tr>
+   758→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">shades</td><td className="px-3 py-2 font-mono text-muted-foreground">[0, 0, 0] (tonal)</td><td className="px-3 py-2">3</td></tr>
+   759→                <tr><td className="px-3 py-2 font-mono text-brand-lemon">custom</td><td className="px-3 py-2 font-mono text-muted-foreground">null (no constraints)</td><td className="px-3 py-2">1+</td></tr>
+   760→              </tbody>
+   761→            </table>
+   762→          </div>
+   763→        </section>
+   764→
+   765→        <section className="mt-8">
+   766→          <h3 className="text-lg font-semibold">Properties and defaults</h3>
+   767→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   768→            <table className="w-full text-left text-[13px]">
+   769→              <thead className="bg-muted/30">
+   770→                <tr>
+   771→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Property</th>
+   772→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Type</th>
+   773→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Default</th>
+   774→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Description</th>
+   775→                </tr>
+   776→              </thead>
+   777→              <tbody className="divide-y divide-border">
+   778→                {meta.properties.map((p) => (
+   779→                  <tr key={p.name}>
+   780→                    <td className="px-3 py-2 font-mono text-brand-lemon">{p.name}</td>
+   781→                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.type}</td>
+   782→                    <td className="px-3 py-2 font-mono text-foreground">{p.default}</td>
+   783→                    <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
+   784→                  </tr>
+   785→                ))}
+   786→              </tbody>
+   787→            </table>
+   788→          </div>
+   789→        </section>
+   790→
+   791→        <section className="mt-8">
+   792→          <h3 className="text-lg font-semibold">Methods</h3>
+   793→          <div className="mt-3 space-y-2">
+   794→            {meta.methods.map((m) => (
+   795→              <div key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   796→                <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   797→                <p className="mt-1 text-[13px] text-muted-foreground">{m.description}</p>
+   798→                {m.returns && <p className="mt-0.5 text-[11px] font-mono text-muted-foreground/70">returns: {m.returns}</p>}
+   799→              </div>
+   800→            ))}
+   801→          </div>
+   802→        </section>
+   803→
+   804→        <section className="mt-8">
+   805→          <h3 className="text-lg font-semibold">Events</h3>
+   806→          <div className="mt-3 space-y-2">
+   807→            {meta.events.map((e) => (
+   808→              <div key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   809→                <div className="flex items-center gap-3">
+   810→                  <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   811→                  <code className="font-mono text-[11px] text-muted-foreground">{e.payload}</code>
+   812→                </div>
+   813→                <p className="mt-1 text-[13px] text-muted-foreground">{e.description}</p>
+   814→              </div>
+   815→            ))}
+   816→          </div>
+   817→        </section>
+   818→      </div>
+   819→
+   820→      <aside className="hidden lg:block">
+   821→        <div className="sticky top-20">
+   822→          <span className="eyebrow mb-2 block">On this page</span>
+   823→          <nav className="space-y-1 text-[12px]">
+   824→            {["Overview", "Base color concept", "Harmony schemas", "Properties and defaults", "Methods", "Events"].map((s) => (
+   825→              <a key={s} href="#" onClick={(e) => e.preventDefault()} className="block rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent">{s}</a>
+   826→            ))}
+   827→          </nav>
+   828→        </div>
+   829→      </aside>
+   830→    </div>
+   831→  );
+   832→}
+   833→

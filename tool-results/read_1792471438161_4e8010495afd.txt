@@ -1,0 +1,1123 @@
+     1→     1→# Page-by-Page UI Specification
+     2→     2→
+     3→     3→Vanilla JavaScript UI Components Platform · UX/UI Product Specification · v1.0
+     4→     4→
+     5→     5→This specification defines the actual interface of every website page: layout, content hierarchy, controls, interaction behavior, responsive states, and navigation. It builds on the platform structure established previously, without locking the website to a particular framework or implementation stack.
+     6→     6→
+     7→     7→The central design principle is that this is a working component workshop, not merely a component gallery. Developers should be able to discover a component, experiment with it, inspect its properties, and understand how to integrate it—all in one coherent experience.
+     8→     8→
+     9→     9→## 1. Global application shell
+    10→    10→
+    11→    11→The global shell is shared across the documentation, component directory, category pages, and component detail pages.
+    12→    12→
+    13→    13→### Form & Function
+    14→    14→
+    15→    15→Application UI components
+    16→    16→
+    17→    17→Search components, APIs, docs...
+    18→    18→
+    19→    19→⌘ K
+    20→    20→
+    21→    21→Components
+    22→    22→
+    23→    23→Documentation
+    24→    24→
+    25→    25→Examples
+    26→    26→
+    27→    27→Resources
+    28→    28→
+    29→    29→LIBRARY
+    30→    30→
+    31→    31→Overview
+    32→    32→
+    33→    33→Color
+    34→    34→
+    35→    35→Color Wheel
+    36→    36→
+    37→    37→Color Field
+    38→    38→
+    39→    39→Palette
+    40→    40→
+    41→    41→Inputs
+    42→    42→
+    43→    43→Layout
+    44→    44→
+    45→    45→Data Display
+    46→    46→
+    47→    47→COMPONENTS / COLOR
+    48→    48→
+    49→    49→## Color Wheel
+    50→    50→
+    51→    51→Explore, configure, and integrate.
+    52→    52→
+    53→    53→[Color picker – Hugo Daniel](https://images.openai.com/static-rsc-4/AfQdLPO5HWCLKb0h3YANbWxtF9DDcyc4UJLkOjleXbrzpUR99P2JLw62UogmPY3HJwQ0QoqpjNPFmM6nRaV5EubJGZP5cK4Te0mKT3NriJ2LKGZ32t5UvKxIAE3CwSXq2Gk0chOHMvX9tw33PDWVZZAo-achqgLeDAocveyn_VM?purpose=inline)
+    54→    54→
+    55→    55→Properties
+    56→    56→
+    57→    57→Shape · Size · Hue
+    58→    58→
+    59→    59→Illustrative wireframe; the production shell must use actual library components and functional navigation.
+    60→    60→
+    61→    61→### 1.1 Header specification
+    62→    62→
+    63→    63→- Brand: logo and product name; click returns Home.
+    64→    64→- Primary navigation: Components, Documentation, Examples, Resources.
+    65→    65→- Search: global command-style search with keyboard shortcut.
+    66→    66→- Theme switch: light/dark mode, with system preference as an optional default.
+    67→    67→- Mobile menu: replaces or collapses primary navigation on narrow screens.
+    68→    68→- Repository link: external project link when available.
+    69→    69→
+    70→    70→The header remains consistent across routes. It should not grow into a large marketing navigation bar.
+    71→    71→
+    72→    72→### 1.2 Documentation sidebar
+    73→    73→
+    74→    74→The sidebar has two modes:
+    75→    75→
+    76→    76→- Library mode: categories and component names.
+    77→    77→- Documentation mode: guides, installation, concepts, theming, and API references.
+    78→    78→
+    79→    79→Behavior:
+    80→    80→
+    81→    81→- Expand and collapse category groups.
+    82→    82→- Highlight the active route.
+    83→    83→- Preserve the current scroll position when practical.
+    84→    84→- Support a compact mode on desktop and a drawer on mobile.
+    85→    85→- Do not display future components as if they already exist. Planned entries must be clearly marked or omitted.
+    86→    86→
+    87→    87→### 1.3 Content and utility regions
+    88→    88→
+    89→    89→The main content region supports text, interactive previews, code panels, and property inspectors. An optional right-hand table of contents appears on longer pages.
+    90→    90→
+    91→    91→On component detail pages, the preview and inspector are the primary work area. On documentation pages, readability takes priority over the three-column layout.
+    92→    92→
+    93→    93→## 2. Home page
+    94→    94→
+    95→    95→[DAUB — CSS Component Library for AI | 84 Components, 21 Themes](https://images.openai.com/static-rsc-4/PpC4AJpwlYQfZmP0syBs9yxNFVI9D4ZKDvnkeO2obXF22RA1KJPl4OsynEGSq9AkrCO_cYsi0lwKrm37eikCBotdKjK-cyMzDcmll8Wg83wm9eDXqP2zB0HvVCDZVqYAJVbKiQ7HRJ094RO8O8qUx3Izb7sFok5QylHtv5V89rg?purpose=inline)
+    96→    96→
+    97→    97→Route: `/`
+    98→    98→
+    99→    99→Primary goal: Help visitors understand the library and reach their first usable component quickly.
+   100→   100→
+   101→   101→Primary action: Browse components.
+   102→   102→
+   103→   103→Secondary action: Read the getting-started guide.
+   104→   104→
+   105→   105→### Page layout
+   106→   106→
+   107→   107→Hero
+   108→   108→
+   109→   109→# UI components for real software.
+   110→   110→
+   111→   111→Framework-independent building blocks for creative tools, editors, developer utilities, and productivity applications.
+   112→   112→
+   113→   113→Explore components ↗
+   114→   114→
+   115→   115→Get started
+   116→   116→
+   117→   117→### Featured component
+   118→   118→
+   119→   119→[.NET Color Picker Control Gallery | Nevron](https://images.openai.com/static-rsc-4/sF5Sjuyp2h3CxEU1t1znif-gOm8QmcSRGsro9WKafN-axz5nbduF6EzCyFfTLeflAA2fO7bU3_p8GKqFDPn-ozQXd-jbqopcblgg7TchCgJ8C6ckbCZzExwQAv7D2VjicN5MCVU7TdOdecIGhfKtLcB0GJ_bY3Y7ClxTF4xsISQ?purpose=inline)
+   120→   120→
+   121→   121→Color Wheel Picker
+   122→   122→
+   123→   123→Interactive preview · Vanilla JavaScript
+   124→   124→
+   125→   125→### Explore categories
+   126→   126→
+   127→   127→Color
+   128→   128→
+   129→   129→Color selection and editing
+   130→   130→
+   131→   131→Controls
+   132→   132→
+   133→   133→Property adjustment
+   134→   134→
+   135→   135→### Section-by-section requirements
+   136→   136→
+   137→   137→| Section            | UI elements                                     | Behavior                                             |
+   138→   138→| ------------------ | ----------------------------------------------- | ---------------------------------------------------- |
+   139→   139→| Hero               | Headline, supporting text, two CTAs             | Navigate to directory or getting started             |
+   140→   140→| Featured component | Real component preview, description             | Direct interaction and link to detail page           |
+   141→   141→| Category explorer  | Category cards with icons                       | Open category overview                               |
+   142→   142→| Why this library   | Short benefits and architecture diagram or list | Explain framework independence and application focus |
+   143→   143→| Quick start        | Short code example and copy control             | Copy code; open installation docs                    |
+   144→   144→| Examples           | Preview cards for available demos               | Open individual example pages                        |
+   145→   145→| Footer             | Documentation, source, contribution links       | Navigate or open external resources                  |
+   146→   146→
+   147→   147→### Interaction details
+   148→   148→
+   149→   149→- The featured component should be a real instance, not a screenshot.
+   150→   150→- Hover states must be subtle and consistent with the library's visual language.
+   151→   151→- Category cards are entirely clickable but must retain clear text links and keyboard accessibility.
+   152→   152→- The hero should avoid exaggerated claims, counters, fake user testimonials, or unsupported compatibility badges.
+   153→   153→
+   154→   154→### Responsive behavior
+   155→   155→
+   156→   156→- Desktop: hero and featured component may appear side by side.
+   157→   157→- Tablet: narrower two-column layout.
+   158→   158→- Mobile: stacked hero, featured preview, and category cards.
+   159→   159→
+   160→   160→## 3. Component directory
+   161→   161→
+   162→   162→[21st.dev - Collection of React UI Components - Made with React.js](https://images.openai.com/static-rsc-4/4GEaMCXUNpkAdlwgqs3JoxMqTiMD-BSQFlw0cbt9kewbfH03jwaAV5QbbHjiWFXngnvTltKbwTC7GM7XkITlYGwavL-W3sgxM7Q-W32e39cMomvuqoezqgra6PyzVlnrgJcbjRB2DsfLUJ3r4DTYETU_pATvcA_iMpkNZKkpav4?purpose=inline)
+   163→   163→
+   164→   164→Route: `/components`
+   165→   165→
+   166→   166→Primary goal: Let developers find a component through browsing, filtering, or searching.
+   167→   167→
+   168→   168→Primary action: Open a component.
+   169→   169→
+   170→   170→Secondary actions: Filter categories, inspect status, and discover related components.
+   171→   171→
+   172→   172→### Page layout
+   173→   173→
+   174→   174→# Components
+   175→   175→
+   176→   176→Browse functional UI building blocks for applications and software.
+   177→   177→
+   178→   178→Search components...
+   179→   179→
+   180→   180→All
+   181→   181→
+   182→   182→Color
+   183→   183→
+   184→   184→Controls
+   185→   185→
+   186→   186→Layout
+   187→   187→
+   188→   188→Data
+   189→   189→
+   190→   190→[Python - custom shaped user input area - Developer Questions - Krita Artists](https://images.openai.com/static-rsc-4/3p2rXRiIE5LeL0Gpt7CbxBUWVJUkQelmJjpf6hMkH_0XUnSLozFCr_uXeMorr_qE6ukGOOkoG9Fktwd8i5XOGq3aAxhC9o3HYLXbk5S9RJ_LPR6ztCCDzPamtRWmkaxZmiZywYjxY55AWrcJkO6P3BH44X0pYA_Gmlu04uXF1lc?purpose=inline)
+   191→   191→
+   192→   192→Color Wheel
+   193→   193→
+   194→   194→Configurable color selection
+   195→   195→
+   196→   196→Color · Interactive
+   197→   197→
+   198→   198→[Slider Input | Horizon Design System](https://images.openai.com/static-rsc-4/YtBlo8yGHv2DO0PqmkA1xel7jhQoniEKuRFu5IJhIuiHLAOSKpTewmO3pJzbwqJO2rfSDtDJsw4LZrC1yg4Xz7fy978iGtAJmDmLoD2-1B_-JU6dkSyh8fpDw-9hkqYHywiEVHMQlwKYgTSODf8LxTMMrg6R5kzgDfzsEOVRgPo?purpose=inline)
+   199→   199→
+   200→   200→Range Control
+   201→   201→
+   202→   202→Illustrative future component
+   203→   203→
+   204→   204→Controls · Planned
+   205→   205→
+   206→   206→The second card above is only an example of the directory's future capacity. It must not appear as an available component until it actually exists.
+   207→   207→
+   208→   208→### Required functionality
+   209→   209→
+   210→   210→Search
+   211→   211→
+   212→   212→- Search component names, descriptions, aliases, and supported properties.
+   213→   213→- Filter results as the query changes.
+   214→   214→- Show a useful empty state with a clear-search action.
+   215→   215→- Allow Escape to clear or close the search interface according to its state.
+   216→   216→
+   217→   217→Filters
+   218→   218→
+   219→   219→- Category.
+   220→   220→- Availability status, such as Stable, Beta, or Experimental.
+   221→   221→- Capabilities, such as Keyboard Support or Resizable, when metadata is available.
+   222→   222→
+   223→   223→Sorting
+   224→   224→
+   225→   225→Default ordering should be curated or alphabetical. Popularity sorting should only be introduced if the platform has a meaningful, transparent popularity measure.
+   226→   226→
+   227→   227→Component card behavior
+   228→   228→
+   229→   229→Each card includes a preview, name, concise description, category, and actual release status. Clicking it opens the component detail page.
+   230→   230→
+   231→   231→### URL and state behavior
+   232→   232→
+   233→   233→- Use query parameters for shareable search and filter states, for example `/components?category=color&q=wheel`.
+   234→   234→- Back and forward navigation must restore the relevant search state.
+   235→   235→- Opening a card should navigate to its canonical URL.
+   236→   236→
+   237→   237→### Empty and loading states
+   238→   238→
+   239→   239→- Loading: restrained skeleton cards.
+   240→   240→- No matches: explain that no components match the current filters.
+   241→   241→- Unavailable category: show a clear explanation rather than a broken page.
+   242→   242→- No network-dependent loading is required for core component previews when their assets and modules are bundled locally.
+   243→   243→
+   244→   244→## 4. Component category page
+   245→   245→
+   246→   246→Route: `/components/color`
+   247→   247→
+   248→   248→Primary goal: Introduce a component family and help users choose the right component.
+   249→   249→
+   250→   250→### Layout specification
+   251→   251→
+   252→   252→BREADCRUMB
+   253→   253→
+   254→   254→Components / Color
+   255→   255→
+   256→   256→# Color
+   257→   257→
+   258→   258→Components for selecting, adjusting, and working with colors inside application interfaces.
+   259→   259→
+   260→   260→&#x20;Color selection
+   261→   261→
+   262→   262→&#x20;Property editing
+   263→   263→
+   264→   264→### Components
+   265→   265→
+   266→   266→1 available
+   267→   267→
+   268→   268→[javascript - CSS HSL-Triangle - Stack Overflow](https://images.openai.com/static-rsc-4/LRDU1AWgqj_9Snx2K9PF6CYHYJpQNZ7fn28mCPot1TeQ48ehx9MyAtwg5TH6sVKPKA1NxWZcAgcZaxhsZ1ALAM4NTCK1CBxSMcJNegZuKfmjzBTQYWTJObIJkzEBG3LFPI1WZ6JKdz9E9WMUbdZ-xHpfLhkEGVAfoecnbCo1cyw?purpose=inline)
+   269→   269→
+   270→   270→### Color Wheel Picker
+   271→   271→
+   272→   272→A hue wheel with configurable inner selection shapes and adjustable dimensions.
+   273→   273→
+   274→   274→Available
+   275→   275→
+   276→   276→Explore component ↗
+   277→   277→
+   278→   278→Choosing a color selector
+   279→   279→
+   280→   280→Explain the differences between wheel-only, triangular, square, and disk-based selection.
+   281→   281→
+   282→   282→### Page sections
+   283→   283→
+   284→   284→1. Breadcrumb and category title.
+   285→   285→2. Category description and intended use cases.
+   286→   286→3. Optional capability overview.
+   287→   287→4. Component listing.
+   288→   288→5. Component-selection guidance, when useful.
+   289→   289→6. Links to relevant color-model documentation.
+   290→   290→
+   291→   291→### Interactions
+   292→   292→
+   293→   293→- Selecting a component opens its detail page.
+   294→   294→- Selecting a capability filter narrows the category listing.
+   295→   295→- Clicking a color-model reference opens its relevant documentation section.
+   296→   296→- Related-category links appear only when useful.
+   297→   297→
+   298→   298→### Important distinction
+   299→   299→
+   300→   300→A category page explains the family. It should not duplicate the full interactive playground or API reference for each component.
+   301→   301→
+   302→   302→## 5. Component detail page and playground
+   303→   303→
+   304→   304→Route: `/components/color/color-wheel`
+   305→   305→
+   306→   306→This is the platform's core experience. The preview, property inspector, output values, and code must all be connected to the same real component instance.
+   307→   307→
+   308→   308→[What is a Design System? A 2026 Guide With Best Practice Examples | Untitled UI](https://images.openai.com/static-rsc-4/-pSM0BCRlYloPHbOQTg1XS_HUhRaSUwyWMc6e78oYYKEiDB1gbR4nyLUZvStbGh3nUOdie95_EAhc0GfFybMYZbd2OKQKzsUcoGcwHGYVBuNCxOyTd7NnbRxB4VnmCh8eNB8sRT-yD60md86-YUV3_nBDSTgMjftzFdqYIJWywk?purpose=inline)
+   309→   309→
+   310→   310→Primary goal: Enable a developer to test and understand a component before integrating it.
+   311→   311→
+   312→   312→Primary actions: Experiment, configure, inspect, copy, and integrate.
+   313→   313→
+   314→   314→Secondary actions: Reset, switch code tabs, navigate API references.
+   315→   315→
+   316→   316→### 5.1 Page anatomy
+   317→   317→
+   318→   318→COMPONENTS / COLOR
+   319→   319→
+   320→   320→# Color Wheel Picker
+   321→   321→
+   322→   322→Circular hue selection with configurable inner geometry.
+   323→   323→
+   324→   324→Vanilla JS
+   325→   325→
+   326→   326→Interactive
+   327→   327→
+   328→   328→Stable\*
+   329→   329→
+   330→   330→### Interactive preview
+   331→   331→
+   332→   332→Reset
+   333→   333→
+   334→   334→[Polychrome Multicolor Spectral Versicolor Rainbow Circle of 12 segments. The spectral harmonic colorful palette of the painter.](https://images.openai.com/static-rsc-4/lPn5TWSMNPP350HT7LGHaFGtBcL0PiAh70vAqa3mrhvTATeS-ZD2l2bJ569FhyW5flg8mtmb_bj9Tn4r0Ds8S5lVFAeQYEjofVgo_usP3qmPgvlYeKj7_tJu3shmdmO979lgMgpTdZwFzDBp9fQETmkDPmMvCQpSXCjx8f1h9G2ihuFxPIGbIlGHwldMs_FY?purpose=inline)
+   335→   335→
+   336→   336→Selected color
+   337→   337→
+   338→   338→\#4287F5
+   339→   339→
+   340→   340→### Configure
+   341→   341→
+   342→   342→Inner shape
+   343→   343→
+   344→   344→Triangle
+   345→   345→
+   346→   346→Square
+   347→   347→
+   348→   348→Disk
+   349→   349→
+   350→   350→None
+   351→   351→
+   352→   352→Inner size
+   353→   353→
+   354→   354→180 px
+   355→   355→
+   356→   356→### Code
+   357→   357→
+   358→   358→JavaScript
+   359→   359→
+   360→   360→HTML
+   361→   361→
+   362→   362→CSS
+   363→   363→
+   364→   364→The selected configuration's initialization example appears here.
+   365→   365→
+   366→   366→\*Release status and values are illustrative. The production page must display real implementation status and live output.
+   367→   367→
+   368→   368→### 5.2 Header and metadata
+   369→   369→
+   370→   370→Show:
+   371→   371→
+   372→   372→- Breadcrumb.
+   373→   373→- Component name and short summary.
+   374→   374→- Release status.
+   375→   375→- Category and relevant capability tags.
+   376→   376→- Link to source or repository, if available.
+   377→   377→- Link to report an issue or contribute.
+   378→   378→
+   379→   379→Do not place numerous low-value badges beside the title.
+   380→   380→
+   381→   381→### 5.3 Preview workspace
+   382→   382→
+   383→   383→The preview is the primary interactive region.
+   384→   384→
+   385→   385→Toolbar controls
+   386→   386→
+   387→   387→- Reset to defaults.
+   388→   388→- Optional preview-size selector.
+   389→   389→- Optional isolated-preview or expanded mode.
+   390→   390→- Optional background selector for components whose appearance depends on their surroundings.
+   391→   391→
+   392→   392→Only show controls that are useful for the current component.
+   393→   393→
+   394→   394→Preview behavior
+   395→   395→
+   396→   396→- Render the actual component.
+   397→   397→- Accept direct pointer and keyboard interaction.
+   398→   398→- Update the output panel and inspector when its state changes.
+   399→   399→- Respect the selected theme and preview dimensions.
+   400→   400→- Remain independent of the surrounding website's styling wherever possible.
+   401→   401→
+   402→   402→### 5.4 Property inspector
+   403→   403→
+   404→   404→For the Color Wheel Picker, the initial inspector should expose the following controls.
+   405→   405→
+   406→   406→| Property        | UI control                     | Behavior                                |
+   407→   407→| --------------- | ------------------------------ | --------------------------------------- |
+   408→   408→| Inner shape     | Four-option segmented selector | Changes triangle, square, disk, or none |
+   409→   409→| Inner size      | Numeric field and/or slider    | Changes inner shape dimensions          |
+   410→   410→| Initial hue     | Numeric field or slider        | Updates hue                             |
+   411→   411→| Initial color   | Color value input              | Sets the current selected color         |
+   412→   412→| Wheel thickness | Numeric field or slider        | Adjusts ring thickness if supported     |
+   413→   413→| Wheel spacing   | Numeric field or slider        | Adjusts inner gap if supported          |
+   414→   414→
+   415→   415→The property inspector should be generated from documented component capabilities or a defined property schema, rather than manually duplicating business logic for each preview.
+   416→   416→
+   417→   417→Control interaction rules
+   418→   418→
+   419→   419→- Apply valid changes immediately.
+   420→   420→- Validate numeric ranges and units.
+   421→   421→- Preserve unrelated property values when another property changes.
+   422→   422→- Keep the inspector synchronized with direct manipulation of the component.
+   423→   423→- Clearly distinguish default values from overridden values.
+   424→   424→- Provide a per-property reset where useful and a global reset for the entire preview.
+   425→   425→
+   426→   426→### 5.5 Output panel
+   427→   427→
+   428→   428→Display the selected color in a clear, copyable format.
+   429→   429→
+   430→   430→- Color swatch.
+   431→   431→- HEX value.
+   432→   432→- RGB values.
+   433→   433→- HSV values.
+   434→   434→- HSL values.
+   435→   435→
+   436→   436→Requirements:
+   437→   437→
+   438→   438→- Copy each representation independently.
+   439→   439→- Update values while the user interacts with the wheel.
+   440→   440→- Validate manually entered values.
+   441→   441→- Show a clear error for invalid input.
+   442→   442→- Keep the current selection synchronized regardless of whether the user changes it through the preview or the input fields.
+   443→   443→
+   444→   444→### 5.6 Code panel
+   445→   445→
+   446→   446→Tabs:
+   447→   447→
+   448→   448→- JavaScript: initialization and component configuration.
+   449→   449→- HTML: required container markup.
+   450→   450→- CSS: required styling or customization.
+   451→   451→- API: public methods, events, and properties.
+   452→   452→
+   453→   453→The code panel must:
+   454→   454→
+   455→   455→- Reflect the active configuration.
+   456→   456→- Use the actual public API.
+   457→   457→- Offer copy-to-clipboard.
+   458→   458→- Preserve readable formatting.
+   459→   459→- Explain dependencies and setup requirements.
+   460→   460→- Avoid showing framework-specific code as the primary integration path.
+   461→   461→
+   462→   462→A framework integration example may be offered as a separate optional guide, but the canonical example must work with plain HTML and JavaScript.
+   463→   463→
+   464→   464→### 5.7 Documentation below the playground
+   465→   465→
+   466→   466→Use a left-aligned documentation column with a contextual right-hand table of contents on wide screens.
+   467→   467→
+   468→   468→Sections:
+   469→   469→
+   470→   470→1. Overview.
+   471→   471→2. When to use it.
+   472→   472→3. Installation and basic usage.
+   473→   473→4. Interactive examples.
+   474→   474→5. Properties and defaults.
+   475→   475→6. Methods.
+   476→   476→7. Events.
+   477→   477→8. Styling and customization.
+   478→   478→9. Accessibility.
+   479→   479→10. Troubleshooting.
+   480→   480→
+   481→   481→Use anchor links and a clear active-section indicator.
+   482→   482→
+   483→   483→### 5.8 Playground states
+   484→   484→
+   485→   485→The component page must define:
+   486→   486→
+   487→   487→- Default configuration.
+   488→   488→- Modified configuration.
+   489→   489→- Invalid property input.
+   490→   490→- Reset state.
+   491→   491→- Preview rendering failure.
+   492→   492→- Copy success or failure.
+   493→   493→- Small viewport behavior.
+   494→   494→- Keyboard focus and interaction states.
+   495→   495→
+   496→   496→If a preview fails to load, preserve the documentation and display a useful error with a retry option where appropriate.
+   497→   497→
+   498→   498→## 6. Documentation landing page
+   499→   499→
+   500→   500→Route: `/docs`
+   501→   501→
+   502→   502→Primary goal: Help a developer move from discovering the library to using a component successfully.
+   503→   503→
+   504→   504→### Layout
+   505→   505→
+   506→   506→# Documentation
+   507→   507→
+   508→   508→Everything you need to install, configure, and integrate the components.
+   509→   509→
+   510→   510→### Getting started
+   511→   511→
+   512→   512→Install the library and initialize your first component.
+   513→   513→
+   514→   514→Read the guide ↗
+   515→   515→
+   516→   516→Core concepts
+   517→   517→
+   518→   518→Component structure and lifecycle
+   519→   519→
+   520→   520→Theming
+   521→   521→
+   522→   522→Styling and design tokens
+   523→   523→
+   524→   524→API reference
+   525→   525→
+   526→   526→Methods, events, and properties
+   527→   527→
+   528→   528→Integration
+   529→   529→
+   530→   530→Using components in applications
+   531→   531→
+   532→   532→### Required sections
+   533→   533→
+   534→   534→- Getting started.
+   535→   535→- Installation.
+   536→   536→- Core concepts.
+   537→   537→- Component lifecycle and cleanup.
+   538→   538→- Configuration and event handling.
+   539→   539→- Styling and theming.
+   540→   540→- Accessibility.
+   541→   541→- API reference.
+   542→   542→- Framework interoperability.
+   543→   543→- Troubleshooting.
+   544→   544→
+   545→   545→### Behavior
+   546→   546→
+   547→   547→- Selecting a documentation card opens the relevant guide.
+   548→   548→- A contextual sidebar shows the documentation hierarchy.
+   549→   549→- Long pages include a right-hand table of contents.
+   550→   550→- Code examples support copying.
+   551→   551→- Inline references link to actual component pages or API entries.
+   552→   552→- Previous/next navigation follows the documentation hierarchy, not arbitrary alphabetical order.
+   553→   553→
+   554→   554→## 7. Installation page
+   555→   555→
+   556→   556→Route: `/docs/installation`
+   557→   557→
+   558→   558→Primary goal: Make the first successful integration straightforward.
+   559→   559→
+   560→   560→### Layout
+   561→   561→
+   562→   562→1. Page title and prerequisites.
+   563→   563→2. Choose a distribution method.
+   564→   564→3. Install or import the package.
+   565→   565→4. Include the required CSS.
+   566→   566→5. Add the component container.
+   567→   567→6. Initialize the component.
+   568→   568→7. Verify the result.
+   569→   569→8. Troubleshooting.
+   570→   570→
+   571→   571→### Distribution selector
+   572→   572→
+   573→   573→If the project supports multiple methods, display options such as:
+   574→   574→
+   575→   575→- Package manager.
+   576→   576→- Direct JavaScript module import.
+   577→   577→- Browser-based module import, if officially supported.
+   578→   578→
+   579→   579→Each option should show the exact installation and import steps for that method. Do not present unsupported CDN URLs or invented package names.
+   580→   580→
+   581→   581→### Code example
+   582→   582→
+   583→   583→Use a minimal, complete example with separate HTML, JavaScript, and CSS tabs where necessary.
+   584→   584→
+   585→   585→Controls:
+   586→   586→
+   587→   587→- Copy code.
+   588→   588→- Switch installation method.
+   589→   589→- Open the first component.
+   590→   590→- View troubleshooting.
+   591→   591→
+   592→   592→### Error handling
+   593→   593→
+   594→   594→Include solutions for common issues, such as missing styles, incorrect import paths, invalid container references, and duplicate initialization.
+   595→   595→
+   596→   596→The installation guide should be version-aware when multiple incompatible releases are supported.
+   597→   597→
+   598→   598→## 8. Concepts page
+   599→   599→
+   600→   600→Route: `/docs/concepts`
+   601→   601→
+   602→   602→Primary goal: Explain how the library works without requiring developers to understand the website's own framework.
+   603→   603→
+   604→   604→### Page layout
+   605→   605→
+   606→   606→# Core concepts
+   607→   607→
+   608→   608→Understand the architecture and conventions shared by the component library.
+   609→   609→
+   610→   610→Component initialization
+   611→   611→
+   612→   612→Containers, configuration options, defaults, and instance creation.
+   613→   613→
+   614→   614→State and updates
+   615→   615→
+   616→   616→How user input, programmatic updates, and rendered state stay synchronized.
+   617→   617→
+   618→   618→Events and lifecycle
+   619→   619→
+   620→   620→Change notifications, cleanup, and predictable component behavior.
+   621→   621→
+   622→   622→Framework interoperability
+   623→   623→
+   624→   624→Using vanilla JavaScript components within applications built with different frameworks.
+   625→   625→
+   626→   626→### Required content
+   627→   627→
+   628→   628→- Component instance and container conventions.
+   629→   629→- Configuration and default values.
+   630→   630→- Controlled versus internally managed state, where applicable.
+   631→   631→- Event naming and event payload conventions.
+   632→   632→- Lifecycle, cleanup, and disposal.
+   633→   633→- DOM ownership and style isolation.
+   634→   634→- Error handling.
+   635→   635→- Framework integration patterns.
+   636→   636→
+   637→   637→### Interactions
+   638→   638→
+   639→   639→- Code examples can be copied.
+   640→   640→- Concept references link to related API documentation.
+   641→   641→- The right-hand table of contents tracks the current section.
+   642→   642→- Interactive diagrams may be used where they clarify lifecycle or state flow.
+   643→   643→
+   644→   644→Avoid duplicating every component's API reference here. Explain shared conventions once and link to component-specific details.
+   645→   645→
+   646→   646→## 9. Theming page
+   647→   647→
+   648→   648→Route: `/docs/theming`
+   649→   649→
+   650→   650→Primary goal: Teach developers how to adapt the component appearance without modifying its functional logic.
+   651→   651→
+   652→   652→### Layout specification
+   653→   653→
+   654→   654→# Theming and customization
+   655→   655→
+   656→   656→Customize component appearance while keeping behavior consistent.
+   657→   657→
+   658→   658→### Theme preview
+   659→   659→
+   660→   660→Accent color
+   661→   661→
+   662→   662→Terracotta
+   663→   663→
+   664→   664→Border color
+   665→   665→
+   666→   666→Neutral
+   667→   667→
+   668→   668→Surface
+   669→   669→
+   670→   670→Light
+   671→   671→
+   672→   672→### Customization guides
+   673→   673→
+   674→   674→Design tokens · CSS custom properties · Component-level overrides · Dark themes · Interaction states
+   675→   675→
+   676→   676→### Page requirements
+   677→   677→
+   678→   678→- Explain the global design-token system.
+   679→   679→- Show supported CSS custom properties.
+   680→   680→- Distinguish supported public customization points from internal styles.
+   681→   681→- Demonstrate component-specific customization.
+   682→   682→- Explain light and dark theme support.
+   683→   683→- Document focus, hover, disabled, selected, and error states.
+   684→   684→- Provide before-and-after examples.
+   685→   685→
+   686→   686→### Interactive behavior
+   687→   687→
+   688→   688→Where a live theme editor is provided, changes to supported tokens should update the preview immediately. The page should show the corresponding CSS configuration and offer a copy action.
+   689→   689→
+   690→   690→Theming must not imply that every internal style is a stable public API. Document which variables and overrides are officially supported.
+   691→   691→
+   692→   692→## 10. Examples directory
+   693→   693→
+   694→   694→Route: `/examples`
+   695→   695→
+   696→   696→Primary goal: Show what the library can do in realistic application contexts.
+   697→   697→
+   698→   698→### Layout specification
+   699→   699→
+   700→   700→# Examples
+   701→   701→
+   702→   702→See the components in the context of real software interfaces.
+   703→   703→
+   704→   704→All examples
+   705→   705→
+   706→   706→Creative tools
+   707→   707→
+   708→   708→Developer tools
+   709→   709→
+   710→   710→Productivity
+   711→   711→
+   712→   712→[Design App Concept - Clavius Design System by Mikolaj on Dribbble](https://images.openai.com/static-rsc-4/9yRZVEVsQkzK8i54IdNsHimuekQ4qn--pN4stJXCOoQOrkuAy-y_Law7c4XW0ieLH_KKaRx_Yl3q1IFeJXH26JKohqkVzBBvcXCbSYs2FkQi0Kix4BVvUpKrQxmlCuR-aGTStd40HcWa0tshQ_719hvgElbgFg160vnBN7zROnw?purpose=inline)
+   713→   713→
+   714→   714→[dribbble.com](https://dribbble.com/shots/22869260-Design-App-Concept-Clavius-Design-System?utm_source=chatgpt.com)
+   715→   715→
+   716→   716→### Creative application inspector
+   717→   717→
+   718→   718→An example of color controls inside a visual editing workspace.
+   719→   719→
+   720→   720→Explore example ↗
+   721→   721→
+   722→   722→[Avalonia UI Showcase](https://images.openai.com/static-rsc-4/FfC0Cc6Wnmjw8P1MTqlD9SZMEM75bS_7s8hoPbce0p_WMf2OAAd2Vw8Y9Vrcrn_wxwIpd88TmLN7APNZKt80PqLPxHciT7JDlrVzIZZNuENI2NE1oQG3BgI3Y1ThYZKKEWWPTzw9iQ3PKzHSkHy8M1J3CvbkvA5_ys6PWQTwhGM?purpose=inline)
+   723→   723→
+   724→   724→[avaloniaui.net](https://avaloniaui.net/Showcase?utm_source=chatgpt.com)
+   725→   725→
+   726→   726→### Application settings panel
+   727→   727→
+   728→   728→A demonstration of how controls can be organized in a software settings interface.
+   729→   729→
+   730→   730→Explore example ↗
+   731→   731→
+   732→   732→### Directory controls
+   733→   733→
+   734→   734→- Search examples.
+   735→   735→- Filter by application domain.
+   736→   736→- Filter by components used, once enough examples exist.
+   737→   737→- Sort alphabetically or by curated order.
+   738→   738→
+   739→   739→### Example cards
+   740→   740→
+   741→   741→Each card includes:
+   742→   742→
+   743→   743→- Preview image or live miniature.
+   744→   744→- Example title.
+   745→   745→- Short use-case description.
+   746→   746→- Components used.
+   747→   747→- Link to the example details page.
+   748→   748→
+   749→   749→### Interaction behavior
+   750→   750→
+   751→   751→Clicking a card opens `/examples/[slug]`.
+   752→   752→
+   753→   753→The directory must distinguish between a static visual illustration and an interactive example. Never label a screenshot as a live demo.
+   754→   754→
+   755→   755→## 11. Individual example page
+   756→   756→
+   757→   757→Route: `/examples/[slug]`
+   758→   758→
+   759→   759→Primary goal: Let developers inspect an application pattern and understand how it is assembled from library components.
+   760→   760→
+   761→   761→### Layout
+   762→   762→
+   763→   763→EXAMPLES / CREATIVE TOOLS
+   764→   764→
+   765→   765→# Creative application inspector
+   766→   766→
+   767→   767→A demonstration of how an application can embed color selection and property controls.
+   768→   768→
+   769→   769→Live example
+   770→   770→
+   771→   771→[Unsupported client](https://images.openai.com/static-rsc-4/cXctduRPbafHEoZu04MWALIWMdmTfHI9UbFlxfbCeIva0P-LlRtvfZ2mtcxlrliN5XMnL5p9bHFAIa2VXaUf-MWAMlN1Pt9haT97kRwxBrCTpxji7Yejjmbq2trvtDpHQGAf9PWZ9ls5oOhimuqXX1ZVgJZ3563_7Rq2Dl_bqNY?purpose=inline)
+   772→   772→
+   773→   773→[affinity.studio](https://www.affinity.studio/help/object-control-select/?utm_source=chatgpt.com)
+   774→   774→
+   775→   775→Selected object
+   776→   776→
+   777→   777→Shape 01
+   778→   778→
+   779→   779→Fill color
+   780→   780→
+   781→   781→\#D94B32
+   782→   782→
+   783→   783→### Components used
+   784→   784→
+   785→   785→Color Wheel Picker
+   786→   786→
+   787→   787→Open component documentation
+   788→   788→
+   789→   789→### Implementation
+   790→   790→
+   791→   791→Explanation, code snippets, and integration steps for recreating the example.
+   792→   792→
+   793→   793→### Page sections
+   794→   794→
+   795→   795→1. Example title and purpose.
+   796→   796→2. Live demonstration or clearly labeled static preview.
+   797→   797→3. Interactive controls, if supported.
+   798→   798→4. Component list with links.
+   799→   799→5. Explanation of layout and behavior.
+   800→   800→6. Implementation code.
+   801→   801→7. Relevant component documentation.
+   802→   802→
+   803→   803→### Functionality
+   804→   804→
+   805→   805→- Reset the example to its initial state.
+   806→   806→- Expand the demonstration where useful.
+   807→   807→- Copy relevant code snippets.
+   808→   808→- Navigate directly to individual component documentation.
+   809→   809→- Distinguish illustrative application logic from features provided by the library itself.
+   810→   810→
+   811→   811→The example page should not imply that the component library includes an entire application framework or state-management system.
+   812→   812→
+   813→   813→## 12. Resources page
+   814→   814→
+   815→   815→Route: `/resources`
+   816→   816→
+   817→   817→Primary goal: Collect supplementary materials that help developers use the components effectively.
+   818→   818→
+   819→   819→### Initial sections
+   820→   820→
+   821→   821→- Recipes and implementation patterns.
+   822→   822→- Accessibility guides.
+   823→   823→- Design and interaction principles.
+   824→   824→- Integration examples.
+   825→   825→- Component contribution guidance.
+   826→   826→- Links to relevant external references.
+   827→   827→
+   828→   828→### Layout
+   829→   829→
+   830→   830→Use a categorized list or a small grid of resource cards. Each card should include a title, concise description, resource type, and destination.
+   831→   831→
+   832→   832→### Interaction
+   833→   833→
+   834→   834→- Filter by resource type.
+   835→   835→- Search resource titles and descriptions.
+   836→   836→- Open internal guides within the documentation shell.
+   837→   837→- Clearly identify external links.
+   838→   838→
+   839→   839→Avoid building a community forum, user account system, or resource submission marketplace in the first release unless those become explicit product requirements.
+   840→   840→
+   841→   841→## 13. API reference page
+   842→   842→
+   843→   843→Proposed route: `/docs/api`
+   844→   844→
+   845→   845→The API reference is a cross-component index, distinct from the API section embedded in an individual component page.
+   846→   846→
+   847→   847→Primary goal: Help developers find a property, method, event, or type without browsing every component.
+   848→   848→
+   849→   849→### Layout
+   850→   850→
+   851→   851→# API Reference
+   852→   852→
+   853→   853→Browse the public interfaces exposed by the library.
+   854→   854→
+   855→   855→Search methods, properties, events...
+   856→   856→
+   857→   857→### Color Wheel Picker
+   858→   858→
+   859→   859→setColor(color)
+   860→   860→
+   861→   861→Sets the selected color.
+   862→   862→
+   863→   863→Method
+   864→   864→
+   865→   865→setShape(shape)
+   866→   866→
+   867→   867→Changes the inner selection geometry.
+   868→   868→
+   869→   869→Method
+   870→   870→
+   871→   871→change
+   872→   872→
+   873→   873→Notifies listeners of a committed color change.
+   874→   874→
+   875→   875→Event
+   876→   876→
+   877→   877→The signatures above are illustrative and must be reconciled with the final public API before publication.
+   878→   878→
+   879→   879→### Required functionality
+   880→   880→
+   881→   881→- Search by symbol name.
+   882→   882→- Filter by component and API type.
+   883→   883→- Link every entry to its owning component.
+   884→   884→- Display signature, parameters, return value, examples, and relevant errors.
+   885→   885→- Indicate whether an entry is stable, experimental, or deprecated.
+   886→   886→- Provide copyable examples.
+   887→   887→
+   888→   888→The reference must be generated from, or validated against, the actual public API definitions so that documentation does not drift from implementation.
+   889→   889→
+   890→   890→## 14. Changelog page
+   891→   891→
+   892→   892→Route: `/changelog`
+   893→   893→
+   894→   894→Primary goal: Communicate what changed between releases.
+   895→   895→
+   896→   896→### Layout
+   897→   897→
+   898→   898→Use a reverse-chronological timeline of release entries. Each entry should include:
+   899→   899→
+   900→   900→- Version number.
+   901→   901→- Release date.
+   902→   902→- Added features.
+   903→   903→- Improvements.
+   904→   904→- Bug fixes.
+   905→   905→- Breaking changes.
+   906→   906→- Migration instructions where necessary.
+   907→   907→
+   908→   908→### Interactions
+   909→   909→
+   910→   910→- Filter releases by component or change type.
+   911→   911→- Link component-specific changes to their documentation.
+   912→   912→- Support direct links to a specific release.
+   913→   913→- Highlight breaking changes with a meaningful warning treatment.
+   914→   914→
+   915→   915→Only publish real, verified release information. Avoid fabricated dates, release promises, or automatic status indicators unsupported by the release process.
+   916→   916→
+   917→   917→## 15. Contributing page
+   918→   918→
+   919→   919→Route: `/contributing`
+   920→   920→
+   921→   921→Primary goal: Explain how to contribute components, fixes, tests, and documentation.
+   922→   922→
+   923→   923→### Page structure
+   924→   924→
+   925→   925→1. Contribution overview.
+   926→   926→2. Component design principles.
+   927→   927→3. Public API conventions.
+   928→   928→4. Accessibility requirements.
+   929→   929→5. Testing expectations.
+   930→   930→6. Documentation and examples.
+   931→   931→7. Issue reporting.
+   932→   932→8. Pull request workflow.
+   933→   933→
+   934→   934→### UI behavior
+   935→   935→
+   936→   936→- Use navigable sections and copyable commands.
+   937→   937→- Link to actual repository contribution files when available.
+   938→   938→- Clearly distinguish established requirements from proposed standards.
+   939→   939→- Provide a component proposal template if the project adopts one.
+   940→   940→
+   941→   941→Contribution instructions should align with the repository's real workflow rather than inventing a mandatory approval process.
+   942→   942→
+   943→   943→## 16. Global search interface
+   944→   944→
+   945→   945→Trigger: Header search button or keyboard shortcut.
+   946→   946→
+   947→   947→Presentation: Centered command palette overlay on desktop; full-screen or nearly full-screen search panel on mobile.
+   948→   948→
+   949→   949→Search the library...
+   950→   950→
+   951→   951→Components, APIs, documentation, examples
+   952→   952→
+   953→   953→COMPONENTS
+   954→   954→
+   955→   955→Color Wheel Picker
+   956→   956→
+   957→   957→Components / Color
+   958→   958→
+   959→   959→DOCUMENTATION
+   960→   960→
+   961→   961→Color and HSV
+   962→   962→
+   963→   963→Concepts / Color models
+   964→   964→
+   965→   965→setColor()
+   966→   966→
+   967→   967→API / Color Wheel Picker
+   968→   968→
+   969→   969→↑↓ Navigate
+   970→   970→
+   971→   971→↵ Open
+   972→   972→
+   973→   973→Esc Close
+   974→   974→
+   975→   975→### Functional requirements
+   976→   976→
+   977→   977→- Search across all published content.
+   978→   978→- Group results by type.
+   979→   979→- Navigate results using arrow keys and Enter.
+   980→   980→- Close with Escape or by clicking outside.
+   981→   981→- Move keyboard focus into the search panel on opening and return focus to the trigger on closing.
+   982→   982→- Display a useful empty state and a clear action.
+   983→   983→- Avoid indexing unpublished or nonexistent components.
+   984→   984→
+   985→   985→The search system should support a local, lightweight implementation initially. A remote search service is optional, not a requirement.
+   986→   986→
+   987→   987→## 17. Not-found and error pages
+   988→   988→
+   989→   989→### Not-found page
+   990→   990→
+   991→   991→Route: Any unknown URL, rendered as a 404 response.
+   992→   992→
+   993→   993→# This page doesn't exist.
+   994→   994→
+   995→   995→The page may have moved, or the URL may be incorrect.
+   996→   996→
+   997→   997→Browse components
+   998→   998→
+   999→   999→Go home
+  1000→  1000→
+  1001→  1001→Requirements:
+  1002→  1002→
+  1003→  1003→- Provide links to Home, Components, and Documentation.
+  1004→  1004→- Offer search as a recovery path.
+  1005→  1005→- Never silently redirect every unknown URL to Home.
+  1006→  1006→- Preserve correct HTTP status semantics.
+  1007→  1007→
+  1008→  1008→### Error states within pages
+  1009→  1009→
+  1010→  1010→Use contextual messages rather than replacing an entire page with a generic error.
+  1011→  1011→
+  1012→  1012→Examples:
+  1013→  1013→
+  1014→  1014→- Preview module failed to load.
+  1015→  1015→- Invalid property value.
+  1016→  1016→- Clipboard access unavailable.
+  1017→  1017→- Requested component version unavailable.
+  1018→  1018→- Search request failed, if search uses a remote service.
+  1019→  1019→
+  1020→  1020→Where appropriate, provide a retry action and preserve the rest of the page.
+  1021→  1021→
+  1022→  1022→## 18. Global interaction and accessibility specification
+  1023→  1023→
+  1024→  1024→These requirements apply to all pages and all interactive previews.
+  1025→  1025→
+  1026→  1026→| Area                 | Required behavior                                                        |
+  1027→  1027→| -------------------- | ------------------------------------------------------------------------ |
+  1028→  1028→| Navigation           | Keyboard-accessible links, visible active state, correct browser history |
+  1029→  1029→| Dialogs and overlays | Focus management, Escape handling, accessible labels                     |
+  1030→  1030→| Inputs               | Labels, validation messages, keyboard support                            |
+  1031→  1031→| Component previews   | Actual functional instances, not visual imitations                       |
+  1032→  1032→| Code examples        | Readable formatting and reliable copy behavior                           |
+  1033→  1033→| Loading              | Clear loading states without layout jumps                                |
+  1034→  1034→| Errors               | Contextual messages and recovery where possible                          |
+  1035→  1035→| Themes               | Consistent colors and contrast across the platform                       |
+  1036→  1036→| Mobile               | Touch-friendly controls and no unintended horizontal overflow            |
+  1037→  1037→| Motion               | Respect reduced-motion preferences                                       |
+  1038→  1038→
+  1039→  1039→### Component playground-specific requirements
+  1040→  1040→
+  1041→  1041→The playground must distinguish between three sources of state:
+  1042→  1042→
+  1043→  1043→1. Component state: The actual selected value and behavior inside the component.
+  1044→  1044→2. Playground configuration: Properties set through the inspector.
+  1045→  1045→3. Code representation: The configuration and initialization code shown to the developer.
+  1046→  1046→
+  1047→  1047→These must remain synchronized through a documented configuration model. The generated code must describe the actual component configuration, not an approximation of what the preview looks like.
+  1048→  1048→
+  1049→  1049→## 19. Responsive UI rules
+  1050→  1050→
+  1051→  1051→[SupportGenix Docs | Astro](https://images.openai.com/static-rsc-4/oDQ91GRA6WkCWQfatrNZeWn9565sNr3vniTvo6GE2F0dpoaRWHBARra693c7cjjqtupdXg4orMeMuavZh5QC7Y78nISWfDWJdCjtY7lEhP3OIFmy92hw3tzE5xq9DjbgipVRa_E6oDIj-xvs9fBq1dGrHZq1lYL4y6MPTK_0C2M?purpose=inline)
+  1052→  1052→
+  1053→  1053→Desktop
+  1054→  1054→
+  1055→  1055→Persistent documentation sidebar, generous content width, contextual right sidebar, and a preview with adjacent property controls where space permits.
+  1056→  1056→
+  1057→  1057→[docusaurus - Collapse sidebar (Table of Contents, left side) section - Stack Overflow](https://images.openai.com/static-rsc-4/PJ7EXZgAxG-vSL3eTQQCrLn72nKOUGJUzqHGTumBg3L6Gyv1oYz5FuO8HEjXmTmRZkS0yAeA2bniq2fo2Z24998zac5wP7XzPRwKlxeXDtvb_gB6i92gOjrMGjiNp0KlWpKJaCu73k5kFClORvyOwjfljOgJyqEKXxSXeyKCE3s?purpose=inline)
+  1058→  1058→
+  1059→  1059→Tablet
+  1060→  1060→
+  1061→  1061→Collapsible navigation, reduced spacing, and stacked preview controls whenever a side-by-side layout becomes cramped.
+  1062→  1062→
+  1063→  1063→[API / Documentation • Material You (m3) • Design system by F e l i ✖︎ for Setproduct on Dribbble](https://images.openai.com/static-rsc-4/m0fm3B0Vx7VCboDAwhfx0MxClpRvK5aO223ZK32KteEgwD1OZFjJOJwmzUJyxIG3Fx0BlgqzOD93X9_n-G87IFw8D9zUoGiqCuNMTXq_egHHU5qKDNR8CL5W6L3Y2dBDSTrvH5ousb6KqpioMxaG93qUIPnSsxI08o9mThH5EBY?purpose=inline)
+  1064→  1064→
+  1065→  1065→Mobile
+  1066→  1066→
+  1067→  1067→Single-column content, drawer navigation, compact code tabs, touch-friendly property controls, and horizontally scrollable code blocks when necessary.
+  1068→  1068→
+  1069→  1069→### Responsive behavior rules
+  1070→  1070→
+  1071→  1071→- The right-hand table of contents disappears before the main content becomes cramped.
+  1072→  1072→- The component inspector moves below the preview on narrow screens.
+  1073→  1073→- Code blocks may scroll horizontally, but the page itself should not.
+  1074→  1074→- Search results remain usable with touch and keyboard input.
+  1075→  1075→- The color picker retains sufficient size and precision for touch interaction.
+  1076→  1076→- No essential property or action should be available only on hover.
+  1077→  1077→
+  1078→  1078→Use content-driven breakpoints rather than assuming all devices fit a particular fixed width.
+  1079→  1079→
+  1080→  1080→## 20. Route and page inventory
+  1081→  1081→
+  1082→  1082→The following table is the consolidated page checklist for design and implementation.
+  1083→  1083→
+  1084→  1084→| Route                           | Page                                     | Priority |
+  1085→  1085→| ------------------------------- | ---------------------------------------- | -------- |
+  1086→  1086→| `/`                             | Home                                     | P0       |
+  1087→  1087→| `/components`                   | Component directory                      | P0       |
+  1088→  1088→| `/components/[category]`        | Category overview                        | P0       |
+  1089→  1089→| `/components/color/color-wheel` | Color Wheel Picker detail and playground | P0       |
+  1090→  1090→| `/docs`                         | Documentation landing                    | P0       |
+  1091→  1091→| `/docs/installation`            | Installation                             | P0       |
+  1092→  1092→| `/docs/concepts`                | Core concepts                            | P1       |
+  1093→  1093→| `/docs/theming`                 | Theming                                  | P1       |
+  1094→  1094→| `/docs/api`                     | API reference index                      | P1       |
+  1095→  1095→| `/examples`                     | Examples directory                       | P1       |
+  1096→  1096→| `/examples/[slug]`              | Individual example                       | P1       |
+  1097→  1097→| `/resources`                    | Resources directory                      | P2       |
+  1098→  1098→| `/changelog`                    | Changelog                                | P1       |
+  1099→  1099→| `/contributing`                 | Contribution guide                       | P1       |
+  1100→  1100→| Global overlay                  | Search                                   | P0       |
+  1101→  1101→| Fallback                        | Not-found and error states               | P0       |
+  1102→  1102→
+  1103→  1103→Priority definitions:
+  1104→  1104→
+  1105→  1105→- P0: Necessary for a coherent first release.
+  1106→  1106→- P1: Important for a complete developer experience.
+  1107→  1107→- P2: Useful expansion after the core experience is established.
+  1108→  1108→
+  1109→  1109→These priorities describe the website experience, not the release status of individual library components.
+  1110→  1110→
+  1111→  1111→## 21. Final design and implementation handoff criteria
+  1112→  1112→
+  1113→  1113→Before beginning detailed implementation, every page should have:
+  1114→  1114→
+  1115→  1115→- A defined layout and content hierarchy.
+  1116→  1116→- Named interactive controls and their expected behaviors.
+  1117→  1117→- Loading, empty, invalid, and error states where applicable.
+  1118→  1118→- Responsive behavior.
+  1119→  1119→- Navigation destinations and browser-history expectations.
+  1120→  1120→- Accessibility requirements.
+  1121→  1121→- A clear distinction between static illustrations and real working components.
+  1122→  1122→- Reusable shell and page-layout conventions.
+  1123→  1123→- A consistent source of truth for component metadata and API documentation.

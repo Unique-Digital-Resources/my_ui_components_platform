@@ -1,0 +1,882 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { RotateCcw } from "lucide-react";
+     5→import { getComponent } from "@/lib/platform/content";
+     6→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+     7→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+     8→import { AgentSkillTabs } from "@/components/platform/agent-skill-tabs";
+     9→import {
+    10→  CalendarReact,
+    11→  type CalendarMode,
+    12→  type WeekdayFormat,
+    13→  type CalendarEventPayload,
+    14→} from "./calendar-react";
+    15→import type { Calendar } from "@/lib/components/calendar";
+    16→import { formatDateISO } from "@/lib/components/calendar";
+    17→import { cn } from "@/lib/utils";
+    18→import { toast } from "sonner";
+    19→
+    20→interface PlaygroundState {
+    21→  mode: CalendarMode;
+    22→  firstDayOfWeek: number;
+    23→  weekdayFormat: WeekdayFormat;
+    24→  showWeekNumbers: boolean;
+    25→  showTodayButton: boolean;
+    26→  showAdjacentMonths: boolean;
+    27→  todayHighlight: boolean;
+    28→  weekendHighlight: boolean;
+    29→  cellSize: number;
+    30→  minDate: string; // YYYY-MM-DD or ""
+    31→  maxDate: string;
+    32→}
+    33→
+    34→const DEFAULTS: PlaygroundState = {
+    35→  mode: "single",
+    36→  firstDayOfWeek: 0,
+    37→  weekdayFormat: "short",
+    38→  showWeekNumbers: false,
+    39→  showTodayButton: true,
+    40→  showAdjacentMonths: true,
+    41→  todayHighlight: true,
+    42→  weekendHighlight: false,
+    43→  cellSize: 36,
+    44→  minDate: "",
+    45→  maxDate: "",
+    46→};
+    47→
+    48→function parseDateInput(s: string): Date | undefined {
+    49→  if (!s) return undefined;
+    50→  // HTML date inputs produce "YYYY-MM-DD" — parse as local midnight.
+    51→  const [y, m, d] = s.split("-").map(Number);
+    52→  if (!y || !m || !d) return undefined;
+    53→  return new Date(y, m - 1, d);
+    54→}
+    55→
+    56→function toDateInput(d: Date | null): string {
+    57→  if (!d) return "";
+    58→  return formatDateISO(d);
+    59→}
+    60→
+    61→export function CalendarPlayground() {
+    62→  const meta = getComponent("calendar")!;
+    63→  const [state, setState] = React.useState<PlaygroundState>(DEFAULTS);
+    64→
+    65→  // Selection state mirrors the instance. These are updated from the
+    66→  // calendar's events so the Output panel reflects what the user picks.
+    67→  const [selectedDate, setSelectedDate] = React.useState<Date | null>(null);
+    68→  const [selectedRange, setSelectedRange] = React.useState<{ start: Date | null; end: Date | null }>({
+    69→    start: null,
+    70→    end: null,
+    71→  });
+    72→  const [selectedDates, setSelectedDates] = React.useState<Date[]>([]);
+    73→  const [viewLabel, setViewLabel] = React.useState<string>("");
+    74→
+    75→  const [activeTab, setActiveTab] = React.useState<
+    76→    "javascript" | "html" | "css" | "api"
+    77→  >("javascript");
+    78→  const instanceRef = React.useRef<Calendar | null>(null);
+    79→
+    80→  const update = React.useCallback(
+    81→    <K extends keyof PlaygroundState>(key: K, value: PlaygroundState[K]) => {
+    82→      setState((s) => ({ ...s, [key]: value }));
+    83→    },
+    84→    [],
+    85→  );
+    86→
+    87→  // Sync selection from the instance whenever the mode changes (so the output
+    88→  // panel doesn't show stale data from a different mode).
+    89→  const syncFromInstance = React.useCallback(() => {
+    90→    const inst = instanceRef.current;
+    91→    if (!inst) return;
+    92→    setSelectedDate(inst.getSelectedDate());
+    93→    setSelectedRange(inst.getSelectedRange());
+    94→    setSelectedDates(inst.getSelectedDates());
+    95→  }, []);
+    96→
+    97→  React.useEffect(() => {
+    98→    syncFromInstance();
+    99→  }, [state.mode, syncFromInstance]);
+   100→
+   101→  const onSelect = React.useCallback((p: CalendarEventPayload) => {
+   102→    setSelectedDate(p.selectedDate);
+   103→    setSelectedRange(p.selectedRange);
+   104→    setSelectedDates(p.selectedDates);
+   105→  }, []);
+   106→
+   107→  const onChange = React.useCallback((p: CalendarEventPayload) => {
+   108→    setSelectedDate(p.selectedDate);
+   109→    setSelectedRange(p.selectedRange);
+   110→    setSelectedDates(p.selectedDates);
+   111→    const v = p.viewDate;
+   112→    setViewLabel(`${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}`);
+   113→  }, []);
+   114→
+   115→  const onNavigate = React.useCallback((p: CalendarEventPayload) => {
+   116→    const v = p.viewDate;
+   117→    setViewLabel(`${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}`);
+   118→  }, []);
+   119→
+   120→  const reset = React.useCallback(() => {
+   121→    setState(DEFAULTS);
+   122→    setSelectedDate(null);
+   123→    setSelectedRange({ start: null, end: null });
+   124→    setSelectedDates([]);
+   125→    toast.success("Reset to defaults");
+   126→  }, []);
+   127→
+   128→  // ---- Code generation ----
+   129→  const jsCode = React.useMemo(() => generateJsCode(state), [state]);
+   130→  const htmlCode = React.useMemo(() => generateHtmlCode(), []);
+   131→  const cssCode = React.useMemo(() => generateCssCode(), []);
+   132→  const apiCode = React.useMemo(() => generateApiCode(), []);
+   133→
+   134→  // ---- Output chips ----
+   135→  const outputChips: { label: string; value: string }[] = React.useMemo(() => {
+   136→    if (state.mode === "single") {
+   137→      return [{ label: "selected", value: selectedDate ? formatDateISO(selectedDate) : "(none)" }];
+   138→    }
+   139→    if (state.mode === "range") {
+   140→      return [
+   141→        { label: "start", value: selectedRange.start ? formatDateISO(selectedRange.start) : "(none)" },
+   142→        { label: "end", value: selectedRange.end ? formatDateISO(selectedRange.end) : "(none)" },
+   143→      ];
+   144→    }
+   145→    // multi
+   146→    if (selectedDates.length === 0) return [{ label: "selected", value: "(none)" }];
+   147→    return selectedDates.map((d, i) => ({
+   148→      label: `#${i + 1}`,
+   149→      value: formatDateISO(d),
+   150→    }));
+   151→  }, [state.mode, selectedDate, selectedRange, selectedDates]);
+   152→
+   153→  return (
+   154→    <div>
+   155→      {/* Page header */}
+   156→      <div className="border-b border-border bg-background">
+   157→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   158→          <Breadcrumbs />
+   159→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   160→            <div>
+   161→              <PageOverline>Components / Inputs</PageOverline>
+   162→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+   163→                {meta.name}
+   164→              </h1>
+   165→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">
+   166→                {meta.longDescription}
+   167→              </p>
+   168→            </div>
+   169→            <div className="flex flex-wrap items-center gap-2">
+   170→              {meta.tags.map((tag) => (
+   171→                <span
+   172→                  key={tag}
+   173→                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground"
+   174→                >
+   175→                  {tag}
+   176→                </span>
+   177→              ))}
+   178→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   179→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />
+   180→                {meta.status}
+   181→              </span>
+   182→            </div>
+   183→          </div>
+   184→        </div>
+   185→      </div>
+   186→
+   187→      {/* Playground workspace */}
+   188→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   189→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px] lg:items-start">
+   190→          {/* Live preview */}
+   191→          <section
+   192→            aria-label="Live preview"
+   193→            className="panel relative flex h-[600px] flex-col overflow-hidden"
+   194→          >
+   195→            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+   196→              <div className="flex items-center gap-2">
+   197→                <span className="h-2 w-2 rounded-full bg-brand-lemon animate-pulse" />
+   198→                <span className="eyebrow">Live preview</span>
+   199→              </div>
+   200→              <div className="flex items-center gap-1">
+   201→                <span className="mr-2 font-mono text-[11px] text-muted-foreground/70">
+   202→                  {viewLabel || "—"}
+   203→                </span>
+   204→                <button
+   205→                  type="button"
+   206→                  onClick={reset}
+   207→                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   208→                >
+   209→                  <RotateCcw className="h-3 w-3" />
+   210→                  Reset
+   211→                </button>
+   212→              </div>
+   213→            </div>
+   214→            <div className="flex flex-1 min-h-0 items-center justify-center overflow-auto bg-grid p-8">
+   215→              <CalendarReact
+   216→                mode={state.mode}
+   217→                firstDayOfWeek={state.firstDayOfWeek}
+   218→                weekdayFormat={state.weekdayFormat}
+   219→                showWeekNumbers={state.showWeekNumbers}
+   220→                showTodayButton={state.showTodayButton}
+   221→                showAdjacentMonths={state.showAdjacentMonths}
+   222→                todayHighlight={state.todayHighlight}
+   223→                weekendHighlight={state.weekendHighlight}
+   224→                cellSize={state.cellSize}
+   225→                minDate={parseDateInput(state.minDate)}
+   226→                maxDate={parseDateInput(state.maxDate)}
+   227→                onSelect={onSelect}
+   228→                onChange={onChange}
+   229→                onNavigate={onNavigate}
+   230→                instanceRef={instanceRef}
+   231→              />
+   232→            </div>
+   233→            {/* Output section — selected date(s) */}
+   234→            <div className="border-t border-border p-4">
+   235→              <div className="mb-3 flex items-center justify-between">
+   236→                <span className="eyebrow">Output</span>
+   237→                <span className="font-mono text-[11px] text-muted-foreground">
+   238→                  {state.mode === "single"
+   239→                    ? selectedDate ? "1 selected" : "0 selected"
+   240→                    : state.mode === "range"
+   241→                    ? selectedRange.start && selectedRange.end ? "range complete" : "awaiting end"
+   242→                    : `${selectedDates.length} selected`}
+   243→                </span>
+   244→              </div>
+   245→              <div className="flex flex-col gap-2">
+   246→                <div className="flex flex-wrap items-center gap-2">
+   247→                  {outputChips.map((chip, i) => (
+   248→                    <CopyableValue key={i} label={chip.label} value={chip.value} />
+   249→                  ))}
+   250→                </div>
+   251→                <p className="text-[11px] text-muted-foreground/70">
+   252→                  Click a day to select it. {state.mode === "range" ? "Click twice to set start and end; hover for a live preview." : state.mode === "multi" ? "Click toggles each date in the selection set." : "Single-select mode — clicking replaces the selection."}
+   253→                </p>
+   254→              </div>
+   255→            </div>
+   256→          </section>
+   257→
+   258→          {/* Property inspector */}
+   259→          <AgentSkillTabs
+   260→            agentPath="/docs/components/calendar-AGENT.md"
+   261→            skillPath="/docs/components/calendar-SKILL.md"
+   262→          >
+   263→            <section>
+   264→              <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   265→                Selection
+   266→              </h3>
+   267→              <div className="flex flex-col gap-4">
+   268→                {/* Mode — 3-way */}
+   269→                <PropertyField label="Mode" hint="Selection behavior">
+   270→                  <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   271→                    {(["single", "range", "multi"] as const).map((m) => {
+   272→                      const active = state.mode === m;
+   273→                      return (
+   274→                        <button
+   275→                          key={m}
+   276→                          type="button"
+   277→                          onClick={() => update("mode", m)}
+   278→                          aria-pressed={active}
+   279→                          className={cn(
+   280→                            "flex items-center justify-center rounded px-2 py-2 text-[11px] font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   281→                            active
+   282→                              ? "bg-brand-purple-strong text-foreground"
+   283→                              : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   284→                          )}
+   285→                        >
+   286→                          {m}
+   287→                        </button>
+   288→                      );
+   289→                    })}
+   290→                  </div>
+   291→                </PropertyField>
+   292→              </div>
+   293→            </section>
+   294→
+   295→            <div className="h-px bg-border" />
+   296→
+   297→            <section>
+   298→              <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   299→                Layout
+   300→              </h3>
+   301→              <div className="flex flex-col gap-4">
+   302→                {/* First day of week — toggle */}
+   303→                <PropertyField label="First day of week" hint="Which weekday starts the row">
+   304→                  <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   305→                    {([
+   306→                      { value: 0, label: "Sunday" },
+   307→                      { value: 1, label: "Monday" },
+   308→                    ] as const).map((o) => {
+   309→                      const active = state.firstDayOfWeek === o.value;
+   310→                      return (
+   311→                        <button
+   312→                          key={o.value}
+   313→                          type="button"
+   314→                          onClick={() => update("firstDayOfWeek", o.value)}
+   315→                          aria-pressed={active}
+   316→                          className={cn(
+   317→                            "flex items-center justify-center rounded px-2 py-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   318→                            active
+   319→                              ? "bg-brand-purple-strong text-foreground"
+   320→                              : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   321→                          )}
+   322→                        >
+   323→                          {o.label}
+   324→                        </button>
+   325→                      );
+   326→                    })}
+   327→                  </div>
+   328→                </PropertyField>
+   329→
+   330→                {/* Weekday format — 3-way */}
+   331→                <PropertyField label="Weekday format" hint="Header label width">
+   332→                  <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   333→                    {(["narrow", "short", "long"] as const).map((f) => {
+   334→                      const active = state.weekdayFormat === f;
+   335→                      return (
+   336→                        <button
+   337→                          key={f}
+   338→                          type="button"
+   339→                          onClick={() => update("weekdayFormat", f)}
+   340→                          aria-pressed={active}
+   341→                          className={cn(
+   342→                            "flex items-center justify-center rounded px-2 py-2 text-[11px] font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   343→                            active
+   344→                              ? "bg-brand-purple-strong text-foreground"
+   345→                              : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   346→                          )}
+   347→                        >
+   348→                          {f}
+   349→                        </button>
+   350→                      );
+   351→                    })}
+   352→                  </div>
+   353→                </PropertyField>
+   354→
+   355→                {/* Cell size — slider */}
+   356→                <PropertyField label={`Cell size (${state.cellSize}px)`} hint="Pixel size of each day cell">
+   357→                  <input
+   358→                    type="range"
+   359→                    min={24}
+   360→                    max={60}
+   361→                    step={1}
+   362→                    value={state.cellSize}
+   363→                    onChange={(e) => update("cellSize", Number(e.target.value))}
+   364→                    className="w-full accent-brand-lemon"
+   365→                    aria-label="Cell size"
+   366→                  />
+   367→                  <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground/70">
+   368→                    <span>24</span>
+   369→                    <span>60</span>
+   370→                  </div>
+   371→                </PropertyField>
+   372→              </div>
+   373→            </section>
+   374→
+   375→            <div className="h-px bg-border" />
+   376→
+   377→            <section>
+   378→              <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   379→                Display
+   380→              </h3>
+   381→              <div className="flex flex-col gap-4">
+   382→                <PropertyField label="Week numbers" hint="Show ISO week-number column">
+   383→                  <Switch
+   384→                    checked={state.showWeekNumbers}
+   385→                    onChange={(v) => update("showWeekNumbers", v)}
+   386→                  />
+   387→                </PropertyField>
+   388→                <PropertyField label="Today button" hint="Show the Today shortcut in the header">
+   389→                  <Switch
+   390→                    checked={state.showTodayButton}
+   391→                    onChange={(v) => update("showTodayButton", v)}
+   392→                  />
+   393→                </PropertyField>
+   394→                <PropertyField label="Adjacent months" hint="Render prev/next-month days in trailing cells">
+   395→                  <Switch
+   396→                    checked={state.showAdjacentMonths}
+   397→                    onChange={(v) => update("showAdjacentMonths", v)}
+   398→                  />
+   399→                </PropertyField>
+   400→                <PropertyField label="Today highlight" hint="Bold today with a small lemon dot">
+   401→                  <Switch
+   402→                    checked={state.todayHighlight}
+   403→                    onChange={(v) => update("todayHighlight", v)}
+   404→                  />
+   405→                </PropertyField>
+   406→                <PropertyField label="Weekend highlight" hint="Apply the weekend color to Saturday/Sunday">
+   407→                  <Switch
+   408→                    checked={state.weekendHighlight}
+   409→                    onChange={(v) => update("weekendHighlight", v)}
+   410→                  />
+   411→                </PropertyField>
+   412→              </div>
+   413→            </section>
+   414→
+   415→            <div className="h-px bg-border" />
+   416→
+   417→            <section>
+   418→              <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   419→                Constraints
+   420→              </h3>
+   421→              <div className="flex flex-col gap-4">
+   422→                <PropertyField label="Min date" hint="Earliest selectable date">
+   423→                  <input
+   424→                    type="date"
+   425→                    value={state.minDate}
+   426→                    onChange={(e) => update("minDate", e.target.value)}
+   427→                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   428→                  />
+   429→                </PropertyField>
+   430→                <PropertyField label="Max date" hint="Latest selectable date">
+   431→                  <input
+   432→                    type="date"
+   433→                    value={state.maxDate}
+   434→                    onChange={(e) => update("maxDate", e.target.value)}
+   435→                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   436→                  />
+   437→                </PropertyField>
+   438→                <button
+   439→                  type="button"
+   440→                  onClick={() => {
+   441→                    update("minDate", "");
+   442→                    update("maxDate", "");
+   443→                  }}
+   444→                  className="inline-flex h-7 items-center justify-center gap-1.5 self-start rounded-md border border-border bg-background px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   445→                >
+   446→                  Clear constraints
+   447→                </button>
+   448→              </div>
+   449→            </section>
+   450→          </AgentSkillTabs>
+   451→        </div>
+   452→
+   453→        {/* Code panel */}
+   454→        <section className="panel mt-6 overflow-hidden">
+   455→          <div className="flex items-center justify-between border-b border-border px-2">
+   456→            <div className="flex">
+   457→              {([["javascript","JavaScript"],["html","HTML"],["css","CSS"],["api","API"]] as const).map(([key, label]) => (
+   458→                <button
+   459→                  key={key}
+   460→                  type="button"
+   461→                  onClick={() => setActiveTab(key)}
+   462→                  className={cn(
+   463→                    "relative h-9 px-3 text-[12px] font-medium transition-colors focus-visible:outline-none",
+   464→                    activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+   465→                  )}
+   466→                >
+   467→                  {label}
+   468→                  {activeTab === key && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   469→                </button>
+   470→              ))}
+   471→            </div>
+   472→            <span className="pr-2 text-[11px] font-mono text-muted-foreground/70">
+   473→              Synchronized with live configuration
+   474→            </span>
+   475→          </div>
+   476→          <div className="p-4">
+   477→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   478→            {activeTab === "html" && <CodeBlock code={htmlCode} language="html" filename="index.html" />}
+   479→            {activeTab === "css" && <CodeBlock code={cssCode} language="css" filename="styles.css" />}
+   480→            {activeTab === "api" && <CodeBlock code={apiCode} language="typescript" filename="api.ts" />}
+   481→          </div>
+   482→        </section>
+   483→
+   484→        {/* Documentation */}
+   485→        <ComponentDocumentation />
+   486→      </div>
+   487→    </div>
+   488→  );
+   489→}
+   490→
+   491→// ---- Inspector primitives ----
+   492→
+   493→function PropertyField({
+   494→  label,
+   495→  hint,
+   496→  children,
+   497→}: {
+   498→  label: string;
+   499→  hint?: string;
+   500→  children: React.ReactNode;
+   501→}) {
+   502→  return (
+   503→    <div>
+   504→      <div className="mb-1.5 flex items-center justify-between">
+   505→        <label className="text-[12px] font-medium text-foreground">{label}</label>
+   506→      </div>
+   507→      {children}
+   508→      {hint && <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p>}
+   509→    </div>
+   510→  );
+   511→}
+   512→
+   513→function Switch({
+   514→  checked,
+   515→  onChange,
+   516→}: {
+   517→  checked: boolean;
+   518→  onChange: (v: boolean) => void;
+   519→}) {
+   520→  return (
+   521→    <button
+   522→      type="button"
+   523→      role="switch"
+   524→      aria-checked={checked}
+   525→      onClick={() => onChange(!checked)}
+   526→      className={cn(
+   527→        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   528→        checked
+   529→          ? "border-brand-lemon bg-brand-lemon"
+   530→          : "border-border bg-muted",
+   531→      )}
+   532→    >
+   533→      <span
+   534→        className={cn(
+   535→          "inline-block h-3.5 w-3.5 transform rounded-full bg-foreground transition-transform",
+   536→          checked ? "translate-x-[18px] bg-[#17151D]" : "translate-x-[2px]",
+   537→        )}
+   538→      />
+   539→    </button>
+   540→  );
+   541→}
+   542→
+   543→// ---- Code generators ----
+   544→
+   545→function generateJsCode(state: PlaygroundState): string {
+   546→  const lines: string[] = [];
+   547→  lines.push(`import { Calendar } from "@workshop/calendar";`);
+   548→  lines.push(``);
+   549→  lines.push(`const container = document.querySelector("#calendar");`);
+   550→  lines.push(``);
+   551→  lines.push(`const cal = new Calendar(container, {`);
+   552→  lines.push(`  mode: "${state.mode}",`);
+   553→  if (state.firstDayOfWeek !== 0) lines.push(`  firstDayOfWeek: ${state.firstDayOfWeek},`);
+   554→  if (state.weekdayFormat !== "short") lines.push(`  weekdayFormat: "${state.weekdayFormat}",`);
+   555→  if (state.showWeekNumbers) lines.push(`  showWeekNumbers: true,`);
+   556→  if (!state.showTodayButton) lines.push(`  showTodayButton: false,`);
+   557→  if (!state.showAdjacentMonths) lines.push(`  showAdjacentMonths: false,`);
+   558→  if (!state.todayHighlight) lines.push(`  todayHighlight: false,`);
+   559→  if (state.weekendHighlight) lines.push(`  weekendHighlight: true,`);
+   560→  if (state.cellSize !== 36) lines.push(`  cellSize: ${state.cellSize},`);
+   561→  if (state.minDate) lines.push(`  minDate: new Date("${state.minDate}T00:00:00"),`);
+   562→  if (state.maxDate) lines.push(`  maxDate: new Date("${state.maxDate}T00:00:00"),`);
+   563→  lines.push(`});`);
+   564→  lines.push(``);
+   565→  lines.push(`cal.on("select", (payload) => {`);
+   566→  lines.push(`  // Fires when the user clicks a day`);
+   567→  lines.push(`  console.log("date:", payload.date);`);
+   568→  if (state.mode === "single") {
+   569→    lines.push(`  console.log("selected:", payload.selectedDate);`);
+   570→  } else if (state.mode === "range") {
+   571→    lines.push(`  const { start, end } = payload.selectedRange;`);
+   572→    lines.push(`  if (start && end) console.log(start, "->", end);`);
+   573→  } else {
+   574→    lines.push(`  console.log("selected:", payload.selectedDates);`);
+   575→  }
+   576→  lines.push(`});`);
+   577→  lines.push(``);
+   578→  lines.push(`cal.on("navigate", (payload) => {`);
+   579→  lines.push(`  // Fires when the visible month changes`);
+   580→  lines.push(`  console.log("view:", payload.viewDate);`);
+   581→  lines.push(`});`);
+   582→  lines.push(``);
+   583→  lines.push(`cal.on("change", (payload) => {`);
+   584→  lines.push(`  // Fires on any selection or view change (user or programmatic)`);
+   585→  lines.push(`});`);
+   586→  lines.push(``);
+   587→  lines.push(`// Programmatic control`);
+   588→  if (state.mode === "single") {
+   589→    lines.push(`// cal.setSelectedDate(new Date(2024, 5, 15));`);
+   590→  } else if (state.mode === "range") {
+   591→    lines.push(`// cal.setSelectedRange(new Date(2024, 5, 1), new Date(2024, 5, 30));`);
+   592→  } else {
+   593→    lines.push(`// cal.setSelectedDates([new Date(2024, 5, 1), new Date(2024, 5, 15)]);`);
+   594→  }
+   595→  lines.push(`// cal.setMode("range");`);
+   596→  lines.push(`// cal.setFirstDayOfWeek(1); // Monday`);
+   597→  lines.push(`// cal.setShowWeekNumbers(true);`);
+   598→  lines.push(`// cal.setCellSize(40);`);
+   599→  lines.push(`// cal.today(); // jump to current month, today selected`);
+   600→  lines.push(`// cal.destroy();`);
+   601→  return lines.join("\n");
+   602→}
+   603→
+   604→function generateHtmlCode(): string {
+   605→  return `<!DOCTYPE html>
+   606→<html>
+   607→  <head><link rel="stylesheet" href="calendar.css" /></head>
+   608→  <body>
+   609→    <div id="calendar"></div>
+   610→    <script type="module" src="init.js"></script>
+   611→  </body>
+   612→</html>`;
+   613→}
+   614→
+   615→function generateCssCode(): string {
+   616→  return `/* The component ships its own scoped styles (.calendar-* prefix).
+   617→   Override the visual tokens below to customize appearance. */
+   618→
+   619→:root {
+   620→  /* Brand tokens used by the component */
+   621→  --brand-lemon: #D9FF66;
+   622→  --brand-lemon-hover: #C8F34F;
+   623→}
+   624→
+   625→/* Calendar surface tokens (override on the host element) */
+   626→.calendar {
+   627→  --calendar-bg: #15131c;
+   628→  --calendar-fg: #F4F1FF;
+   629→  --calendar-border: #2a2438;
+   630→  --calendar-muted: #8a8298;
+   631→  --calendar-muted-strong: #b09cd6;
+   632→}
+   633→
+   634→/* Example: hide today's dot when today is selected */
+   635→.calendar__day--today.calendar__day--selected::after {
+   636→  background: #17151D;
+   637→}
+   638→
+   639→/* Example: customize the range preview tint */
+   640→.calendar__day--preview {
+   641→  background: rgba(217, 255, 102, 0.10);
+   642→  border-color: rgba(217, 255, 102, 0.16);
+   643→}`;
+   644→}
+   645→
+   646→function generateApiCode(): string {
+   647→  return `type CalendarMode = "single" | "range" | "multi";
+   648→type WeekdayFormat = "narrow" | "short" | "long";
+   649→
+   650→interface CalendarRange {
+   651→  start: Date | null;
+   652→  end: Date | null;
+   653→}
+   654→
+   655→interface CalendarOptions {
+   656→  // Date selection
+   657→  selectedDate?: Date | null;
+   658→  minDate?: Date;
+   659→  maxDate?: Date;
+   660→  // Multi-selection
+   661→  mode?: CalendarMode;                 // default "single"
+   662→  selectedRange?: CalendarRange;
+   663→  selectedDates?: Date[];              // for multi mode
+   664→  // Display
+   665→  firstDayOfWeek?: number;             // 0=Sunday, 1=Monday. Default 0
+   666→  weekdayFormat?: WeekdayFormat;       // default "short"
+   667→  showWeekNumbers?: boolean;           // default false
+   668→  showTodayButton?: boolean;           // default true
+   669→  showAdjacentMonths?: boolean;        // default true
+   670→  // Behavior
+   671→  disabledDates?: Date[];
+   672→  disabledDaysOfWeek?: number[];       // 0–6
+   673→  // Visual
+   674→  todayHighlight?: boolean;            // default true
+   675→  weekendHighlight?: boolean;          // default false
+   676→  // Size
+   677→  cellSize?: number;                   // default 36
+   678→}
+   679→
+   680→interface CalendarEventPayload {
+   681→  date: Date | null;
+   682→  selectedDate: Date | null;
+   683→  selectedRange: CalendarRange;
+   684→  selectedDates: Date[];
+   685→  viewDate: Date;
+   686→  mode: CalendarMode;
+   687→  source: "select" | "navigate" | "programmatic";
+   688→}
+   689→
+   690→class Calendar {
+   691→  constructor(container: HTMLElement, options?: CalendarOptions);
+   692→  getSelectedDate(): Date | null;
+   693→  getSelectedRange(): CalendarRange;
+   694→  getSelectedDates(): Date[];
+   695→  setSelectedDate(date: Date | null): void;
+   696→  setSelectedRange(start: Date | null, end: Date | null): void;
+   697→  setSelectedDates(dates: Date[]): void;
+   698→  setMode(mode: CalendarMode): void;
+   699→  setMinDate(date: Date): void;
+   700→  setMaxDate(date: Date): void;
+   701→  setFirstDayOfWeek(day: number): void;
+   702→  setShowWeekNumbers(on: boolean): void;
+   703→  setCellSize(n: number): void;
+   704→  today(): void;
+   705→  on(event: "select" | "change" | "navigate",
+   706→     handler: (payload: CalendarEventPayload) => void): void;
+   707→  off(event: string, handler: Function): void;
+   708→  destroy(): void;
+   709→}
+   710→
+   711→// Events
+   712→//   "select"   — fires when the user clicks an enabled day
+   713→//   "change"   — fires on any selection or view change (user or programmatic)
+   714→//   "navigate" — fires when the visible month changes
+   715→
+   716→// Selection modes
+   717→//   "single" — clicking a date selects it (deselects previous)
+   718→//   "range"  — first click sets start, second click sets end.
+   719→//              If end < start, swap them. Hovering after start shows preview.
+   720→//   "multi"  — clicking toggles a date in the selection set`;
+   721→}
+   722→
+   723→// ---- Documentation ----
+   724→
+   725→function ComponentDocumentation() {
+   726→  const meta = getComponent("calendar")!;
+   727→  return (
+   728→    <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_200px]">
+   729→      <div className="min-w-0 max-w-[760px]">
+   730→        <h2 className="text-2xl font-semibold tracking-tight">Documentation</h2>
+   731→        <p className="mt-2 text-sm text-muted-foreground">
+   732→          The Calendar is a framework-independent vanilla JavaScript component — no React or Next.js required, and no external date library.
+   733→        </p>
+   734→
+   735→        <section className="mt-8">
+   736→          <h3 className="text-lg font-semibold">Overview</h3>
+   737→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   738→            {meta.longDescription} Click any day to select it. The header carries prev/next month buttons and an optional Today shortcut. The grid is always six rows tall so the calendar's height is stable across months.
+   739→          </p>
+   740→        </section>
+   741→
+   742→        <section className="mt-8">
+   743→          <h3 className="text-lg font-semibold">When to use it</h3>
+   744→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   745→            {meta.whenToUse.map((item) => (
+   746→              <li key={item} className="flex gap-2">
+   747→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   748→                {item}
+   749→              </li>
+   750→            ))}
+   751→          </ul>
+   752→        </section>
+   753→
+   754→        <section className="mt-8">
+   755→          <h3 className="text-lg font-semibold">When not to use it</h3>
+   756→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   757→            {meta.whenNotToUse.map((item) => (
+   758→              <li key={item} className="flex gap-2">
+   759→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
+   760→                {item}
+   761→              </li>
+   762→            ))}
+   763→          </ul>
+   764→        </section>
+   765→
+   766→        <section className="mt-8">
+   767→          <h3 className="text-lg font-semibold">Selection modes</h3>
+   768→          <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+   769→            <div className="rounded-md border border-border bg-muted/20 p-3">
+   770→              <code className="font-mono text-[12px] text-brand-lemon">single</code>
+   771→              <p className="mt-1 text-[13px]">Clicking a date selects it and deselects the previous selection. The most common mode for booking a single date.</p>
+   772→            </div>
+   773→            <div className="rounded-md border border-border bg-muted/20 p-3">
+   774→              <code className="font-mono text-[12px] text-brand-lemon">range</code>
+   775→              <p className="mt-1 text-[13px]">First click sets the start, second click sets the end. If end precedes start, the two are swapped. Between clicks, hovering a day highlights the would-be range as a preview.</p>
+   776→            </div>
+   777→            <div className="rounded-md border border-border bg-muted/20 p-3">
+   778→              <code className="font-mono text-[12px] text-brand-lemon">multi</code>
+   779→              <p className="mt-1 text-[13px]">Clicking a date toggles it in the selection set. Use for picking multiple non-contiguous dates (holidays, scheduling, etc.).</p>
+   780→            </div>
+   781→          </div>
+   782→        </section>
+   783→
+   784→        <section className="mt-8">
+   785→          <h3 className="text-lg font-semibold">Properties and defaults</h3>
+   786→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   787→            <table className="w-full text-left text-[13px]">
+   788→              <thead className="bg-muted/30">
+   789→                <tr>
+   790→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Property</th>
+   791→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Type</th>
+   792→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Default</th>
+   793→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Description</th>
+   794→                </tr>
+   795→              </thead>
+   796→              <tbody className="divide-y divide-border">
+   797→                {meta.properties.map((p) => (
+   798→                  <tr key={p.name}>
+   799→                    <td className="px-3 py-2 font-mono text-brand-lemon">{p.name}</td>
+   800→                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.type}</td>
+   801→                    <td className="px-3 py-2 font-mono text-foreground">{p.default}</td>
+   802→                    <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
+   803→                  </tr>
+   804→                ))}
+   805→              </tbody>
+   806→            </table>
+   807→          </div>
+   808→        </section>
+   809→
+   810→        <section className="mt-8">
+   811→          <h3 className="text-lg font-semibold">Methods</h3>
+   812→          <div className="mt-3 space-y-2">
+   813→            {meta.methods.map((m) => (
+   814→              <div key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   815→                <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   816→                <p className="mt-1 text-[13px] text-muted-foreground">{m.description}</p>
+   817→                {m.returns && (
+   818→                  <p className="mt-0.5 text-[11px] font-mono text-muted-foreground/70">
+   819→                    returns: {m.returns}
+   820→                  </p>
+   821→                )}
+   822→              </div>
+   823→            ))}
+   824→          </div>
+   825→        </section>
+   826→
+   827→        <section className="mt-8">
+   828→          <h3 className="text-lg font-semibold">Events</h3>
+   829→          <div className="mt-3 space-y-2">
+   830→            {meta.events.map((e) => (
+   831→              <div key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   832→                <div className="flex items-center gap-3">
+   833→                  <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   834→                  <code className="font-mono text-[11px] text-muted-foreground">{e.payload}</code>
+   835→                </div>
+   836→                <p className="mt-1 text-[13px] text-muted-foreground">{e.description}</p>
+   837→              </div>
+   838→            ))}
+   839→          </div>
+   840→        </section>
+   841→
+   842→        <section className="mt-8">
+   843→          <h3 className="text-lg font-semibold">Accessibility</h3>
+   844→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   845→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />The root has <code className="font-mono text-brand-lemon">role=&quot;group&quot;</code> and an aria-label of &quot;Calendar&quot;.</li>
+   846→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Each day is a real <code className="font-mono text-brand-lemon">&lt;button&gt;</code> with an aria-label of the form &quot;January 5, 2024&quot;.</li>
+   847→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Selected days set <code className="font-mono text-brand-lemon">aria-selected=&quot;true&quot;</code>.</li>
+   848→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Disabled days use <code className="font-mono text-brand-lemon">disabled</code> and <code className="font-mono text-brand-lemon">aria-disabled=&quot;true&quot;</code>.</li>
+   849→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />The title has <code className="font-mono text-brand-lemon">aria-live=&quot;polite&quot;</code> so month changes are announced.</li>
+   850→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Keyboard: Arrow keys move by day/week, PageUp/PageDown by month (Shift = year), Home/End to first/last day of week, Enter/Space to select.</li>
+   851→          </ul>
+   852→        </section>
+   853→
+   854→        <section className="mt-8">
+   855→          <h3 className="text-lg font-semibold">Date math</h3>
+   856→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   857→            The calendar uses only the native <code className="font-mono text-brand-lemon">Date</code> object. All comparisons strip time via local-midnight normalization. Week numbers follow ISO 8601: week 1 contains the first Thursday of the year, and Monday is the first day of the week.
+   858→          </p>
+   859→        </section>
+   860→      </div>
+   861→
+   862→      <aside className="hidden lg:block">
+   863→        <div className="sticky top-20">
+   864→          <span className="eyebrow mb-2 block">On this page</span>
+   865→          <nav className="space-y-1 text-[12px]">
+   866→            {["Overview", "When to use it", "When not to use it", "Selection modes", "Properties and defaults", "Methods", "Events", "Accessibility", "Date math"].map((s) => (
+   867→              <a
+   868→                key={s}
+   869→                href="#"
+   870→                onClick={(e) => e.preventDefault()}
+   871→                className="block rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+   872→              >
+   873→                {s}
+   874→              </a>
+   875→            ))}
+   876→          </nav>
+   877→        </div>
+   878→      </aside>
+   879→    </div>
+   880→  );
+   881→}
+   882→

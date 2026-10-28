@@ -1,0 +1,300 @@
+- Vanilla TS Calendar is complete and self-contained (no React/Next.js imports, no external date library). Files produced:
+  - `src/lib/components/calendar/calendar.ts` — `Calendar` class (DOM + scoped CSS, pointer + keyboard, three selection modes, range preview, week numbers, min/max, per-date/per-weekday disables, today/weekend highlight, configurable cell size, public API, idempotent destroy).
+  - `src/lib/components/calendar/index.ts` — public barrel.
+  - `src/lib/components/calendar/AGENT.md` + `SKILL.md` — contribution guide + usage docs.
+  - `public/docs/components/calendar-AGENT.md` + `calendar-SKILL.md` — copies for the playground's AGENT/SKILL tabs.
+  - `src/components/calendar/calendar-react.tsx` — React wrapper (create-once, imperative forwarding, ISO-key dedupe).
+  - `src/components/calendar/calendar-playground.tsx` — full playground (live canvas + AgentSkillTabs properties panel + output chips + JS/HTML/CSS/API code panel + documentation).
+- Public API surface (final):
+  - `new Calendar(container, options?: CalendarOptions)`
+  - `getSelectedDate()` / `getSelectedRange()` / `getSelectedDates()`
+  - `setSelectedDate(date | null)` / `setSelectedRange(start, end)` / `setSelectedDates(dates)`
+  - `setMode(mode)` / `setMinDate(date)` / `setMaxDate(date)` / `setFirstDayOfWeek(day)` / `setShowWeekNumbers(on)` / `setCellSize(n)` / `today()`
+  - `on("select" | "change" | "navigate", handler)` / `off(event, handler)` / `destroy()`
+  - `CalendarEventPayload = { date, selectedDate, selectedRange, selectedDates, viewDate, mode, source }`
+- Routing: `component/inputs/calendar` → `<CalendarPlayground />`. The navigation store's `routeLabel` returns "Calendar" for that slug.
+- Design discipline: only brand lemon used for selection/range/preview/today-dot; no indigo, no blue, no emojis, no test files. The calendar's host-override tokens (`--calendar-bg`, `--calendar-fg`, `--calendar-border`, `--calendar-muted`, `--calendar-muted-strong`) make it themeable on light/dark surfaces without code changes.
+- Ready for use as the date picker in any future inspector, form, or booking panel.
+
+---
+Task ID: 38 (summary)
+Agent: main + subagent
+Task: Mark NodesGraph as unstable + build full-options Calendar
+
+Work Log:
+- **Marked NodesGraph as "unstable"**: Changed `status: "stable"` to `status: "unstable"` in content.ts for the nodes-graph component. Added "Experimental" tag. Updated navigation.ts routeLabel to show "Nodes Graph (Unstable)" in breadcrumbs. The component has known interaction conflicts (path selection, drag-to-connect vs resize) that need further work.
+- **Built Calendar component** (`src/lib/components/calendar/calendar.ts`, ~870 lines): A full-featured date picker calendar with:
+  - Three selection modes: single, range (with hover preview), multi (toggle)
+  - Configurable first day of week (Sunday/Monday)
+  - Weekday format: narrow/short/long
+  - Week numbers (ISO)
+  - Min/max date constraints
+  - Per-date and per-weekday disables
+  - Today highlight, weekend highlight
+  - Adjacent month days (configurable)
+  - Configurable cell size (24-60px)
+  - Today button
+  - Full keyboard navigation (Arrows, PageUp/Down, Home/End, Enter/Space)
+  - Scoped CSS with `--calendar-*` custom properties
+  - DOM-based (no canvas, no external date library)
+  - Full public API: getSelectedDate/Range/Dates, setMode, setMinDate, setMaxDate, setFirstDayOfWeek, setShowWeekNumbers, setCellSize, today, on/off, destroy
+- **React wrapper + playground**: Full playground with fixed h-[600px] live canvas, AgentSkillTabs properties panel (Selection/Layout/Display/Constraints sections), output chips for selected dates, code panel (JS/HTML/CSS/API), and documentation.
+- VLM-verified: Calendar renders with 114 day cells, properties/AGENT/SKILL tabs present.
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- NodesGraph is now categorized as "unstable" in the content metadata and navigation.
+- New Calendar component established with full options: single/range/multi selection, week numbers, min/max constraints, keyboard navigation, configurable display.
+- Appears in sidebar under Inputs → Calendar.
+
+---
+Task ID: 39
+Agent: main
+Task: Rebuild Calendar from scratch using simplified spec
+
+Work Log:
+- **Deleted old Calendar files** and rebuilt from scratch following the new simplified spec.
+- **Calendar class** (`src/lib/components/calendar/calendar.ts`): Single-file vanilla TS implementation with:
+  - Pure date math (no Date object for date-only values — avoids TZ issues): `isLeap`, `daysInMonth`, `dayOfWeek`, `compareDate`, `isBetween`, `addMonths`, `addDays`, `weekNumber`, `today`.
+  - `CalendarDate = { year, month, day }` — date-only, no timezone.
+  - 4 selection modes: none, single, multiple, range (with hover preview and auto-swap).
+  - Separated value (selection) vs view_date (displayed period) — navigating months doesn't change selection.
+  - Grid: 6×7, stable height, outside-month dates configurable (show/hide/disabled).
+  - Cell states with visual precedence: selected > range-start/end > in-range > focused > today > hover/preview > default > outside.
+  - Disabled dates: min/max bounds + explicit disabled list.
+  - Week numbers (ISO), configurable week start (0-6), weekday format (narrow/short/long).
+  - Navigation: prev/next month, today button, clear button.
+  - Keyboard: Arrows (day/week), Home/End (week bounds), PageUp/Down (month), Shift+PageUp/Down (year), Enter/Space (select), Escape (cancel range).
+  - Events: selection_changed, view_changed, date_selected, range_changed, focused_date_changed, validation_failed, today_requested, clear_requested.
+  - Commands: setProperty, navigate, navigateTo, selectDate, setSelection, clearSelection, focusDate, getValue, getRange, getSelectedDates, destroy.
+  - Scoped CSS with `--cal-*` custom properties, lemon accent, dark theme.
+- **React wrapper**: Create-once mount, imperative property forwarding, callback refs.
+- **Playground**: Fixed h-[600px] live canvas, AgentSkillTabs properties panel (selection mode, weekday format, week start, cell size, 9 toggle switches), output chips showing selection, code panel, documentation.
+- AGENT.md + SKILL.md created and copied to public/docs.
+- VLM-verified: 42 day cells, 2 nav buttons, Properties/AGENT/SKILL tabs present.
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- Calendar rebuilt from scratch per the simplified spec. Clean single-file architecture with pure date math, 4 selection modes, keyboard navigation, full event system, and scoped CSS.
+
+---
+Task ID: 2
+Agent: main
+Task: Build Kanban Board component (vanilla JS + React wrapper + playground) following the spec in /home/z/my-project/upload/Pasted Content_1792693914490.txt
+
+Work Log:
+- Read the spec file (521 lines) covering purpose, modes, layout, properties, states, interactions, drag-and-drop sequence, events, commands, data/ordering rules, accessibility, extensions, implementation boundaries, and the §14 minimum viable specification.
+- Read existing calendar component (kanban.ts ~870 lines, calendar-react.tsx, calendar-playground.tsx, AGENT.md, SKILL.md) as a structural template — single-file vanilla TS class with scoped CSS injection, create-once React wrapper, full playground with AgentSkillTabs + CodeBlock + documentation.
+- Read existing platform files: content.ts (components array, categories, plannedComponents), navigation.ts (routeLabel + categoryLabel + breadcrumbs), page.tsx (route switcher), agent-skill-tabs.tsx, code-block.tsx, breadcrumbs.tsx, globals.css (design tokens, dark theme defaults).
+- Created `src/lib/components/kanban/kanban.ts` (~960 lines):
+  - Public types: `KanbanMode`, `KanbanLayout`, `KanbanCardLayout`, `KanbanPriority`, `KanbanItem`, `KanbanColumn`, `KanbanOptions`, `KanbanEventPayload`, `KanbanHandler`.
+  - Scoped CSS injected once (id `kanban-styles`) with `.kanban-` prefix and `--kb-*` custom properties. Only the brand lemon (#D9FF66) is used as the accent. Honors `prefers-reduced-motion`.
+  - `KanbanBoard` class with the full public API from the task spec: constructor, setItems, setColumns, selectItem, clearSelection, moveItem, reorderItem, createItem, updateItem, removeItem, collapseColumn, expandColumn, getItems, getColumns, getSelectedItem, setProperty, on, off, destroy.
+  - Internal: flat `items[]` array; per-column order is array order filtered by `columnId`. `moveItem` removes + re-inserts at the target position derived from the target column's current list (after removal); position is clamped to `[0, column.length]`.
+  - Move validation: rejects with stable reason vocabulary (`read_only`, `invalid_item`, `invalid_target`, `cross_column_disabled`, `reorder_disabled`, `column_limit`). Item-limit check counts the dragged item only when entering from a different column.
+  - Drag-and-drop via HTML5 DnD API: dragstart stores dragItemId + dragSourceColumnId, adds `.kanban-dragging`; dragenter/dragover on column body compute target column + position (midpoint of each card relative to cursor Y, or X in vertical layout), highlight target column (`.kanban-drop-target` or `.kanban-drop-invalid`), render the lemon drop indicator at the computed position, emit `drop_target_changed`; dragleave clears only when actually leaving the column; drop validates → calls moveItem or emits `item_move_rejected`; dragend emits `drag_cancelled` if no drop happened.
+  - Keyboard model: cards are `tabindex="0"` + `role="button"`. Space selects; Enter activates (emits `item_activated`); ArrowUp/Down reorders within column (focus preserved); ArrowLeft/Right moves to next non-collapsed column; M opens the Move-to popover (accessible alternative to drag); Delete/Backspace emits `item_delete_requested`; Escape closes popover + clears selection.
+  - Move-to popover: a small fixed-position menu listing every column with its color dot; the current column is disabled and marked "(current)"; a "Request delete" entry is included. Click-outside and Escape close it; focus is restored to the originating card.
+  - Read-only mode: cards not draggable, Move/Add buttons hidden, collapse button hidden, selection still allowed for inspection, moveItem rejects with `read_only`.
+  - Empty columns: `.kanban-empty` placeholder ("Drop cards here" / "No items") shown when `allowEmptyColumns` is true. Placeholder is removed during a drag so the drop indicator has a clean spot.
+  - Events emitted: `item_selected`, `selection_changed`, `item_activated`, `item_create_requested`, `item_moved`, `item_move_rejected`, `item_reordered`, `item_delete_requested`, `drag_started`, `drag_cancelled`, `drop_target_changed`, `column_selected`. All carry a consistent `KanbanEventPayload` shape with `type` field and old/new column + position.
+- Created `src/lib/components/kanban/index.ts` — barrel re-exporting `KanbanBoard` class and all public types.
+- Created `src/lib/components/kanban/AGENT.md` (architecture, ordering model, rendering lifecycle, selection, move validation, drag-and-drop sequence, keyboard model, Move-to popover, read-only behavior, empty columns, public API, events, known issues) and `src/lib/components/kanban/SKILL.md` (installation, quick start, options table, item/column shapes, methods table, events table, keyboard shortcuts, React example, integration notes).
+- Copied both docs to `public/docs/components/kanban-AGENT.md` and `public/docs/components/kanban-SKILL.md` so the AgentSkillTabs AGENT/SKILL tabs can fetch them.
+- Created `src/components/kanban/kanban-react.tsx`: React wrapper around the vanilla `KanbanBoard`. Create-once mount effect captures initial items/columns via refs; callback handlers are kept in a ref so listeners don't need re-attaching; each option prop is forwarded via `setProperty` in its own effect with an `undefined` guard; items/columns are forwarded via `setItems`/`setColumns` when the array reference changes; exposes an `instanceRef` so the playground can call imperative methods (createItem, removeItem, clearSelection) for the quick-action buttons.
+- Created `src/components/kanban/kanban-playground.tsx`: the full component detail page.
+  - Page header: Breadcrumbs → PageOverline "Components / Productivity" → H1 "Kanban Board" → longDescription → tag chips + status badge.
+  - Live preview (fixed `h-[600px]`): a header bar (KanbanSquare icon + "Live canvas" + item/column count + Reset button), the KanbanReact board on a `bg-grid` panel, and an output section showing a copyable "Selected" chip plus per-column count chips (with color dots) and a last-event line. Includes a keyboard hint about M and Delete.
+  - Property inspector uses `AgentSkillTabs` with the Properties tab containing:
+    - **Mode**: 2-way (editable / read_only).
+    - **Layout**: 2-way (horizontal / vertical).
+    - **Card layout**: 3-way (compact / standard / detailed).
+    - **Toggles**: dragEnabled, reorderWithinColumn, moveBetweenColumns, showCardBorder, showItemCount, showDropPreview — all Switch-style buttons with lemon active state.
+    - **Sliders**: columnWidth (220-400, step 10), cardGap (2-20, step 1), columnGap (4-32, step 1) — all with lemon gradient fill and mono min/max labels.
+    - **Quick actions**: "Add to To Do" (calls createItem), "Remove selected" (calls removeItem, errors via toast if no selection).
+  - AGENT and SKILL tabs fetch `/docs/components/kanban-AGENT.md` and `/docs/components/kanban-SKILL.md` respectively (handled by `AgentSkillTabs`).
+  - Code panel: JavaScript / HTML / CSS / API tabs. The JavaScript tab is generated from the live playground state (mode, layout, cardLayout, all toggles, columnWidth, cardGap, columnGap) so the snippet always matches what's on screen. HTML/CSS/API tabs are static reference (HTML host, CSS token overrides, full API surface + event list).
+  - Documentation section: Overview + whenToUse/whenNotToUse, Properties table (16 rows), Methods cards (12), Events cards (12), Accessibility bullets. Sticky "On this page" sidebar on large screens.
+  - Seed data: 3 columns (To Do #B8B2CA, In Progress #D9FF66, Done #8FE3A5 — all `allowAddItem: true`) and 7 sample items with varied titles, descriptions, labels, priorities, and assignees spread across the columns.
+  - Toast feedback: success on create/delete, info on activate, error on move-rejected (with reason + target). `sonner` is used per the project convention.
+- Wired the platform:
+  - `src/lib/platform/content.ts`: appended a `kanban` ComponentMeta to the END of the `components` array (after nodes-graph). Slug "kanban", name "Kanban Board", category "productivity", status "stable", 16 properties, 18 methods, 12 events, and a defaults block.
+  - `src/store/navigation.ts`: extended `routeLabel`'s `component` branch with `route.slug === "kanban" ? "Kanban Board"`; extended `categoryLabel` with `case "productivity": return "Project Management & Productivity"`.
+  - `src/app/page.tsx`: imported `KanbanPlayground` and added a `route.category === "productivity" && route.slug === "kanban"` branch to `renderRoute`'s `component` case (with a `// Productivity category components.` comment matching the pattern of other categories).
+- Ran `bun run lint` — initially 1 warning (unused eslint-disable directive on the create-once effect's exhaustive-deps); removed the directive and re-ran → 0 errors, 0 warnings. The create-once effect doesn't need the directive because all dependencies are read from refs (initialItemsRef, initialColumnsRef, cbRef) and the option values are forwarded in their own effects.
+- Ran `bunx tsc --noEmit` — no type errors in any of the new kanban files (the only TS errors reported are pre-existing in unrelated files: examples/websocket, skills/image-edit, skills/stock-analysis-skill, color-circle/calendar/platform — none touch the kanban code).
+- Verified via curl: `GET /` returns 200 and `GET /docs/components/kanban-AGENT.md` and `/docs/components/kanban-SKILL.md` both return 200. Dev log shows successful compilation with no errors.
+
+Stage Summary:
+- Vanilla TS KanbanBoard is complete and self-contained (no React/Next.js imports, no external libraries). Files produced:
+  - `src/lib/components/kanban/kanban.ts` — `KanbanBoard` class (DOM + scoped CSS, HTML5 drag-and-drop with lemon drop indicator, keyboard navigation with Move-to popover, full move validation with stable reason vocabulary, read-only mode, item limits, column collapse, public API, idempotent destroy).
+  - `src/lib/components/kanban/index.ts` — public barrel.
+  - `src/lib/components/kanban/AGENT.md` + `SKILL.md` — contribution guide + usage docs.
+  - `public/docs/components/kanban-AGENT.md` + `kanban-SKILL.md` — copies for the playground's AGENT/SKILL tabs.
+  - `src/components/kanban/kanban-react.tsx` — React wrapper (create-once, imperative forwarding, callback refs, undefined-guarded setProperty effects).
+  - `src/components/kanban/kanban-playground.tsx` — full playground (live canvas + AgentSkillTabs properties panel + output chips + JS/HTML/CSS/API code panel + documentation).
+- Public API surface (final):
+  - `new KanbanBoard(container, options?: KanbanOptions)`
+  - `setItems(items)` / `setColumns(columns)` / `getItems()` / `getColumns()`
+  - `selectItem(id | null, source?)` / `clearSelection()` / `getSelectedItem()`
+  - `moveItem(itemId, targetColumnId, position, source?)` / `reorderItem(itemId, position, source?)`
+  - `createItem(columnId, partial)` → string / `updateItem(itemId, changes)` / `removeItem(itemId)`
+  - `collapseColumn(id)` / `expandColumn(id)`
+  - `setProperty(name, value)` / `on(event, handler)` / `off(event, handler)` / `destroy()`
+- Events: `item_selected`, `selection_changed`, `item_activated`, `item_create_requested`, `item_moved`, `item_move_rejected` (with reason vocabulary: read_only, invalid_item, invalid_target, cross_column_disabled, reorder_disabled, column_limit), `item_reordered`, `item_delete_requested`, `drag_started`, `drag_cancelled`, `drop_target_changed`, `column_selected`.
+- Routing: `component/productivity/kanban` → `<KanbanPlayground />`. The navigation store's `routeLabel` returns "Kanban Board" for that slug and `categoryLabel` returns "Project Management & Productivity" for the productivity category. Breadcrumbs render correctly: Home / Components / Project Management & Productivity / Kanban Board.
+- Design discipline: only the brand lemon (#D9FF66) is used as the accent — for selected cards, focus rings, drop indicators, drop-target column borders, count chips at-limit (red destructive only for over-limit count badge and the "Request delete" popover entry), and slider fills. No indigo, no blue, no emojis, no test files. Scoped `.kanban-` CSS uses `--kb-*` custom properties so the board can be rethemed by overriding tokens on the `.kanban-board` host.
+- Appears in the sidebar under Productivity → Kanban Board. The first component in the productivity category.
+
+---
+Task ID: 40 (summary)
+Agent: main + subagent
+Task: Add Productivity category + build Kanban component per spec
+
+Work Log:
+- **New category**: Added "Project Management & Productivity" (slug: "productivity") to content.ts categories with icon "KanbanSquare".
+- **Kanban component** (`src/lib/components/kanban/kanban.ts`, ~960 lines): A full Kanban board per the spec's minimum viable spec (§14):
+  - Configurable columns and ordered cards with generic item records (stable IDs).
+  - HTML5 drag-and-drop with lemon drop indicator line, move validation, item limits.
+  - Reordering within columns and moving between columns.
+  - Empty columns as valid drop targets, invalid drop target handling.
+  - Editable / read-only / disabled modes.
+  - Three card densities: compact, standard, detailed.
+  - Horizontal and vertical layouts with horizontal scrolling.
+  - Configurable column width, card gap, column gap, card borders, item counts.
+  - Selection (single), item activation, create/edit/delete requests.
+  - Column collapse/expand, column item limits.
+  - Keyboard navigation: focusable cards, Enter/Space to select/activate, "Move to column" popover as accessible drag alternative.
+  - Full event system: item_selected, selection_changed, item_moved, item_move_rejected, item_reordered, item_create_requested, item_edit_requested, item_delete_requested, drag_started, drag_cancelled, drop_target_changed, column_selected.
+  - Scoped CSS with `.kanban-` prefix, dark theme, lemon accent.
+- **React wrapper + playground**: Fixed h-[600px] live canvas, AgentSkillTabs properties panel (mode, layout, card layout, drag/reorder/move toggles, show border/count/drop preview, column width/gap sliders), output section with selected item + column counts, code panel, documentation. Seeds with 3 columns (To Do, In Progress, Done) and 7 sample tasks.
+- VLM-verified: 3 columns, 7 cards, Properties/AGENT/SKILL tabs present, appears in sidebar under Productivity → Kanban Board.
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- New "Project Management & Productivity" category established.
+- Kanban Board component built per spec with drag-and-drop, keyboard navigation, full event system, and configurable appearance.
+- Appears in sidebar under Productivity → Kanban Board and in Components directory.
+
+---
+Task ID: 41
+Agent: main
+Task: Add "Content Templates" platform concept (src/lib/templates/) and refactor Kanban card content to be template-driven
+
+Work Log:
+- Read the previous worklog (Task 40) to understand the Kanban component state and the precedent set by `src/lib/commands/` (registry + shortcuts as a separated platform concept).
+- Studied the existing Kanban `renderCard` method (~90 lines of hardcoded priority → title → description → labels → footer rendering) and the `src/lib/commands/` module structure (registry.ts + shortcuts.ts + index.ts + AGENT/SKILL docs) as the architectural template for the new templates module.
+- Created `src/lib/templates/` — the third platform-level concept alongside Commands and components:
+  - `registry.ts`: `ContentTemplate`, `TemplateSlot`, `SlotRenderer`, `SlotRenderContext`, `TemplateDensity` types; `ContentTemplateRegistry` and `SlotRendererRegistry` singleton classes; `defineTemplate`/`defineTemplates`/`defineRenderer`/`defineRenderers` convenience functions; `slotVisible` + `DEFAULT_VISIBILITY` helpers. The `SlotRenderContext` carries `{ item, slot, density, host }` so renderers are pure functions that don't depend on the host component's API.
+  - `renderers.ts`: 12 built-in slot renderers (priority-row, severity-row, title, description, label-chips, assignee-avatar, assignee-row, meta-line, id-badge, progress-bar, divider, footer) + scoped `.ctpl-` CSS injected once (id `content-template-styles`). Renderers use the host's `--kb-*` tokens with sensible fallbacks so they look native inside a Kanban card without coupling. The accent is always the brand lemon.
+  - `index.ts`: barrel exports + `registerBuiltinTemplates()` which calls `registerBuiltinRenderers()` (idempotent) then registers 4 built-in Kanban templates: `kanban.standard-task` (the current card pattern extracted), `kanban.minimal` (title only), `kanban.bug-report` (severity/title/description/reporter/id), `kanban.milestone` (title/dueDate/progress).
+  - `AGENT.md` + `SKILL.md`: full contribution guide + usage docs. Copied to `public/docs/concepts/templates-AGENT.md` and `templates-SKILL.md`.
+- Refactored `src/lib/components/kanban/kanban.ts`:
+  - Added `templateId?: string` to `KanbanOptions` (defaults to `"kanban.standard-task"`).
+  - Imported `templateRegistry`, `rendererRegistry`, `slotVisible`, `ContentTemplate`, `TemplateDensity` from `@/lib/templates`.
+  - Replaced the hardcoded `renderCard` body with a template-driven loop: looks up the active template via `getTemplate()`, iterates `tpl.slots` in order, skips slots not visible in the current `cardLayout` density, calls each slot's renderer with `{ item, slot, density, host }` (host carries board-level state: mode, moveBetweenColumns, dragEnabled, showCardBorder, cardLayout), appends non-null results. Falls back to a bare `.kanban-card-title` if no template is registered.
+  - The board-level Move button is now rendered as a **board control** (NOT part of the template) in a `.kanban-card-footer` wrapper with a flex spacer, appended after the templated content when `mode === "editable" && moveBetweenColumns && cardLayout !== "compact"`.
+  - Added `getTemplate()`, `getTemplateId()`, `setTemplateId(id)` public methods. `setTemplateId` is a no-op if the ID isn't registered; re-renders otherwise.
+  - Extended `setProperty` switch with a `templateId` case that delegates to `setTemplateId`.
+  - Extracted `buildCardAriaLabel(item)` helper (the aria-label is the board's responsibility, not the template's).
+  - Removed the now-unused `initials` helper (moved into the templates `assignee-avatar` renderer).
+- Updated `src/components/kanban/kanban-react.tsx`: added `templateId` prop forwarded to the constructor and via `setProperty("templateId", templateId)` in its own effect.
+- Updated `src/components/kanban/kanban-playground.tsx`:
+  - Imports `registerBuiltinTemplates`, `templateRegistry`, `ContentTemplate` from `@/lib/templates`.
+  - Calls `registerBuiltinTemplates()` at **module scope** (not in useEffect) because the KanbanBoard constructor reads the registry to lay out card content, so templates must be registered BEFORE the board is constructed. The call is idempotent and SSR-safe (`injectStyles` is `typeof document`-guarded).
+  - Added `templateId: "kanban.standard-task"` to `DEFAULTS` and the `State` interface.
+  - Added a `kanbanTemplates` memo (`templateRegistry.byCategory("Kanban")`) and `activeTemplate` memo for the live canvas header chip.
+  - Added a Content template picker at the TOP of the properties panel: each template shows its name, ID, description, and a list of slot chips (`field · renderer` pairs). Selected template gets the brand-purple-strong background.
+  - Added a LayoutTemplate icon + active template name chip in the live canvas header.
+  - Extended the seed items with severity, reporter, dueDate, and progress fields so the alternate templates have real content to render.
+  - Updated the JS code snippet to include `import { registerBuiltinTemplates } from "@workshop/templates"`, the `registerBuiltinTemplates()` call, the `templateId` option, and a commented `board.setTemplateId(...)` example.
+  - Updated the API code tab to include `getTemplate()`, `getTemplateId()`, `setTemplateId(id)` methods and a note about the template registry.
+- Updated `src/lib/platform/content.ts` Kanban meta:
+  - Added `templateId` to the properties table.
+  - Added `getTemplate()`, `getTemplateId()`, `setTemplateId(id)` to the methods list.
+  - Added "Content Templates" to tags and capabilities.
+  - Updated `longDescription` to describe the template system.
+  - Added `templateId: "kanban.standard-task"` to the defaults block.
+- Updated `src/lib/components/kanban/AGENT.md`: documented the new `templateId` option, the template-driven `renderCard` lifecycle (5-step description), and the separation between templated content and board-level controls.
+- Updated `src/lib/components/kanban/SKILL.md`: added `templateId` to the options table, `getTemplate`/`getTemplateId`/`setTemplateId` to the methods table, and a full "Content templates" section with a table of the 4 built-in templates + code example.
+- Copied all updated docs to `public/docs/components/` and `public/docs/concepts/`.
+- Ran `bun run lint` → 0 errors, 0 warnings.
+- Ran `bunx tsc --noEmit` → no type errors in any templates or kanban files (the 11 pre-existing errors are all in unrelated files: calendar, color-circle, content.ts nodes-graph unstable status, examples/websocket, skills).
+- Agent Browser verification (end-to-end):
+  - Navigated Home → Productivity category → Kanban Board playground.
+  - Confirmed the live canvas shows 3 columns (To Do / In Progress / Done) with 7 cards total.
+  - Confirmed the properties panel shows the Content template picker with all 4 templates (Standard Task, Minimal, Bug Report, Milestone) — each with name, ID, description, and slot chips.
+  - Switched to Standard Task: 7 priority rows, 7 titles, 4 descriptions, 4 label sets, 4 avatars (matches seed data exactly).
+  - Switched to Bug Report: 7 severity rows, 7 titles, 4 descriptions, 7 reporter rows (assignee-row renderer), 7 id-badges.
+  - Switched to Milestone: 7 titles, 7 dueDate meta-lines, 7 progress bars (first card shows 10% width — matches t1's `progress: 10`).
+  - Switched to Minimal: 7 titles only, 0 priority/description/labels — exactly the minimal template.
+  - VLM-verified the final Standard Task screenshot: confirmed 3 columns with correct item counts, cards with priority dots (red HIGH, yellow MEDIUM), titles, descriptions, label chips, assignee avatars, and the right-side template picker with 4 templates and Standard Task active.
+  - Verified the AGENT and SKILL tabs fetch correctly (curl 200 for kanban-AGENT, kanban-SKILL, templates-AGENT, templates-SKILL).
+  - Dev log shows clean compilation, no errors, all 200 responses.
+
+Stage Summary:
+- New platform-level concept "Content Templates" established at `src/lib/templates/` — analogous to `src/lib/commands/` (registry-based, separated from components, reusable across hosts). Files:
+  - `src/lib/templates/registry.ts` — `ContentTemplateRegistry` + `SlotRendererRegistry` singletons, `ContentTemplate`/`TemplateSlot`/`SlotRenderer`/`SlotRenderContext`/`TemplateDensity` types, `defineTemplate`/`defineRenderer`/`slotVisible` helpers.
+  - `src/lib/templates/renderers.ts` — 12 built-in slot renderers (priority-row, severity-row, title, description, label-chips, assignee-avatar, assignee-row, meta-line, id-badge, progress-bar, divider, footer) + scoped `.ctpl-` CSS.
+  - `src/lib/templates/index.ts` — barrel + `registerBuiltinTemplates()` (4 Kanban templates: standard-task, minimal, bug-report, milestone).
+  - `src/lib/templates/AGENT.md` + `SKILL.md` + copies in `public/docs/concepts/`.
+- Kanban component refactored to be template-driven:
+  - `templateId` option (default `"kanban.standard-task"`) + `getTemplate()` / `getTemplateId()` / `setTemplateId(id)` public API + `setProperty("templateId", id)` support.
+  - `renderCard` now iterates template slots; board-level Move button is a separate control appended after templated content.
+  - The current card content pattern (priority → title → description → labels → assignee) is preserved as the `kanban.standard-task` template — same visual result, now reusable and swappable.
+- Playground exposes a 4-template picker at the top of the properties panel; switching templates re-renders all cards without touching the data. The live canvas header shows the active template name.
+- Design discipline maintained: only brand lemon accent, no indigo/blue, scoped `.ctpl-` CSS with `--kb-*` token fallbacks, renderers are pure functions, `null` means "skip this slot", `prefers-reduced-motion` honored.
+- Agent Browser + VLM verified end-to-end: all 4 templates render correctly with the right slot counts matching the seed data, the template picker is interactive, and the page compiles cleanly.
+
+---
+Task ID: 42
+Agent: main
+Task: Three improvements — (1) collapsible long description, (2) templates in inner tabs box + "None" option, (3) custom-template creation docs
+
+Work Log:
+- Read the previous worklog (Task 41) to understand the Content Templates system state.
+- Read `src/components/platform/agent-skill-tabs.tsx` to understand the Properties/AGENT/SKILL tab structure and plan the Templates tab addition.
+
+**Improvement 1 — Collapsible long description:**
+- Created `src/components/platform/collapsible-description.tsx`: a `CollapsibleDescription` component that takes `text` and `maxLength` (default 220). If the text exceeds `maxLength`, it truncates at the nearest word boundary before `maxLength`, appends an ellipsis, and renders a "Show more" / "Show less" toggle (ChevronDown / ChevronUp icons, brand lemon). When the text fits, it renders plainly with no toggle. Default state is collapsed.
+- Updated the Kanban playground header to replace the plain `<p>{meta.longDescription}</p>` with `<CollapsibleDescription text={meta.longDescription} maxLength={220} className="..." />`. The 1290-char longDescription now collapses to 219 chars on first load with a "Show more" toggle.
+
+**Improvement 2 — Templates tab + "None" option:**
+- Extended `src/components/platform/agent-skill-tabs.tsx` with an optional `templatesSlot?: React.ReactNode` prop. When provided, a "Templates" tab (LayoutTemplate icon) is rendered between Properties and AGENT. The tab content is the `templatesSlot` node. Other playgrounds that don't pass `templatesSlot` see no change. Updated the activeTab state type to include `"templates"`.
+- Added `KANBAN_TEMPLATE_NONE = "none"` constant to `src/lib/components/kanban/kanban.ts` (exported). Updated `setTemplateId(id)` to bypass the `templateRegistry.has(id)` check when `id === KANBAN_TEMPLATE_NONE` — the "none" sentinel is always allowed. `getTemplate()` returns `undefined` for "none" (it's not registered), and `renderCard` already falls back to a bare `.kanban-card-title` div (native rendering). Added a docblock explaining the sentinel and the component-independence guarantee.
+- Exported `KANBAN_TEMPLATE_NONE` from `src/lib/components/kanban/index.ts` barrel.
+- Updated the Kanban playground:
+  - Added `templateOptions` memo that prepends a synthetic "None" entry (id: `KANBAN_TEMPLATE_NONE`, name: "None", slots: []) to the registered Kanban templates. The picker iterates `templateOptions` instead of `kanbanTemplates`.
+  - Moved the template picker from the Properties tab children into the `templatesSlot` prop of `AgentSkillTabs`. The Properties tab now starts with "Mode" (no template picker).
+  - The "None" option shows a Ban icon (instead of LayoutTemplate) and an extra note: "The board works with zero templates registered — content templates are an opt-in layer on top."
+  - The live canvas header chip switches between LayoutTemplate (templated) and Ban (none) icons based on `state.templateId === KANBAN_TEMPLATE_NONE`.
+  - Added a "Creating custom templates" info box below the picker in the Templates tab with a 3-step guide + code examples (defineRenderer → defineTemplate → setTemplateId).
+
+**Improvement 3 — Custom-template creation docs:**
+- Added a "Content templates" documentation panel at the bottom of the Kanban playground (after Accessibility, before the sidebar). It includes:
+  - An intro paragraph explaining the board is independent of templates and that `"none"` disables templated content.
+  - A table of all 5 template options (none + 4 registered) with their IDs, names, and slot chains.
+  - A "Creating a custom template" subsection with a 3-step numbered guide and a full code example (defineRenderer + defineTemplate + setTemplateId + setTemplateId("none")).
+- Updated `src/lib/components/kanban/SKILL.md`:
+  - Added `"none"` to the template table and the `templateId` option description.
+  - Added `KANBAN_TEMPLATE_NONE` to the code example.
+  - Added a full "Creating a custom template" subsection with the 3-step guide, code examples, and the renderer contract.
+- Updated `src/lib/platform/content.ts` Kanban meta: the `templateId` property description now mentions the `"none"` option.
+- Updated the "On this page" sidebar to include "Content templates".
+- Copied updated docs to `public/docs/components/kanban-SKILL.md` and `kanban-AGENT.md`.
+
+**Verification:**
+- `bun run lint` → 0 errors, 0 warnings.
+- Agent Browser end-to-end:
+  - Collapsible description: confirmed 219-char collapsed text with "Show more" button; clicking expands to full 1290 chars and the button changes to "Show less". `aria-expanded` set correctly.
+  - Templates tab: confirmed the "Templates" tab appears between Properties and AGENT in the tab bar. Clicking it shows the template picker with "None" (first, Ban icon) + 4 registered templates (LayoutTemplate icon), each with name, ID, description, and slot chips. The "Creating custom templates" guide is below the picker.
+  - "None" option: clicking "None" switches all 7 cards to native rendering (bare `.kanban-card-title` divs, 0 ctpl-* elements). The live canvas header chip shows "None" with a Ban icon. Switching back to "Standard Task" restores all templated content (7 priority rows, 7 titles, 4 descriptions, etc.).
+  - Bottom docs section: VLM-verified the "Content templates" heading, the 5-row template table, and the "Creating a custom template" 3-step guide with code examples.
+- Dev log: clean compilation, no errors.
+
+Stage Summary:
+- Three improvements delivered:
+  1. **Collapsible long description** — `CollapsibleDescription` component (`src/components/platform/collapsible-description.tsx`) truncates at `maxLength` (default 220) chars at the nearest word boundary, collapsed by default with a "Show more" / "Show less" toggle. Applied to the Kanban playground header.
+  2. **Templates in inner tabs box + "None" option** — `AgentSkillTabs` extended with `templatesSlot` prop (renders a "Templates" tab between Properties and AGENT). The Kanban picker now shows "None" first (native rendering, Ban icon) + all registered templates. `KANBAN_TEMPLATE_NONE = "none"` constant exported; `setTemplateId("none")` bypasses the registry check and the board falls back to bare-title native rendering.
+  3. **Custom-template creation docs** — a "Creating custom templates" info box in the Templates tab + a full "Content templates" documentation panel at the bottom of the playground with a 5-row template table and a 3-step numbered guide with code examples. The SKILL.md is updated with the same guide. All docs emphasize that the component is independent of templates (works with "none" or zero templates registered).
+- Design discipline: only brand lemon accent, Ban icon for "None" (muted), LayoutTemplate icon for templated options, scoped CSS maintained, no indigo/blue, responsive.

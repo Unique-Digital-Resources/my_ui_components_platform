@@ -1,0 +1,1167 @@
+     1→     1→/**
+     2→     2→ * ColorWheelPicker — a vanilla TypeScript color picker component.
+     3→     3→ *
+     4→     4→ * Renders a hue wheel surrounding a configurable inner selection shape
+     5→     5→ * (triangle / square / disk / none). Canvas-based, pointer + keyboard
+     6→     6→ * interaction, framework-independent. No React or other UI framework.
+     7→     7→ *
+     8→     8→ * ----------------------------------------------------------------------------
+     9→     9→ * GEOMETRY
+    10→    10→ * ----------------------------------------------------------------------------
+    11→    11→ *   `size`            — diameter (px) of the inner shape's bounding circle.
+    12→    12→ *   `wheelSpacing`    — gap (px) between the inner shape and the wheel's
+    13→    13→ *                       inner edge.
+    14→    14→ *   `wheelThickness`  — radial thickness (px) of the hue ring.
+    15→    15→ *
+    16→    16→ *   innerR       = size / 2
+    17→    17→ *   wheelInnerR  = innerR + wheelSpacing
+    18→    18→ *   wheelOuterR  = wheelInnerR + wheelThickness
+    19→    19→ *   total        = wheelOuterR * 2  (full component size in CSS pixels)
+    20→    20→ *   cx = cy      = total / 2         (wheel is centered on the inner shape)
+    21→    21→ *
+    22→    22→ * ----------------------------------------------------------------------------
+    23→    23→ * HUE MAPPING
+    24→    24→ * ----------------------------------------------------------------------------
+    25→    25→ *   Hue 0° (red) is at the top (12 o'clock), increasing clockwise.
+    26→    26→ *   Canvas y-axis is inverted (+y is down) so "clockwise" on screen equals
+    27→    27→ *   increasing canvas angle.
+    28→    28→ *
+    29→    29→ *     angle(hue)  = -π/2 + hue * π/180            (canvas radians)
+    30→    30→ *     hue(angle)  = ((angle + π/2) * 180/π) mod 360
+    31→    31→ *
+    32→    32→ *   Equivalently, using atan2 from the "up" vector:
+    33→    33→ *     theta = atan2(dx, -dy)   (in radians, 0 = top, increasing clockwise)
+    34→    34→ *
+    35→    35→ * ----------------------------------------------------------------------------
+    36→    36→ * INNER SHAPE COLOR MAPPINGS (hue from the wheel, fixed)
+    37→    37→ * ----------------------------------------------------------------------------
+    38→    38→ *   triangle — Vertices: A = top (S=0, V=1, white), B = bottom-right
+    39→    39→ *              (S=1, V=1, pure hue), C = bottom-left (V=0, black).
+    40→    40→ *              For any interior point P = α·A + β·B + γ·C with α+β+γ=1:
+    41→    41→ *                 V = α + β
+    42→    42→ *                 S = β / V   (when V > 0; S is undefined at the black vertex)
+    43→    43→ *              Inverse:
+    44→    44→ *                 α = V·(1 − S),  β = S·V,  γ = 1 − V
+    45→    45→ *
+    46→    46→ *   square   — Inscribed square (side = innerR · √2) inside the inner circle.
+    47→    47→ *              x → saturation (0..1, left → right)
+    48→    48→ *              y → value      (1..0, top → bottom)
+    49→    49→ *
+    50→    50→ *   disk     — r → saturation (0..1, center → edge)
+    51→    51→ *              θ → value, mapped via V = (1 + cos θ) / 2.
+    52→    52→ *              This is a smooth, seam-free mapping. The top of the disk is
+    53→    53→ *              V = 1 (bright), the bottom is V = 0 (black); left/right at
+    54→    54→ *              V = 0.5 are mirror images. Because two θ values can produce
+    55→    55→ *              the same V, the component tracks the user's last angular
+    56→    56→ *              position (`diskTheta`) so the inner marker stays where the
+    57→    57→ *              user dragged it.
+    58→    58→ *
+    59→    59→ *   none     — Only the wheel renders; the inner area shows the current
+    60→    60→ *              solid color and is not interactive.
+    61→    61→ *
+    62→    62→ * ----------------------------------------------------------------------------
+    63→    63→ * RENDERING STRATEGY
+    64→    64→ * ----------------------------------------------------------------------------
+    65→    65→ *   A single <canvas> renders the whole component:
+    66→    66→ *     1. Hue wheel   — drawn as 360 one-degree arc segments (cached).
+    67→    67→ *     2. Inner shape — drawn pixel-by-pixel (triangle/disk) or with three
+    68→    68→ *                      canvas gradients (square). Cached per (shape, size, hue).
+    69→    69→ *     3. Markers     — hue marker on the wheel ring; inner marker on the
+    70→    70→ *                      selected (S, V) position. Re-drawn every frame (cheap).
+    71→    71→ *
+    72→    72→ *   Caching keeps drag interactions smooth: SV drags only redraw markers,
+    73→    73→ *   and hue drags only re-render the inner shape (not the wheel).
+    74→    74→ */
+    75→    75→
+    76→    76→import {
+    77→    77→  type HSV,
+    78→    78→  type ColorOutput,
+    79→    79→  parseColor,
+    80→    80→  toColorOutput,
+    81→    81→  hsvToRgb,
+    82→    82→  clamp,
+    83→    83→  clampHue,
+    84→    84→} from "./color-utils";
+    85→    85→
+    86→    86→export type Shape = "triangle" | "square" | "disk" | "none";
+    87→    87→
+    88→    88→export interface ColorPickerOptions {
+    89→    89→  /** Inner selection shape. Default "triangle". */
+    90→    90→  shape?: Shape;
+    91→    91→  /** Inner shape diameter in CSS pixels. Default 180. */
+    92→    92→  size?: number;
+    93→    93→  /** Hue wheel radial thickness in pixels. Default 24. */
+    94→    94→  wheelThickness?: number;
+    95→    95→  /** Gap between inner shape and wheel in pixels. Default 8. */
+    96→    96→  wheelSpacing?: number;
+    97→    97→  /** Initial hue (0-360). Ignored if `color` is provided. Default 210. */
+    98→    98→  hue?: number;
+    99→    99→  /** Initial color (any parseable string). Overrides `hue` when provided. */
+   100→   100→  color?: string;
+   101→   101→}
+   102→   102→
+   103→   103→interface Geometry {
+   104→   104→  /** Inner shape bounding radius (= size / 2). */
+   105→   105→  innerR: number;
+   106→   106→  /** Inner edge of the hue wheel. */
+   107→   107→  wheelInnerR: number;
+   108→   108→  /** Outer edge of the hue wheel. */
+   109→   109→  wheelOuterR: number;
+   110→   110→  /** Total component size in CSS pixels. */
+   111→   111→  total: number;
+   112→   112→  /** Center x in CSS pixels. */
+   113→   113→  cx: number;
+   114→   114→  /** Center y in CSS pixels. */
+   115→   115→  cy: number;
+   116→   116→}
+   117→   117→
+   118→   118→const DEFAULTS: Required<ColorPickerOptions> = {
+   119→   119→  shape: "triangle",
+   120→   120→  size: 180,
+   121→   121→  wheelThickness: 24,
+   122→   122→  wheelSpacing: 8,
+   123→   123→  hue: 210,
+   124→   124→  color: "#4287f5",
+   125→   125→};
+   126→   126→
+   127→   127→const STYLE_ID = "color-wheel-picker-styles";
+   128→   128→
+   129→   129→/** Scoped CSS injected once per document. Host apps can override via the
+   130→   130→ *  `--color-picker-*` custom properties. */
+   131→   131→function injectStyles(): void {
+   132→   132→  if (typeof document === "undefined") return;
+   133→   133→  if (document.getElementById(STYLE_ID)) return;
+   134→   134→  const style = document.createElement("style");
+   135→   135→  style.id = STYLE_ID;
+   136→   136→  style.textContent = `
+   137→   137→.color-wheel-picker {
+   138→   138→  display: inline-block;
+   139→   139→  position: relative;
+   140→   140→  font-family: inherit;
+   141→   141→  --color-picker-marker-border: rgba(255, 255, 255, 0.95);
+   142→   142→  --color-picker-marker-border-dark: rgba(0, 0, 0, 0.7);
+   143→   143→  --color-picker-focus-ring: rgba(217, 255, 102, 0.55);
+   144→   144→  --color-picker-bg: transparent;
+   145→   145→}
+   146→   146→.color-wheel-picker canvas {
+   147→   147→  display: block;
+   148→   148→  touch-action: none;
+   149→   149→  outline: none;
+   150→   150→  cursor: pointer;
+   151→   151→  background: var(--color-picker-bg);
+   152→   152→  border-radius: 50%;
+   153→   153→}
+   154→   154→.color-wheel-picker canvas:focus-visible {
+   155→   155→  box-shadow: 0 0 0 3px var(--color-picker-focus-ring);
+   156→   156→}
+   157→   157→`;
+   158→   158→  document.head.appendChild(style);
+   159→   159→}
+   160→   160→
+   161→   161→type ColorHandler = (color: ColorOutput) => void;
+   162→   162→
+   163→   163→export class ColorWheelPicker {
+   164→   164→  private readonly container: HTMLElement;
+   165→   165→  private readonly canvas: HTMLCanvasElement;
+   166→   166→  private readonly ctx: CanvasRenderingContext2D;
+   167→   167→
+   168→   168→  private options: Required<ColorPickerOptions>;
+   169→   169→  private hsv: HSV;
+   170→   170→  /** Tracked disk angle (radians, 0 = top, clockwise) for marker placement. */
+   171→   171→  private diskTheta: number;
+   172→   172→
+   173→   173→  private readonly listeners: Map<string, Set<ColorHandler>> = new Map();
+   174→   174→  private pointerState: {
+   175→   175→    type: "wheel" | "inner";
+   176→   176→    pointerId: number;
+   177→   177→  } | null = null;
+   178→   178→
+   179→   179→  private resizeObserver: ResizeObserver | null = null;
+   180→   180→  private _renderScheduled = false;
+   181→   181→  private _destroyed = false;
+   182→   182→
+   183→   183→  /** Cached hue wheel canvas (only depends on geometry). */
+   184→   184→  private wheelCache: HTMLCanvasElement | null = null;
+   185→   185→  private wheelCacheCtx: CanvasRenderingContext2D | null = null;
+   186→   186→  private wheelCacheKey = "";
+   187→   187→
+   188→   188→  /** Cached inner-shape canvas (depends on shape, size, hue). */
+   189→   189→  private innerCache: HTMLCanvasElement | null = null;
+   190→   190→  private innerCacheCtx: CanvasRenderingContext2D | null = null;
+   191→   191→  private innerCacheKey = "";
+   192→   192→
+   193→   193→  /** Bound handlers (so removeEventListener works). */
+   194→   194→  private readonly _onPointerDown: (e: PointerEvent) => void;
+   195→   195→  private readonly _onPointerMove: (e: PointerEvent) => void;
+   196→   196→  private readonly _onPointerUp: (e: PointerEvent) => void;
+   197→   197→  private readonly _onKeyDown: (e: KeyboardEvent) => void;
+   198→   198→  private readonly _onResize: () => void;
+   199→   199→
+   200→   200→  constructor(container: HTMLElement, options: ColorPickerOptions = {}) {
+   201→   201→    if (!container) {
+   202→   202→      throw new Error("ColorWheelPicker: container is required");
+   203→   203→    }
+   204→   204→    this.container = container;
+   205→   205→
+   206→   206→    // Resolve options (per-option defaults; `color` overrides `hue`).
+   207→   207→    this.options = {
+   208→   208→      shape: (options.shape as Shape) ?? DEFAULTS.shape,
+   209→   209→      size: Math.max(40, options.size ?? DEFAULTS.size),
+   210→   210→      wheelThickness: Math.max(4, options.wheelThickness ?? DEFAULTS.wheelThickness),
+   211→   211→      wheelSpacing: Math.max(0, options.wheelSpacing ?? DEFAULTS.wheelSpacing),
+   212→   212→      hue: clampHue(options.hue ?? DEFAULTS.hue),
+   213→   213→      color: options.color ?? DEFAULTS.color,
+   214→   214→    };
+   215→   215→
+   216→   216→    // Resolve initial color: `color` wins over `hue`.
+   217→   217→    if (options.color != null) {
+   218→   218→      this.hsv = parseColor(options.color);
+   219→   219→    } else {
+   220→   220→      const h = options.hue != null ? clampHue(options.hue) : DEFAULTS.hue;
+   221→   221→      this.hsv = { h, s: 100, v: 100 };
+   222→   222→    }
+   223→   223→    this.diskTheta = Math.acos(clamp((this.hsv.v / 100) * 2 - 1, -1, 1));
+   224→   224→
+   225→   225→    injectStyles();
+   226→   226→
+   227→   227→    // Build canvas.
+   228→   228→    this.canvas = document.createElement("canvas");
+   229→   229→    this.canvas.className = "color-wheel-picker-canvas";
+   230→   230→    this.canvas.setAttribute("role", "application");
+   231→   231→    this.canvas.setAttribute(
+   232→   232→      "aria-label",
+   233→   233→      "Color wheel picker. Use arrow keys to adjust hue, saturation, and value.",
+   234→   234→    );
+   235→   235→    this.canvas.tabIndex = 0;
+   236→   236→
+   237→   237→    const ctx = this.canvas.getContext("2d");
+   238→   238→    if (!ctx) {
+   239→   239→      throw new Error("ColorWheelPicker: 2D canvas context unavailable");
+   240→   240→    }
+   241→   241→    this.ctx = ctx;
+   242→   242→
+   243→   243→    this.container.classList.add("color-wheel-picker");
+   244→   244→    this.container.appendChild(this.canvas);
+   245→   245→
+   246→   246→    // Bind handlers.
+   247→   247→    this._onPointerDown = this.onPointerDown.bind(this);
+   248→   248→    this._onPointerMove = this.onPointerMove.bind(this);
+   249→   249→    this._onPointerUp = this.onPointerUp.bind(this);
+   250→   250→    this._onKeyDown = this.onKeyDown.bind(this);
+   251→   251→    this._onResize = this.handleResize.bind(this);
+   252→   252→
+   253→   253→    this.canvas.addEventListener("pointerdown", this._onPointerDown);
+   254→   254→    this.canvas.addEventListener("pointermove", this._onPointerMove);
+   255→   255→    this.canvas.addEventListener("pointerup", this._onPointerUp);
+   256→   256→    this.canvas.addEventListener("pointercancel", this._onPointerUp);
+   257→   257→    this.canvas.addEventListener("keydown", this._onKeyDown);
+   258→   258→
+   259→   259→    if (typeof ResizeObserver !== "undefined") {
+   260→   260→      this.resizeObserver = new ResizeObserver(this._onResize);
+   261→   261→      this.resizeObserver.observe(this.canvas);
+   262→   262→    }
+   263→   263→
+   264→   264→    this.updateCanvasSize();
+   265→   265→    this.render();
+   266→   266→    this.updateAria();
+   267→   267→  }
+   268→   268→
+   269→   269→  // --------------------------------------------------------------------------
+   270→   270→  // Public API
+   271→   271→  // --------------------------------------------------------------------------
+   272→   272→
+   273→   273→  /** Set the color from any parseable input. Fires `input` + `change`. */
+   274→   274→  setColor(color: string): void {
+   275→   275→    this.hsv = parseColor(color);
+   276→   276→    this.options.hue = this.hsv.h;
+   277→   277→    this.diskTheta = Math.acos(
+   278→   278→      clamp((this.hsv.v / 100) * 2 - 1, -1, 1),
+   279→   279→    );
+   280→   280→    this.invalidateInnerCache();
+   281→   281→    this.scheduleRender();
+   282→   282→    this.updateAria();
+   283→   283→    const out = this.getColor();
+   284→   284→    this.emit("input", out);
+   285→   285→    this.emit("change", out);
+   286→   286→  }
+   287→   287→
+   288→   288→  /** Get the current color as a full ColorOutput. */
+   289→   289→  getColor(): ColorOutput {
+   290→   290→    return toColorOutput(this.hsv);
+   291→   291→  }
+   292→   292→
+   293→   293→  /** Change the inner selection shape. Preserves the current color. */
+   294→   294→  setShape(shape: Shape): void {
+   295→   295→    if (this.options.shape === shape) return;
+   296→   296→    this.options.shape = shape;
+   297→   297→    this.invalidateInnerCache();
+   298→   298→    this.scheduleRender();
+   299→   299→  }
+   300→   300→
+   301→   301→  /** Change the inner shape diameter in CSS pixels. Preserves the color. */
+   302→   302→  setSize(size: number): void {
+   303→   303→    const s = Math.max(40, Math.round(size));
+   304→   304→    if (this.options.size === s) return;
+   305→   305→    this.options.size = s;
+   306→   306→    this.updateCanvasSize();
+   307→   307→    this.invalidateWheelCache();
+   308→   308→    this.invalidateInnerCache();
+   309→   309→    this.scheduleRender();
+   310→   310→  }
+   311→   311→
+   312→   312→  /** Change the hue (0-360). Preserves S and V. Fires `input` + `change`. */
+   313→   313→  setHue(hue: number): void {
+   314→   314→    this.hsv = { ...this.hsv, h: clampHue(hue) };
+   315→   315→    this.options.hue = this.hsv.h;
+   316→   316→    this.invalidateInnerCache();
+   317→   317→    this.scheduleRender();
+   318→   318→    this.updateAria();
+   319→   319→    const out = this.getColor();
+   320→   320→    this.emit("input", out);
+   321→   321→    this.emit("change", out);
+   322→   322→  }
+   323→   323→
+   324→   324→  /** Subscribe to a picker event. */
+   325→   325→  on(event: "input" | "change", handler: ColorHandler): void;
+   326→   326→
+   327→   327→  /** Subscribe to a picker event (escape hatch for arbitrary event names). */
+   328→   328→  on(event: string, handler: ColorHandler): void;
+   329→   329→
+   330→   330→  on(event: string, handler: ColorHandler): void {
+   331→   331→    let set = this.listeners.get(event);
+   332→   332→    if (!set) {
+   333→   333→      set = new Set<ColorHandler>();
+   334→   334→      this.listeners.set(event, set);
+   335→   335→    }
+   336→   336→    set.add(handler);
+   337→   337→  }
+   338→   338→
+   339→   339→  /** Unsubscribe from a picker event. */
+   340→   340→  off(event: string, handler: ColorHandler): void {
+   341→   341→    const set = this.listeners.get(event);
+   342→   342→    if (set) {
+   343→   343→      set.delete(handler);
+   344→   344→    }
+   345→   345→  }
+   346→   346→
+   347→   347→  /** Tear down: remove listeners, observers, and DOM. Idempotent. */
+   348→   348→  destroy(): void {
+   349→   349→    if (this._destroyed) return;
+   350→   350→    this._destroyed = true;
+   351→   351→
+   352→   352→    this.canvas.removeEventListener("pointerdown", this._onPointerDown);
+   353→   353→    this.canvas.removeEventListener("pointermove", this._onPointerMove);
+   354→   354→    this.canvas.removeEventListener("pointerup", this._onPointerUp);
+   355→   355→    this.canvas.removeEventListener("pointercancel", this._onPointerUp);
+   356→   356→    this.canvas.removeEventListener("keydown", this._onKeyDown);
+   357→   357→
+   358→   358→    if (this.pointerState) {
+   359→   359→      try {
+   360→   360→        this.canvas.releasePointerCapture(this.pointerState.pointerId);
+   361→   361→      } catch {
+   362→   362→        /* ignore */
+   363→   363→      }
+   364→   364→      this.pointerState = null;
+   365→   365→    }
+   366→   366→
+   367→   367→    if (this.resizeObserver) {
+   368→   368→      this.resizeObserver.disconnect();
+   369→   369→      this.resizeObserver = null;
+   370→   370→    }
+   371→   371→
+   372→   372→    this.listeners.clear();
+   373→   373→
+   374→   374→    if (this.canvas.parentNode) {
+   375→   375→      this.canvas.parentNode.removeChild(this.canvas);
+   376→   376→    }
+   377→   377→    this.container.classList.remove("color-wheel-picker");
+   378→   378→
+   379→   379→    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+   380→   380→    this.wheelCache = null;
+   381→   381→    this.wheelCacheCtx = null;
+   382→   382→    this.innerCache = null;
+   383→   383→    this.innerCacheCtx = null;
+   384→   384→  }
+   385→   385→
+   386→   386→  // --------------------------------------------------------------------------
+   387→   387→  // Geometry
+   388→   388→  // --------------------------------------------------------------------------
+   389→   389→
+   390→   390→  private getGeometry(): Geometry {
+   391→   391→    const { size, wheelThickness, wheelSpacing } = this.options;
+   392→   392→    const innerR = size / 2;
+   393→   393→    const wheelInnerR = innerR + wheelSpacing;
+   394→   394→    const wheelOuterR = wheelInnerR + wheelThickness;
+   395→   395→    const total = wheelOuterR * 2;
+   396→   396→    return {
+   397→   397→      innerR,
+   398→   398→      wheelInnerR,
+   399→   399→      wheelOuterR,
+   400→   400→      total,
+   401→   401→      cx: total / 2,
+   402→   402→      cy: total / 2,
+   403→   403→    };
+   404→   404→  }
+   405→   405→
+   406→   406→  // --------------------------------------------------------------------------
+   407→   407→  // Rendering
+   408→   408→  // --------------------------------------------------------------------------
+   409→   409→
+   410→   410→  private updateCanvasSize(): void {
+   411→   411→    const geom = this.getGeometry();
+   412→   412→    const dpr =
+   413→   413→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   414→   414→    this.canvas.style.width = `${geom.total}px`;
+   415→   415→    this.canvas.style.height = `${geom.total}px`;
+   416→   416→    this.canvas.width = Math.round(geom.total * dpr);
+   417→   417→    this.canvas.height = Math.round(geom.total * dpr);
+   418→   418→    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   419→   419→  }
+   420→   420→
+   421→   421→  private handleResize(): void {
+   422→   422→    if (this._destroyed) return;
+   423→   423→    // The canvas's CSS size may have changed (host CSS) or the device pixel
+   424→   424→    // ratio may have changed (window moved between monitors). Refresh the
+   425→   425→    // backing store and re-render.
+   426→   426→    const dpr =
+   427→   427→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   428→   428→    const geom = this.getGeometry();
+   429→   429→    const expectedW = Math.round(geom.total * dpr);
+   430→   430→    if (this.canvas.width !== expectedW) {
+   431→   431→      this.updateCanvasSize();
+   432→   432→      this.invalidateWheelCache();
+   433→   433→      this.invalidateInnerCache();
+   434→   434→    }
+   435→   435→    this.scheduleRender();
+   436→   436→  }
+   437→   437→
+   438→   438→  private scheduleRender(): void {
+   439→   439→    if (this._destroyed) return;
+   440→   440→    if (this._renderScheduled) return;
+   441→   441→    this._renderScheduled = true;
+   442→   442→    requestAnimationFrame(() => {
+   443→   443→      this._renderScheduled = false;
+   444→   444→      if (!this._destroyed) this.render();
+   445→   445→    });
+   446→   446→  }
+   447→   447→
+   448→   448→  private invalidateWheelCache(): void {
+   449→   449→    this.wheelCacheKey = "";
+   450→   450→  }
+   451→   451→
+   452→   452→  private invalidateInnerCache(): void {
+   453→   453→    this.innerCacheKey = "";
+   454→   454→  }
+   455→   455→
+   456→   456→  private render(): void {
+   457→   457→    const geom = this.getGeometry();
+   458→   458→    const { ctx } = this;
+   459→   459→    ctx.clearRect(0, 0, geom.total, geom.total);
+   460→   460→    this.renderWheel(geom);
+   461→   461→    this.renderInner(geom);
+   462→   462→    this.renderMarkers(geom);
+   463→   463→  }
+   464→   464→
+   465→   465→  // ---- Hue wheel ----------------------------------------------------------
+   466→   466→
+   467→   467→  private renderWheel(geom: Geometry): void {
+   468→   468→    const dpr =
+   469→   469→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   470→   470→    const key = `wheel-${geom.total}-${dpr}`;
+   471→   471→    if (key !== this.wheelCacheKey || !this.wheelCache || !this.wheelCacheCtx) {
+   472→   472→      if (!this.wheelCache) {
+   473→   473→        this.wheelCache = document.createElement("canvas");
+   474→   474→        this.wheelCacheCtx = this.wheelCache.getContext("2d");
+   475→   475→      }
+   476→   476→      const cache = this.wheelCache;
+   477→   477→      const cacheCtx = this.wheelCacheCtx!;
+   478→   478→      const backing = Math.round(geom.total * dpr);
+   479→   479→      if (cache.width !== backing) {
+   480→   480→        cache.width = backing;
+   481→   481→        cache.height = backing;
+   482→   482→      }
+   483→   483→      cacheCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   484→   484→      cacheCtx.clearRect(0, 0, geom.total, geom.total);
+   485→   485→      this.drawWheelTo(cacheCtx, geom);
+   486→   486→      this.wheelCacheKey = key;
+   487→   487→    }
+   488→   488→    this.ctx.drawImage(this.wheelCache, 0, 0, geom.total, geom.total);
+   489→   489→  }
+   490→   490→
+   491→   491→  /**
+   492→   492→   * Draw the hue wheel directly into a target context. The wheel is composed
+   493→   493→   * of 360 one-degree segments, each filled with the HSL color of its hue.
+   494→   494→   */
+   495→   495→  private drawWheelTo(ctx: CanvasRenderingContext2D, geom: Geometry): void {
+   496→   496→    const { cx, cy, wheelInnerR, wheelOuterR } = geom;
+   497→   497→    const segments = 360;
+   498→   498→    const inner = Math.max(0.5, wheelInnerR);
+   499→   499→    const outer = Math.max(inner + 0.5, wheelOuterR);
+   500→   500→
+   501→   501→    for (let i = 0; i < segments; i++) {
+   502→   502→      // Start at the top (-π/2) and go clockwise (increasing angle).
+   503→   503→      const a0 = -Math.PI / 2 + (i / segments) * Math.PI * 2;
+   504→   504→      const a1 = -Math.PI / 2 + ((i + 1) / segments) * Math.PI * 2;
+   505→   505→      ctx.beginPath();
+   506→   506→      ctx.arc(cx, cy, outer, a0, a1);
+   507→   507→      ctx.arc(cx, cy, inner, a1, a0, true);
+   508→   508→      ctx.closePath();
+   509→   509→      ctx.fillStyle = `hsl(${i}, 100%, 50%)`;
+   510→   510→      ctx.fill();
+   511→   511→    }
+   512→   512→  }
+   513→   513→
+   514→   514→  // ---- Inner shape --------------------------------------------------------
+   515→   515→
+   516→   516→  private renderInner(geom: Geometry): void {
+   517→   517→    const { shape } = this.options;
+   518→   518→    if (shape === "none") {
+   519→   519→      this.renderNone(geom);
+   520→   520→      return;
+   521→   521→    }
+   522→   522→
+   523→   523→    const dpr =
+   524→   524→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   525→   525→    const key = `inner-${shape}-${geom.total}-${dpr}-${this.hsv.h}`;
+   526→   526→    if (key !== this.innerCacheKey || !this.innerCache || !this.innerCacheCtx) {
+   527→   527→      if (!this.innerCache) {
+   528→   528→        this.innerCache = document.createElement("canvas");
+   529→   529→        this.innerCacheCtx = this.innerCache.getContext("2d");
+   530→   530→      }
+   531→   531→      const cache = this.innerCache;
+   532→   532→      const cacheCtx = this.innerCacheCtx!;
+   533→   533→      const backing = Math.round(geom.total * dpr);
+   534→   534→      if (cache.width !== backing) {
+   535→   535→        cache.width = backing;
+   536→   536→        cache.height = backing;
+   537→   537→      }
+   538→   538→      cacheCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   539→   539→      cacheCtx.clearRect(0, 0, geom.total, geom.total);
+   540→   540→
+   541→   541→      if (shape === "triangle") this.drawTriangleTo(cacheCtx, geom);
+   542→   542→      else if (shape === "square") this.drawSquareTo(cacheCtx, geom);
+   543→   543→      else if (shape === "disk") this.drawDiskTo(cacheCtx, geom);
+   544→   544→
+   545→   545→      this.innerCacheKey = key;
+   546→   546→    }
+   547→   547→
+   548→   548→    this.ctx.drawImage(this.innerCache, 0, 0, geom.total, geom.total);
+   549→   549→  }
+   550→   550→
+   551→   551→  /** None mode: solid filled inner circle in the current color. */
+   552→   552→  private renderNone(geom: Geometry): void {
+   553→   553→    const { cx, cy, innerR } = geom;
+   554→   554→    const { ctx, hsv } = this;
+   555→   555→    const rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+   556→   556→    ctx.beginPath();
+   557→   557→    ctx.arc(cx, cy, Math.max(0.5, innerR), 0, Math.PI * 2);
+   558→   558→    ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+   559→   559→    ctx.fill();
+   560→   560→  }
+   561→   561→
+   562→   562→  /**
+   563→   563→   * Square inner shape: inscribed square (side = innerR · √2) with three
+   564→   564→   * stacked layers — pure hue → white-to-transparent (S) → transparent-to-
+   565→   565→   * black (V).
+   566→   566→   */
+   567→   567→  private drawSquareTo(ctx: CanvasRenderingContext2D, geom: Geometry): void {
+   568→   568→    const { cx, cy, innerR } = geom;
+   569→   569→    const { hsv } = this;
+   570→   570→    const side = innerR * Math.SQRT2;
+   571→   571→    const half = side / 2;
+   572→   572→    const left = cx - half;
+   573→   573→    const top = cy - half;
+   574→   574→
+   575→   575→    ctx.save();
+   576→   576→    // Clip to the square so corners don't bleed into the wheel gap.
+   577→   577→    ctx.beginPath();
+   578→   578→    ctx.rect(left, top, side, side);
+   579→   579→    ctx.clip();
+   580→   580→
+   581→   581→    // 1) Pure hue base.
+   582→   582→    ctx.fillStyle = `hsl(${hsv.h}, 100%, 50%)`;
+   583→   583→    ctx.fillRect(left, top, side, side);
+   584→   584→
+   585→   585→    // 2) White → transparent (saturation, left → right).
+   586→   586→    const gSat = ctx.createLinearGradient(left, 0, left + side, 0);
+   587→   587→    gSat.addColorStop(0, "rgba(255, 255, 255, 1)");
+   588→   588→    gSat.addColorStop(1, "rgba(255, 255, 255, 0)");
+   589→   589→    ctx.fillStyle = gSat;
+   590→   590→    ctx.fillRect(left, top, side, side);
+   591→   591→
+   592→   592→    // 3) Transparent → black (value, top → bottom).
+   593→   593→    const gVal = ctx.createLinearGradient(0, top, 0, top + side);
+   594→   594→    gVal.addColorStop(0, "rgba(0, 0, 0, 0)");
+   595→   595→    gVal.addColorStop(1, "rgba(0, 0, 0, 1)");
+   596→   596→    ctx.fillStyle = gVal;
+   597→   597→    ctx.fillRect(left, top, side, side);
+   598→   598→
+   599→   599→    ctx.restore();
+   600→   600→  }
+   601→   601→
+   602→   602→  /**
+   603→   603→   * Triangle inner shape: equilateral triangle inscribed in the inner circle.
+   604→   604→   *   A = top             (S = 0, V = 1)  — white
+   605→   605→   *   B = bottom-right    (S = 1, V = 1)  — pure hue
+   606→   606→   *   C = bottom-left     (S = *, V = 0)  — black
+   607→   607→   *
+   608→   608→   * Rendered per-pixel via barycentric coordinates so the gradient is exact.
+   609→   609→   */
+   610→   610→  private drawTriangleTo(ctx: CanvasRenderingContext2D, geom: Geometry): void {
+   611→   611→    const { cx, cy, innerR } = geom;
+   612→   612→    const r = Math.max(1, innerR);
+   613→   613→
+   614→   614→    // Vertices. With hue 0 at the top (12 o'clock) and the triangle pointing
+   615→   615→    // up, B and C are placed symmetrically around the bottom.
+   616→   616→    const Ax = cx;
+   617→   617→    const Ay = cy - r;
+   618→   618→    const Bx = cx + (r * Math.sqrt(3)) / 2;
+   619→   619→    const By = cy + r / 2;
+   620→   620→    const Cx = cx - (r * Math.sqrt(3)) / 2;
+   621→   621→    const Cy = cy + r / 2;
+   622→   622→
+   623→   623→    this.drawBarycentric(ctx, [
+   624→   624→      { x: Ax, y: Ay },
+   625→   625→      { x: Bx, y: By },
+   626→   626→      { x: Cx, y: Cy },
+   627→   627→    ]);
+   628→   628→  }
+   629→   629→
+   630→   630→  /**
+   631→   631→   * Per-pixel triangle renderer using barycentric coordinates.
+   632→   632→   *
+   633→   633→   * For a point P with barycentric (α, β, γ) w.r.t. (A, B, C):
+   634→   634→   *   P = α·A + β·B + γ·C,   α + β + γ = 1
+   635→   635→   *   V = α + β       (white + pure-hue weights)
+   636→   636→   *   S = β / V       (pure-hue share of the non-black weights)
+   637→   637→   *
+   638→   638→   * Anti-aliasing: pixel coverage = min(α, β, γ) ramped over ~1px.
+   639→   639→   */
+   640→   640→  private drawBarycentric(
+   641→   641→    ctx: CanvasRenderingContext2D,
+   642→   642→    verts: { x: number; y: number }[],
+   643→   643→  ): void {
+   644→   644→    const { hsv } = this;
+   645→   645→    const [A, B, C] = verts;
+   646→   646→
+   647→   647→    const minX = Math.floor(Math.min(A.x, B.x, C.x));
+   648→   648→    const maxX = Math.ceil(Math.max(A.x, B.x, C.x));
+   649→   649→    const minY = Math.floor(Math.min(A.y, B.y, C.y));
+   650→   650→    const maxY = Math.ceil(Math.max(A.y, B.y, C.y));
+   651→   651→    const w = maxX - minX;
+   652→   652→    const h = maxY - minY;
+   653→   653→    if (w <= 0 || h <= 0) return;
+   654→   654→
+   655→   655→    const img = ctx.createImageData(w, h);
+   656→   656→    const data = img.data;
+   657→   657→
+   658→   658→    // Barycentric determinant and inverse.
+   659→   659→    const det = (B.y - C.y) * (A.x - C.x) + (C.x - B.x) * (A.y - C.y);
+   660→   660→    if (Math.abs(det) < 1e-9) return;
+   661→   661→    const invDet = 1 / det;
+   662→   662→
+   663→   663→    const hue = hsv.h;
+   664→   664→
+   665→   665→    for (let py = 0; py < h; py++) {
+   666→   666→      for (let px = 0; px < w; px++) {
+   667→   667→        // Sample at pixel center.
+   668→   668→        const Px = minX + px + 0.5;
+   669→   669→        const Py = minY + py + 0.5;
+   670→   670→
+   671→   671→        const alpha = ((B.y - C.y) * (Px - C.x) + (C.x - B.x) * (Py - C.y)) * invDet;
+   672→   672→        const beta = ((C.y - A.y) * (Px - C.x) + (A.x - C.x) * (Py - C.y)) * invDet;
+   673→   673→        const gamma = 1 - alpha - beta;
+   674→   674→
+   675→   675→        // Distance to nearest edge — used for ~1px anti-aliased coverage.
+   676→   676→        const coverage = Math.min(alpha, beta, gamma);
+   677→   677→        if (coverage < -0.5) continue; // well outside the triangle
+   678→   678→        const aa = Math.max(0, Math.min(1, coverage + 0.5));
+   679→   679→        if (aa === 0) continue;
+   680→   680→
+   681→   681→        // Clamp barycentric to ≥ 0 and renormalize so colors stay valid even
+   682→   682→        // for the few edge pixels that fall slightly outside the triangle.
+   683→   683→        let a = alpha < 0 ? 0 : alpha;
+   684→   684→        let b = beta < 0 ? 0 : beta;
+   685→   685→        let g = gamma < 0 ? 0 : gamma;
+   686→   686→        const sum = a + b + g;
+   687→   687→        if (sum <= 0) continue;
+   688→   688→        a /= sum;
+   689→   689→        b /= sum;
+   690→   690→        g /= sum;
+   691→   691→
+   692→   692→        const V = a + b;
+   693→   693→        const S = V > 0 ? b / V : 0;
+   694→   694→        const rgb = hsvToRgb(hue, S * 100, V * 100);
+   695→   695→
+   696→   696→        const i = (py * w + px) * 4;
+   697→   697→        data[i] = rgb.r;
+   698→   698→        data[i + 1] = rgb.g;
+   699→   699→        data[i + 2] = rgb.b;
+   700→   700→        data[i + 3] = Math.round(aa * 255);
+   701→   701→      }
+   702→   702→    }
+   703→   703→
+   704→   704→    ctx.putImageData(img, minX, minY);
+   705→   705→  }
+   706→   706→
+   707→   707→  /**
+   708→   708→   * Disk inner shape: polar mapping
+   709→   709→   *   r → saturation (0 at center, 1 at edge)
+   710→   710→   *   θ → value via V = (1 + cos θ) / 2
+   711→   711→   *
+   712→   712→   * Smooth and seam-free. Center maps to S = 0; angle at center is undefined
+   713→   713→   * so V defaults to 1 (bright white center).
+   714→   714→   */
+   715→   715→  private drawDiskTo(ctx: CanvasRenderingContext2D, geom: Geometry): void {
+   716→   716→    const { cx, cy, innerR } = geom;
+   717→   717→    const { hsv } = this;
+   718→   718→    const r = Math.max(1, innerR);
+   719→   719→
+   720→   720→    const minX = Math.floor(cx - r);
+   721→   721→    const minY = Math.floor(cy - r);
+   722→   722→    const w = Math.ceil(2 * r);
+   723→   723→    const h = w;
+   724→   724→    if (w <= 0 || h <= 0) return;
+   725→   725→
+   726→   726→    const img = ctx.createImageData(w, h);
+   727→   727→    const data = img.data;
+   728→   728→
+   729→   729→    const hue = hsv.h;
+   730→   730→
+   731→   731→    for (let py = 0; py < h; py++) {
+   732→   732→      for (let px = 0; px < w; px++) {
+   733→   733→        const Px = minX + px + 0.5;
+   734→   734→        const Py = minY + py + 0.5;
+   735→   735→        const dx = Px - cx;
+   736→   736→        const dy = Py - cy;
+   737→   737→        const dist = Math.sqrt(dx * dx + dy * dy);
+   738→   738→        if (dist > r + 0.5) continue;
+   739→   739→        // Anti-aliased edge.
+   740→   740→        const aa = Math.max(0, Math.min(1, r - dist + 0.5));
+   741→   741→        if (aa === 0) continue;
+   742→   742→
+   743→   743→        const S = Math.min(1, dist / r);
+   744→   744→        let V: number;
+   745→   745→        if (dist < 0.5) {
+   746→   746→          V = 1; // center: angle is undefined
+   747→   747→        } else {
+   748→   748→          // atan2(dx, -dy) = angle from +up axis, increasing clockwise.
+   749→   749→          const theta = Math.atan2(dx, -dy);
+   750→   750→          V = (1 + Math.cos(theta)) / 2;
+   751→   751→        }
+   752→   752→        const rgb = hsvToRgb(hue, S * 100, V * 100);
+   753→   753→
+   754→   754→        const i = (py * w + px) * 4;
+   755→   755→        data[i] = rgb.r;
+   756→   756→        data[i + 1] = rgb.g;
+   757→   757→        data[i + 2] = rgb.b;
+   758→   758→        data[i + 3] = Math.round(aa * 255);
+   759→   759→      }
+   760→   760→    }
+   761→   761→
+   762→   762→    ctx.putImageData(img, minX, minY);
+   763→   763→  }
+   764→   764→
+   765→   765→  // ---- Markers ------------------------------------------------------------
+   766→   766→
+   767→   767→  private renderMarkers(geom: Geometry): void {
+   768→   768→    this.renderHueMarker(geom);
+   769→   769→    if (this.options.shape !== "none") {
+   770→   770→      this.renderInnerMarker(geom);
+   771→   771→    }
+   772→   772→  }
+   773→   773→
+   774→   774→  /**
+   775→   775→   * Hue marker — a small disc sitting on the wheel ring at the angular
+   776→   776→   * position of the current hue. White outer halo + dark inner ring + a
+   777→   777→   * center dot in the pure-hue color guarantees visibility on any hue.
+   778→   778→   */
+   779→   779→  private renderHueMarker(geom: Geometry): void {
+   780→   780→    const { cx, cy, wheelInnerR, wheelOuterR } = geom;
+   781→   781→    const { ctx, hsv } = this;
+   782→   782→    const midR = (wheelInnerR + wheelOuterR) / 2;
+   783→   783→    const angle = -Math.PI / 2 + (hsv.h * Math.PI) / 180;
+   784→   784→    const x = cx + midR * Math.cos(angle);
+   785→   785→    const y = cy + midR * Math.sin(angle);
+   786→   786→
+   787→   787→    const thickness = wheelOuterR - wheelInnerR;
+   788→   788→    const markerR = clamp(thickness / 2 - 1, 4, 9);
+   789→   789→    const ringR = markerR + 1.5;
+   790→   790→
+   791→   791→    // White halo.
+   792→   792→    ctx.beginPath();
+   793→   793→    ctx.arc(x, y, ringR, 0, Math.PI * 2);
+   794→   794→    ctx.lineWidth = 2.5;
+   795→   795→    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+   796→   796→    ctx.stroke();
+   797→   797→
+   798→   798→    // Dark inner ring.
+   799→   799→    ctx.beginPath();
+   800→   800→    ctx.arc(x, y, ringR, 0, Math.PI * 2);
+   801→   801→    ctx.lineWidth = 1;
+   802→   802→    ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+   803→   803→    ctx.stroke();
+   804→   804→
+   805→   805→    // Pure-hue center dot.
+   806→   806→    const rgb = hsvToRgb(hsv.h, 100, 100);
+   807→   807→    ctx.beginPath();
+   808→   808→    ctx.arc(x, y, Math.max(1, markerR - 1.5), 0, Math.PI * 2);
+   809→   809→    ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+   810→   810→    ctx.fill();
+   811→   811→  }
+   812→   812→
+   813→   813→  /**
+   814→   814→   * Inner marker — a small ring at the selected (S, V) position inside the
+   815→   815→   * current shape. White halo + dark inner ring + center dot in the actual
+   816→   816→   * selected color so it remains perceivable against any background.
+   817→   817→   */
+   818→   818→  private renderInnerMarker(geom: Geometry): void {
+   819→   819→    const pos = this.getInnerMarkerPosition(geom);
+   820→   820→    if (!pos) return;
+   821→   821→    const { ctx, hsv } = this;
+   822→   822→    const rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+   823→   823→
+   824→   824→    const markerR = 7;
+   825→   825→    // White halo.
+   826→   826→    ctx.beginPath();
+   827→   827→    ctx.arc(pos.x, pos.y, markerR, 0, Math.PI * 2);
+   828→   828→    ctx.lineWidth = 3;
+   829→   829→    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+   830→   830→    ctx.stroke();
+   831→   831→    // Dark inner ring.
+   832→   832→    ctx.beginPath();
+   833→   833→    ctx.arc(pos.x, pos.y, markerR, 0, Math.PI * 2);
+   834→   834→    ctx.lineWidth = 1.5;
+   835→   835→    ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+   836→   836→    ctx.stroke();
+   837→   837→    // Selected color dot.
+   838→   838→    ctx.beginPath();
+   839→   839→    ctx.arc(pos.x, pos.y, Math.max(1, markerR - 3.5), 0, Math.PI * 2);
+   840→   840→    ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+   841→   841→    ctx.fill();
+   842→   842→  }
+   843→   843→
+   844→   844→  /** Compute the inner marker position from the current HSV state. */
+   845→   845→  private getInnerMarkerPosition(
+   846→   846→    geom: Geometry,
+   847→   847→  ): { x: number; y: number } | null {
+   848→   848→    const { shape } = this.options;
+   849→   849→    const { cx, cy, innerR } = geom;
+   850→   850→    const s = this.hsv.s / 100;
+   851→   851→    const v = this.hsv.v / 100;
+   852→   852→
+   853→   853→    if (shape === "square") {
+   854→   854→      const side = innerR * Math.SQRT2;
+   855→   855→      const half = side / 2;
+   856→   856→      const left = cx - half;
+   857→   857→      const top = cy - half;
+   858→   858→      return { x: left + s * side, y: top + (1 - v) * side };
+   859→   859→    }
+   860→   860→
+   861→   861→    if (shape === "disk") {
+   862→   862→      const r = s * innerR;
+   863→   863→      // Use the tracked disk angle so the marker stays where the user put it.
+   864→   864→      const theta = this.diskTheta;
+   865→   865→      return {
+   866→   866→        x: cx + r * Math.sin(theta),
+   867→   867→        y: cy - r * Math.cos(theta),
+   868→   868→      };
+   869→   869→    }
+   870→   870→
+   871→   871→    if (shape === "triangle") {
+   872→   872→      const r = innerR;
+   873→   873→      const A = { x: cx, y: cy - r };
+   874→   874→      const B = { x: cx + (r * Math.sqrt(3)) / 2, y: cy + r / 2 };
+   875→   875→      const C = { x: cx - (r * Math.sqrt(3)) / 2, y: cy + r / 2 };
+   876→   876→      const alpha = v * (1 - s);
+   877→   877→      const beta = s * v;
+   878→   878→      const gamma = 1 - v;
+   879→   879→      return {
+   880→   880→        x: alpha * A.x + beta * B.x + gamma * C.x,
+   881→   881→        y: alpha * A.y + beta * B.y + gamma * C.y,
+   882→   882→      };
+   883→   883→    }
+   884→   884→
+   885→   885→    return null;
+   886→   886→  }
+   887→   887→
+   888→   888→  // --------------------------------------------------------------------------
+   889→   889→  // Pointer interaction
+   890→   890→  // --------------------------------------------------------------------------
+   891→   891→
+   892→   892→  private getCanvasPoint(e: PointerEvent): { x: number; y: number } {
+   893→   893→    const rect = this.canvas.getBoundingClientRect();
+   894→   894→    // Use rect.width to scale in case the canvas has been resized via CSS.
+   895→   895→    const geom = this.getGeometry();
+   896→   896→    const scaleX = geom.total / (rect.width || geom.total);
+   897→   897→    const scaleY = geom.total / (rect.height || geom.total);
+   898→   898→    return {
+   899→   899→      x: (e.clientX - rect.left) * scaleX,
+   900→   900→      y: (e.clientY - rect.top) * scaleY,
+   901→   901→    };
+   902→   902→  }
+   903→   903→
+   904→   904→  private onPointerDown(e: PointerEvent): void {
+   905→   905→    if (this._destroyed) return;
+   906→   906→    const { x, y } = this.getCanvasPoint(e);
+   907→   907→    const geom = this.getGeometry();
+   908→   908→    const dx = x - geom.cx;
+   909→   909→    const dy = y - geom.cy;
+   910→   910→    const dist = Math.sqrt(dx * dx + dy * dy);
+   911→   911→
+   912→   912→    const onWheel =
+   913→   913→      dist >= geom.wheelInnerR - 1 && dist <= geom.wheelOuterR + 1;
+   914→   914→    const inInner = dist <= geom.innerR;
+   915→   915→
+   916→   916→    if (onWheel) {
+   917→   917→      this.pointerState = { type: "wheel", pointerId: e.pointerId };
+   918→   918→      try {
+   919→   919→        this.canvas.setPointerCapture(e.pointerId);
+   920→   920→      } catch {
+   921→   921→        /* ignore */
+   922→   922→      }
+   923→   923→      this.updateHueFromPoint(x, y, geom);
+   924→   924→      e.preventDefault();
+   925→   925→    } else if (inInner && this.options.shape !== "none") {
+   926→   926→      this.pointerState = { type: "inner", pointerId: e.pointerId };
+   927→   927→      try {
+   928→   928→        this.canvas.setPointerCapture(e.pointerId);
+   929→   929→      } catch {
+   930→   930→        /* ignore */
+   931→   931→      }
+   932→   932→      this.updateInnerFromPoint(x, y, geom);
+   933→   933→      e.preventDefault();
+   934→   934→    }
+   935→   935→  }
+   936→   936→
+   937→   937→  private onPointerMove(e: PointerEvent): void {
+   938→   938→    if (!this.pointerState) return;
+   939→   939→    const { x, y } = this.getCanvasPoint(e);
+   940→   940→    const geom = this.getGeometry();
+   941→   941→    if (this.pointerState.type === "wheel") {
+   942→   942→      this.updateHueFromPoint(x, y, geom);
+   943→   943→    } else {
+   944→   944→      this.updateInnerFromPoint(x, y, geom);
+   945→   945→    }
+   946→   946→    e.preventDefault();
+   947→   947→  }
+   948→   948→
+   949→   949→  private onPointerUp(e: PointerEvent): void {
+   950→   950→    if (!this.pointerState) return;
+   951→   951→    const id = this.pointerState.pointerId;
+   952→   952→    try {
+   953→   953→      this.canvas.releasePointerCapture(id);
+   954→   954→    } catch {
+   955→   955→      /* ignore */
+   956→   956→    }
+   957→   957→    this.pointerState = null;
+   958→   958→    this.emit("change", this.getColor());
+   959→   959→  }
+   960→   960→
+   961→   961→  private updateHueFromPoint(
+   962→   962→    x: number,
+   963→   963→    y: number,
+   964→   964→    geom: Geometry,
+   965→   965→  ): void {
+   966→   966→    const dx = x - geom.cx;
+   967→   967→    const dy = y - geom.cy;
+   968→   968→    // Angle from "up" vector, increasing clockwise (matches wheel layout).
+   969→   969→    let theta = (Math.atan2(dx, -dy) * 180) / Math.PI;
+   970→   970→    if (theta < 0) theta += 360;
+   971→   971→    this.hsv = { ...this.hsv, h: clampHue(theta) };
+   972→   972→    this.options.hue = this.hsv.h;
+   973→   973→    this.invalidateInnerCache();
+   974→   974→    this.updateAria();
+   975→   975→    this.scheduleRender();
+   976→   976→    this.emit("input", this.getColor());
+   977→   977→  }
+   978→   978→
+   979→   979→  private updateInnerFromPoint(
+   980→   980→    x: number,
+   981→   981→    y: number,
+   982→   982→    geom: Geometry,
+   983→   983→  ): void {
+   984→   984→    const { shape } = this.options;
+   985→   985→    const { cx, cy, innerR } = geom;
+   986→   986→    let newHsv: HSV | null = null;
+   987→   987→
+   988→   988→    if (shape === "square") {
+   989→   989→      const side = innerR * Math.SQRT2;
+   990→   990→      const half = side / 2;
+   991→   991→      const left = cx - half;
+   992→   992→      const top = cy - half;
+   993→   993→      const s = clamp((x - left) / side, 0, 1);
+   994→   994→      const v = clamp(1 - (y - top) / side, 0, 1);
+   995→   995→      newHsv = { ...this.hsv, s: s * 100, v: v * 100 };
+   996→   996→    } else if (shape === "disk") {
+   997→   997→      const dx = x - cx;
+   998→   998→      const dy = y - cy;
+   999→   999→      const dist = Math.sqrt(dx * dx + dy * dy);
+  1000→  1000→      const s = clamp(dist / innerR, 0, 1);
+  1001→  1001→      let v: number;
+  1002→  1002→      if (dist < 0.5) {
+  1003→  1003→        v = this.hsv.v / 100; // keep current V at the very center
+  1004→  1004→      } else {
+  1005→  1005→        const theta = Math.atan2(dx, -dy);
+  1006→  1006→        v = (1 + Math.cos(theta)) / 2;
+  1007→  1007→        this.diskTheta = theta;
+  1008→  1008→      }
+  1009→  1009→      newHsv = { ...this.hsv, s: s * 100, v: v * 100 };
+  1010→  1010→    } else if (shape === "triangle") {
+  1011→  1011→      const r = innerR;
+  1012→  1012→      const Ax = cx;
+  1013→  1013→      const Ay = cy - r;
+  1014→  1014→      const Bx = cx + (r * Math.sqrt(3)) / 2;
+  1015→  1015→      const By = cy + r / 2;
+  1016→  1016→      const Cx = cx - (r * Math.sqrt(3)) / 2;
+  1017→  1017→      const Cy = cy + r / 2;
+  1018→  1018→
+  1019→  1019→      const det = (By - Cy) * (Ax - Cx) + (Cx - Bx) * (Ay - Cy);
+  1020→  1020→      if (Math.abs(det) < 1e-9) return;
+  1021→  1021→      const invDet = 1 / det;
+  1022→  1022→      const alpha = ((By - Cy) * (x - Cx) + (Cx - Bx) * (y - Cy)) * invDet;
+  1023→  1023→      const beta = ((Cy - Ay) * (x - Cx) + (Ax - Cx) * (y - Cy)) * invDet;
+  1024→  1024→      const gamma = 1 - alpha - beta;
+  1025→  1025→
+  1026→  1026→      // Clamp to the triangle (project to nearest edge if outside).
+  1027→  1027→      let a = alpha < 0 ? 0 : alpha;
+  1028→  1028→      let b = beta < 0 ? 0 : beta;
+  1029→  1029→      let g = gamma < 0 ? 0 : gamma;
+  1030→  1030→      const sum = a + b + g;
+  1031→  1031→      if (sum <= 0) return;
+  1032→  1032→      a /= sum;
+  1033→  1033→      b /= sum;
+  1034→  1034→      g /= sum;
+  1035→  1035→
+  1036→  1036→      const V = a + b;
+  1037→  1037→      const S = V > 0 ? b / V : 0;
+  1038→  1038→      newHsv = { ...this.hsv, s: S * 100, v: V * 100 };
+  1039→  1039→    }
+  1040→  1040→
+  1041→  1041→    if (!newHsv) return;
+  1042→  1042→    this.hsv = newHsv;
+  1043→  1043→    this.scheduleRender();
+  1044→  1044→    this.emit("input", this.getColor());
+  1045→  1045→  }
+  1046→  1046→
+  1047→  1047→  // --------------------------------------------------------------------------
+  1048→  1048→  // Keyboard interaction
+  1049→  1049→  // --------------------------------------------------------------------------
+  1050→  1050→
+  1051→  1051→  private onKeyDown(e: KeyboardEvent): void {
+  1052→  1052→    if (this._destroyed) return;
+  1053→  1053→    const step = e.shiftKey ? 10 : 1;
+  1054→  1054→    const hasInner = this.options.shape !== "none";
+  1055→  1055→    let handled = false;
+  1056→  1056→
+  1057→  1057→    switch (e.key) {
+  1058→  1058→      case "ArrowLeft":
+  1059→  1059→        if ((e.ctrlKey || e.metaKey) && hasInner) {
+  1060→  1060→          this.adjustSaturation(-step);
+  1061→  1061→        } else {
+  1062→  1062→          this.adjustHue(-step);
+  1063→  1063→        }
+  1064→  1064→        handled = true;
+  1065→  1065→        break;
+  1066→  1066→      case "ArrowRight":
+  1067→  1067→        if ((e.ctrlKey || e.metaKey) && hasInner) {
+  1068→  1068→          this.adjustSaturation(step);
+  1069→  1069→        } else {
+  1070→  1070→          this.adjustHue(step);
+  1071→  1071→        }
+  1072→  1072→        handled = true;
+  1073→  1073→        break;
+  1074→  1074→      case "ArrowUp":
+  1075→  1075→        if (hasInner) {
+  1076→  1076→          this.adjustValue(step);
+  1077→  1077→        } else {
+  1078→  1078→          this.adjustHue(step);
+  1079→  1079→        }
+  1080→  1080→        handled = true;
+  1081→  1081→        break;
+  1082→  1082→      case "ArrowDown":
+  1083→  1083→        if (hasInner) {
+  1084→  1084→          this.adjustValue(-step);
+  1085→  1085→        } else {
+  1086→  1086→          this.adjustHue(-step);
+  1087→  1087→        }
+  1088→  1088→        handled = true;
+  1089→  1089→        break;
+  1090→  1090→      case "Home":
+  1091→  1091→        this.adjustHue(-360);
+  1092→  1092→        handled = true;
+  1093→  1093→        break;
+  1094→  1094→      case "End":
+  1095→  1095→        this.adjustHue(360);
+  1096→  1096→        handled = true;
+  1097→  1097→        break;
+  1098→  1098→      default:
+  1099→  1099→        break;
+  1100→  1100→    }
+  1101→  1101→
+  1102→  1102→    if (handled) {
+  1103→  1103→      e.preventDefault();
+  1104→  1104→      e.stopPropagation();
+  1105→  1105→    }
+  1106→  1106→  }
+  1107→  1107→
+  1108→  1108→  private adjustHue(delta: number): void {
+  1109→  1109→    this.hsv = { ...this.hsv, h: clampHue(this.hsv.h + delta) };
+  1110→  1110→    this.options.hue = this.hsv.h;
+  1111→  1111→    this.invalidateInnerCache();
+  1112→  1112→    this.updateAria();
+  1113→  1113→    this.scheduleRender();
+  1114→  1114→    const out = this.getColor();
+  1115→  1115→    this.emit("input", out);
+  1116→  1116→    this.emit("change", out);
+  1117→  1117→  }
+  1118→  1118→
+  1119→  1119→  private adjustSaturation(delta: number): void {
+  1120→  1120→    this.hsv = { ...this.hsv, s: clamp(this.hsv.s + delta, 0, 100) };
+  1121→  1121→    this.scheduleRender();
+  1122→  1122→    const out = this.getColor();
+  1123→  1123→    this.emit("input", out);
+  1124→  1124→    this.emit("change", out);
+  1125→  1125→  }
+  1126→  1126→
+  1127→  1127→  private adjustValue(delta: number): void {
+  1128→  1128→    this.hsv = { ...this.hsv, v: clamp(this.hsv.v + delta, 0, 100) };
+  1129→  1129→    this.scheduleRender();
+  1130→  1130→    const out = this.getColor();
+  1131→  1131→    this.emit("input", out);
+  1132→  1132→    this.emit("change", out);
+  1133→  1133→  }
+  1134→  1134→
+  1135→  1135→  // --------------------------------------------------------------------------
+  1136→  1136→  // ARIA
+  1137→  1137→  // --------------------------------------------------------------------------
+  1138→  1138→
+  1139→  1139→  private updateAria(): void {
+  1140→  1140→    const out = this.getColor();
+  1141→  1141→    this.canvas.setAttribute(
+  1142→  1142→      "aria-valuetext",
+  1143→  1143→      `Hue ${Math.round(this.hsv.h)}°, ${out.hex}`,
+  1144→  1144→    );
+  1145→  1145→  }
+  1146→  1146→
+  1147→  1147→  // --------------------------------------------------------------------------
+  1148→  1148→  // Event emitter
+  1149→  1149→  // --------------------------------------------------------------------------
+  1150→  1150→
+  1151→  1151→  private emit(event: string, color: ColorOutput): void {
+  1152→  1152→    const set = this.listeners.get(event);
+  1153→  1153→    if (!set) return;
+  1154→  1154→    // Clone to a plain array so a handler unsubscribing during iteration
+  1155→  1155→    // doesn't skip subsequent handlers.
+  1156→  1156→    const handlers = Array.from(set);
+  1157→  1157→    for (const h of handlers) {
+  1158→  1158→      try {
+  1159→  1159→        h(color);
+  1160→  1160→      } catch (err) {
+  1161→  1161→        // Never let a listener error take down the picker.
+  1162→  1162→        console.error("ColorWheelPicker listener error:", err);
+  1163→  1163→      }
+  1164→  1164→    }
+  1165→  1165→  }
+  1166→  1166→}
+  1167→  1167→

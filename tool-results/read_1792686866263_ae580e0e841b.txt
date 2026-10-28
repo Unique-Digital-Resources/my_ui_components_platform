@@ -1,0 +1,916 @@
+     1→// Platform-wide metadata for components, categories, examples, docs, etc.
+     2→// Single source of truth — used by navigation, search, and page rendering.
+     3→
+     4→import type { Route } from "@/store/navigation";
+     5→
+     6→export type ComponentStatus = "stable" | "beta" | "experimental" | "planned";
+     7→
+     8→export interface ComponentMeta {
+     9→  slug: string;
+    10→  name: string;
+    11→  category: string;
+    12→  description: string;
+    13→  longDescription: string;
+    14→  status: ComponentStatus;
+    15→  tags: string[];
+    16→  capabilities: string[];
+    17→  whenToUse: string[];
+    18→  whenNotToUse: string[];
+    19→  properties: ComponentProperty[];
+    20→  methods: ComponentMethod[];
+    21→  events: ComponentEvent[];
+    22→  defaults: Record<string, unknown>;
+    23→}
+    24→
+    25→export interface ComponentProperty {
+    26→  name: string;
+    27→  type: string;
+    28→  default: string;
+    29→  description: string;
+    30→}
+    31→
+    32→export interface ComponentMethod {
+    33→  signature: string;
+    34→  description: string;
+    35→  returns?: string;
+    36→}
+    37→
+    38→export interface ComponentEvent {
+    39→  name: string;
+    40→  payload: string;
+    41→  description: string;
+    42→}
+    43→
+    44→export interface CategoryMeta {
+    45→  slug: string;
+    46→  name: string;
+    47→  description: string;
+    48→  icon: string; // lucide icon name
+    49→  capabilities: string[];
+    50→  useCases: string[];
+    51→}
+    52→
+    53→export const categories: CategoryMeta[] = [
+    54→  {
+    55→    slug: "color",
+    56→    name: "Color",
+    57→    description:
+    58→      "Components for selecting, adjusting, and working with colors inside application interfaces.",
+    59→    icon: "Palette",
+    60→    capabilities: ["Color selection", "Property editing", "HSV / HSL / RGB output"],
+    61→    useCases: [
+    62→      "Graphics and image-editing software",
+    63→      "Illustration and digital painting applications",
+    64→      "Design tools and visual editors",
+    65→      "Theme and appearance customization panels",
+    66→      "Material, surface, and property inspectors",
+    67→    ],
+    68→  },
+    69→  {
+    70→    slug: "inputs",
+    71→    name: "Inputs",
+    72→    description: "Numeric, textual, and composite property controls for application panels.",
+    73→    icon: "SlidersHorizontal",
+    74→    capabilities: ["Value editing", "Range selection", "Validation"],
+    75→    useCases: ["Property inspectors", "Settings panels", "Developer tools"],
+    76→  },
+    77→  {
+    78→    slug: "layout",
+    79→    name: "Layout",
+    80→    description: "Structural building blocks for application-style interfaces.",
+    81→    icon: "LayoutPanelLeft",
+    82→    capabilities: ["Panel composition", "Resizable regions"],
+    83→    useCases: ["Workspaces", "Inspector layouts", "Tool panels"],
+    84→  },
+    85→  {
+    86→    slug: "data-display",
+    87→    name: "Data Display",
+    88→    description: "Components for presenting structured data in application contexts.",
+    89→    icon: "Table2",
+    90→    capabilities: ["Tabular data", "Trees", "Metadata"],
+    91→    useCases: ["Inspectors", "Asset browsers", "Property tables"],
+    92→  },
+    93→];
+    94→
+    95→export const components: ComponentMeta[] = [
+    96→  {
+    97→    slug: "color-wheel",
+    98→    name: "Color Wheel Picker",
+    99→    category: "color",
+   100→    description:
+   101→      "A hue wheel with configurable inner selection shapes and adjustable dimensions.",
+   102→    longDescription:
+   103→      "A professional color-selection component combining a hue wheel with a configurable inner color-selection shape. The inner area can be a triangle, square, disk, or omitted entirely, giving developers precise control over the color-selection experience.",
+   104→    status: "stable",
+   105→    tags: ["Vanilla JS", "Interactive", "Configurable"],
+   106→    capabilities: ["Keyboard Support", "Resizable", "Themeable", "Accessible"],
+   107→    whenToUse: [
+   108→      "You need precise color selection in a creative application.",
+   109→      "You want a hue wheel synchronized with a configurable inner geometry.",
+   110→      "You need HSV-based output with HEX, RGB, and HSL conversions.",
+   111→    ],
+   112→    whenNotToUse: [
+   113→      "You only need a simple hex input field.",
+   114→      "You need advanced color management with ICC profiles.",
+   115→    ],
+   116→    properties: [
+   117→      { name: "shape", type: "'triangle' | 'square' | 'disk' | 'none'", default: "'triangle'", description: "The inner selection geometry." },
+   118→      { name: "size", type: "number", default: "180", description: "The diameter of the inner selection area, in pixels." },
+   119→      { name: "wheelThickness", type: "number", default: "24", description: "The thickness of the hue wheel ring, in pixels." },
+   120→      { name: "wheelSpacing", type: "number", default: "8", description: "The gap between the inner shape and the hue wheel." },
+   121→      { name: "hue", type: "number", default: "210", description: "The initial hue (0–360)." },
+   122→      { name: "color", type: "string", default: "'#4287f5'", description: "The initial selected color as a HEX string." },
+   123→      { name: "rotateShape", type: "boolean", default: "false", description: "When true, the inner triangle rotates so its pure-hue vertex tracks the current hue on the wheel." },
+   124→    ],
+   125→    methods: [
+   126→      { signature: "setColor(color: string)", description: "Sets the selected color. Accepts HEX, RGB, HSL.", returns: "void" },
+   127→      { signature: "getColor()", description: "Returns the current color in all formats.", returns: "ColorOutput" },
+   128→      { signature: "setShape(shape: Shape)", description: "Changes the inner selection geometry." },
+   129→      { signature: "setSize(size: number)", description: "Changes the inner shape diameter." },
+   130→      { signature: "setWheelThickness(thickness: number)", description: "Changes the hue wheel ring thickness." },
+   131→      { signature: "setWheelSpacing(spacing: number)", description: "Changes the gap between the inner shape and the wheel." },
+   132→      { signature: "setHue(hue: number)", description: "Sets the hue (0–360)." },
+   133→      { signature: "setRotateShape(rotate: boolean)", description: "Enables/disables shape rotation tracking the hue." },
+   134→      { signature: "on(event: string, handler: Function)", description: "Subscribes to an event." },
+   135→      { signature: "off(event: string, handler: Function)", description: "Unsubscribes from an event." },
+   136→      { signature: "destroy()", description: "Removes the component and cleans up all listeners." },
+   137→    ],
+   138→    events: [
+   139→      { name: "input", payload: "{ hex, rgb, hsv, hsl }", description: "Fires continuously while the user drags the selection." },
+   140→      { name: "change", payload: "{ hex, rgb, hsv, hsl }", description: "Fires when the user commits a color selection." },
+   141→    ],
+   142→    defaults: {
+   143→      shape: "triangle",
+   144→      size: 180,
+   145→      wheelThickness: 24,
+   146→      wheelSpacing: 8,
+   147→      hue: 210,
+   148→      color: "#4287f5",
+   149→    },
+   150→  },
+   151→  {
+   152→    slug: "color-range",
+   153→    name: "Color Range",
+   154→    category: "color",
+   155→    description:
+   156→      "A 1D color slider for a single dimension — hue, lightness, contrast, or alpha — with configurable orientation and thickness.",
+   157→    longDescription:
+   158→      "A one-dimensional color slider component for adjusting a single color dimension. Supports four modes — hue, lightness, contrast, and alpha — each rendering the appropriate gradient track. The track can be oriented horizontally or vertically, with adjustable thickness and length.",
+   159→    status: "stable",
+   160→    tags: ["Vanilla JS", "Interactive", "Configurable"],
+   161→    capabilities: ["Keyboard Support", "Resizable", "Themeable", "Accessible", "Multi-mode"],
+   162→    whenToUse: [
+   163→      "You need a compact 1D control for a single color dimension.",
+   164→      "You want separate hue, lightness, contrast, or alpha sliders in an inspector.",
+   165→      "You need vertical or horizontal orientation to fit a panel layout.",
+   166→    ],
+   167→    whenNotToUse: [
+   168→      "You need 2D color selection (use the Color Wheel Picker).",
+   169→      "You need a simple numeric range input unrelated to color.",
+   170→    ],
+   171→    properties: [
+   172→      { name: "mode", type: "'hue' | 'lightness' | 'contrast' | 'alpha'", default: "'hue'", description: "Which color dimension the track represents." },
+   173→      { name: "value", type: "number", default: "mode-dependent", description: "0–360 for hue, 0–100 for lightness/contrast, 0–1 for alpha." },
+   174→      { name: "color", type: "string", default: "'#4287f5'", description: "The base color used by lightness/contrast/alpha modes." },
+   175→      { name: "orientation", type: "'horizontal' | 'vertical'", default: "'horizontal'", description: "Track orientation." },
+   176→      { name: "thickness", type: "number", default: "16", description: "Track thickness (the short dimension), in pixels." },
+   177→      { name: "length", type: "number", default: "260", description: "Track length (the long dimension), in pixels." },
+   178→    ],
+   179→    methods: [
+   180→      { signature: "getValue()", description: "Returns the current numeric value.", returns: "number" },
+   181→      { signature: "getValueOutput()", description: "Returns the value with mode and a formatted label.", returns: "ColorRangeValueOutput" },
+   182→      { signature: "setValue(value: number)", description: "Sets the current value (clamped to the mode range)." },
+   183→      { signature: "setMode(mode: ColorRangeMode)", description: "Changes the color dimension. Resets the value to the mode default." },
+   184→      { signature: "setColor(color: string)", description: "Sets the base color (hex)." },
+   185→      { signature: "setOrientation(orientation: ColorRangeOrientation)", description: "Switches between horizontal and vertical." },
+   186→      { signature: "setThickness(n: number)", description: "Changes the track thickness." },
+   187→      { signature: "setLength(n: number)", description: "Changes the track length." },
+   188→      { signature: "on(event: string, handler: Function)", description: "Subscribes to an event." },
+   189→      { signature: "off(event: string, handler: Function)", description: "Unsubscribes from an event." },
+   190→      { signature: "destroy()", description: "Removes the component and cleans up all listeners." },
+   191→    ],
+   192→    events: [
+   193→      { name: "input", payload: "{ mode, value, label }", description: "Fires continuously while the user drags the thumb." },
+   194→      { name: "change", payload: "{ mode, value, label }", description: "Fires when the user commits a selection (pointer up or keyboard)." },
+   195→    ],
+   196→    defaults: {
+   197→      mode: "hue",
+   198→      value: 210,
+   199→      color: "#4287f5",
+   200→      orientation: "horizontal",
+   201→      thickness: 16,
+   202→      length: 260,
+   203→    },
+   204→  },
+   205→  {
+   206→    slug: "color-circle",
+   207→    name: "Color Circle",
+   208→    category: "color",
+   209→    description:
+   210→      "A circular hue wheel with 10 Adobe Color-style harmony rules, a base-color-driven palette, snapping grid, and add/remove color support.",
+   211→    longDescription:
+   212→      "A circular hue wheel that visualizes color harmony relationships using a standalone harmony engine. Supports 10 rules (analogous, monochromatic, triad, complementary, split-complementary, double-split-complementary, square, compound, shades, custom). One color is the 'base' — moving it shifts all others to maintain their harmony offsets. Non-base colors move individually. An optional polar snapping grid (dots or lines) can be toggled on.",
+   213→    status: "stable",
+   214→    tags: ["Vanilla JS", "Interactive", "Configurable"],
+   215→    capabilities: ["Keyboard Support", "Resizable", "Themeable", "Accessible", "10 Harmony Rules", "Snapping Grid", "Add/Remove Colors"],
+   216→    whenToUse: [
+   217→      "You need to explore color harmony relationships (complementary, triadic, etc.).",
+   218→      "You want an Adobe Color-style base-color-driven palette editor.",
+   219→      "You need to generate, adjust, and export a harmonious color palette.",
+   220→    ],
+   221→    whenNotToUse: [
+   222→      "You need 2D saturation/value selection with a fixed inner shape (use the Color Wheel Picker).",
+   223→      "You need a 1D slider for a single dimension (use the Color Range).",
+   224→    ],
+   225→    properties: [
+   226→      { name: "harmony", type: "HarmonyRule", default: "'triad'", description: "One of 10 rules: analogous, monochromatic, triad, complementary, split-complementary, double-split-complementary, square, compound, shades, custom." },
+   227→      { name: "baseHue", type: "number", default: "210", description: "The base hue (0–360). Harmony hues are derived from this." },
+   228→      { name: "size", type: "number", default: "240", description: "Disk diameter in pixels." },
+   229→      { name: "snapping", type: "boolean", default: "false", description: "Whether colors snap to the grid divisions." },
+   230→      { name: "gridMode", type: "'dots' | 'lines'", default: "'dots'", description: "Grid visualization: dots at ring/angle intersections or radial lines + rings." },
+   231→      { name: "gridDivisions", type: "number", default: "12", description: "Number of angular snap divisions (also controls ring count)." },
+   232→      { name: "showHarmonyLinks", type: "boolean", default: "true", description: "Draw lines connecting harmony markers." },
+   233→    ],
+   234→    methods: [
+   235→      { signature: "getColors()", description: "Returns all color entries.", returns: "ColorEntry[]" },
+   236→      { signature: "getBaseIndex()", description: "Returns the index of the base (main) color.", returns: "number" },
+   237→      { signature: "setBaseIndex(i: number)", description: "Promotes a color to be the base. All offsets recalculated." },
+   238→      { signature: "getHarmony()", description: "Returns the active harmony rule.", returns: "HarmonyRule" },
+   239→      { signature: "setHarmony(rule: HarmonyRule)", description: "Changes the harmony rule. Palette is regenerated from the base hue." },
+   240→      { signature: "addColor(hue?, saturation?)", description: "Adds a color at a position. Returns the new index.", returns: "number" },
+   241→      { signature: "removeColor(i: number)", description: "Removes a color by index." },
+   242→      { signature: "setSize(n: number)", description: "Changes the disk diameter." },
+   243→      { signature: "setSnapping(on: boolean)", description: "Enables/disables grid snapping." },
+   244→      { signature: "setGridMode(mode: GridMode)", description: "Switches between dots and lines visualization." },
+   245→      { signature: "setGridDivisions(n: number)", description: "Sets the number of snap divisions (angular + radial)." },
+   246→      { signature: "setShowHarmonyLinks(on: boolean)", description: "Toggles harmony link lines." },
+   247→      { signature: "getOutput()", description: "Returns the base hue, base index, harmony, and full colors.", returns: "ColorCircleOutput" },
+   248→      { signature: "on(event: string, handler: Function)", description: "Subscribes to an event." },
+   249→      { signature: "off(event: string, handler: Function)", description: "Unsubscribes from an event." },
+   250→      { signature: "destroy()", description: "Removes the component and cleans up all listeners." },
+   251→    ],
+   252→    events: [
+   253→      { name: "input", payload: "{ baseHue, baseIndex, harmony, colors }", description: "Fires continuously while the user drags a color." },
+   254→      { name: "change", payload: "{ baseHue, baseIndex, harmony, colors }", description: "Fires when the selection is committed (pointer up or keyboard)." },
+   255→    ],
+   256→    defaults: {
+   257→      harmony: "triad",
+   258→      baseHue: 210,
+   259→      size: 240,
+   260→      snapping: false,
+   261→      gridMode: "dots",
+   262→      gridDivisions: 12,
+   263→      showHarmonyLinks: true,
+   264→    },
+   265→  },
+   266→  {
+   267→    slug: "color-ramp",
+   268→    name: "Color Ramp",
+   269→    category: "color",
+   270→    description:
+   271→      "A multi-stop color gradient component with draggable stops, add/remove, and orientation control.",
+   272→    longDescription:
+   273→      "A gradient ramp component with draggable color stops. Users can add stops by clicking empty space, remove stops, and reposition them by dragging. The gradient interpolates smoothly between stops. Supports horizontal and vertical orientation with configurable thickness and length.",
+   274→    status: "stable",
+   275→    tags: ["Vanilla JS", "Interactive", "Configurable"],
+   276→    capabilities: ["Keyboard Support", "Resizable", "Themeable", "Accessible", "Multi-stop", "Add/Remove Stops"],
+   277→    whenToUse: [
+   278→      "You need a gradient picker for maps, heatmaps, or data visualization.",
+   279→      "You want users to build custom color gradients interactively.",
+   280→      "You need horizontal or vertical gradient ramps in an inspector.",
+   281→    ],
+   282→    whenNotToUse: [
+   283→      "You need a single color picker (use the Color Wheel Picker or Color Range).",
+   284→      "You need harmony-based palette generation (use the Color Circle).",
+   285→    ],
+   286→    properties: [
+   287→      { name: "stops", type: "{ position: number, color: string }[]", default: "3 stops (blue, lemon, orange)", description: "The gradient stops. At least 2 recommended." },
+   288→      { name: "orientation", type: "'horizontal' | 'vertical'", default: "'horizontal'", description: "Ramp orientation." },
+   289→      { name: "thickness", type: "number", default: "32", description: "Bar thickness (short dimension), in pixels." },
+   290→      { name: "length", type: "number", default: "280", description: "Bar length (long dimension), in pixels." },
+   291→    ],
+   292→    methods: [
+   293→      { signature: "getStops()", description: "Returns all gradient stops.", returns: "RampStop[]" },
+   294→      { signature: "setStops(stops)", description: "Replaces all stops." },
+   295→      { signature: "addStop(position?, color?)", description: "Adds a stop. Color is interpolated if not given. Returns new index.", returns: "number" },
+   296→      { signature: "removeStop(i)", description: "Removes a stop (keeps at least 2)." },
+   297→      { signature: "setOrientation(orientation)", description: "Switches between horizontal and vertical." },
+   298→      { signature: "setThickness(n)", description: "Changes the bar thickness." },
+   299→      { signature: "setLength(n)", description: "Changes the bar length." },
+   300→      { signature: "on(event: string, handler: Function)", description: "Subscribes to an event." },
+   301→      { signature: "off(event: string, handler: Function)", description: "Unsubscribes from an event." },
+   302→      { signature: "destroy()", description: "Removes the component and cleans up all listeners." },
+   303→    ],
+   304→    events: [
+   305→      { name: "input", payload: "RampStop[]", description: "Fires continuously while the user drags a stop." },
+   306→      { name: "change", payload: "RampStop[]", description: "Fires when the user commits a change (pointer up or keyboard)." },
+   307→    ],
+   308→    defaults: {
+   309→      orientation: "horizontal",
+   310→      thickness: 32,
+   311→      length: 280,
+   312→    },
+   313→  },
+   314→  {
+   315→    slug: "periodic-range",
+   316→    name: "Periodic Range",
+   317→    category: "inputs",
+   318→    description:
+   319→      "A dual-thumb range slider with snapping, tick-mark markers, and orientation control for selecting a min/max interval.",
+   320→    longDescription:
+   321→      "A dual-thumb range slider component for selecting a minimum and maximum value within a numeric range. The two thumbs cannot cross (valueMin is always less than or equal to valueMax). Optional snapping constrains values to a step grid, optional tick-mark markers render with numeric labels, and the track can be oriented horizontally or vertically. The selected range between the thumbs is filled with the lemon accent color.",
+   322→    status: "stable",
+   323→    tags: ["Vanilla JS", "Interactive", "Configurable"],
+   324→    capabilities: ["Keyboard Support", "Resizable", "Themeable", "Accessible", "Dual-thumb", "Snapping", "Markers"],
+   325→    whenToUse: [
+   326→      "You need to select a value range (interval), not just a single value.",
+   327→      "You want a min/max slider with snapping to a fixed step grid.",
+   328→      "You need tick-mark markers with numeric labels along the track.",
+   329→      "You need vertical or horizontal orientation to fit a panel layout.",
+   330→    ],
+   331→    whenNotToUse: [
+   332→      "You need a single-value slider (use a standard range input).",
+   333→      "You need a 1D color slider (use the Color Range component).",
+   334→      "You need multi-stop gradient editing (use the Color Ramp component).",
+   335→    ],
+   336→    properties: [
+   337→      { name: "min", type: "number", default: "0", description: "Range minimum (low end of the track)." },
+   338→      { name: "max", type: "number", default: "100", description: "Range maximum (high end of the track)." },
+   339→      { name: "valueMin", type: "number", default: "25", description: "Current low thumb value. Clamped to [min, valueMax]." },
+   340→      { name: "valueMax", type: "number", default: "75", description: "Current high thumb value. Clamped to [valueMin, max]." },
+   341→      { name: "step", type: "number", default: "0", description: "Snap step. 0 = no snapping. When > 0, values snap to the nearest grid point." },
+   342→      { name: "showMarkers", type: "boolean", default: "false", description: "Whether to render tick marks with numeric labels along the track." },
+   343→      { name: "markerStep", type: "number", default: "10", description: "Interval between markers. Ignored when showMarkers is false." },
+   344→      { name: "orientation", type: "'horizontal' | 'vertical'", default: "'horizontal'", description: "Track orientation." },
+   345→      { name: "thickness", type: "number", default: "8", description: "Track thickness (the short dimension), in pixels." },
+   346→      { name: "length", type: "number", default: "280", description: "Track length (the long dimension), in pixels." },
+   347→    ],
+   348→    methods: [
+   349→      { signature: "getValueMin()", description: "Returns the current low thumb value.", returns: "number" },
+   350→      { signature: "getValueMax()", description: "Returns the current high thumb value.", returns: "number" },
+   351→      { signature: "setValueMin(v: number)", description: "Sets the low thumb value. Clamped to [min, valueMax] and snapped to step." },
+   352→      { signature: "setValueMax(v: number)", description: "Sets the high thumb value. Clamped to [valueMin, max] and snapped to step." },
+   353→      { signature: "setRange(min: number, max: number)", description: "Sets both range bounds. Existing values are re-clamped to the new range." },
+   354→      { signature: "setStep(step: number)", description: "Sets the snap step. 0 disables snapping. Current values are re-snapped." },
+   355→      { signature: "setShowMarkers(on: boolean)", description: "Toggles tick-mark markers." },
+   356→      { signature: "setMarkerStep(step: number)", description: "Sets the interval between markers." },
+   357→      { signature: "setOrientation(orientation)", description: "Switches between horizontal and vertical orientation." },
+   358→      { signature: "setThickness(n: number)", description: "Changes the track thickness." },
+   359→      { signature: "setLength(n: number)", description: "Changes the track length." },
+   360→      { signature: "on(event: 'input' | 'change', handler)", description: "Subscribes to an event." },
+   361→      { signature: "off(event: string, handler: Function)", description: "Unsubscribes from an event." },
+   362→      { signature: "destroy()", description: "Removes the component and cleans up all listeners." },
+   363→    ],
+   364→    events: [
+   365→      { name: "input", payload: "{ valueMin, valueMax }", description: "Fires continuously while the user drags either thumb." },
+   366→      { name: "change", payload: "{ valueMin, valueMax }", description: "Fires when the selection is committed (pointer up or keyboard)." },
+   367→    ],
+   368→    defaults: {
+   369→      min: 0,
+   370→      max: 100,
+   371→      valueMin: 25,
+   372→      valueMax: 75,
+   373→      step: 0,
+   374→      showMarkers: false,
+   375→      markerStep: 10,
+   376→      orientation: "horizontal",
+   377→      thickness: 8,
+   378→      length: 280,
+   379→    },
+   380→  },
+   381→  {
+   382→    slug: "calendar",
+   383→    name: "Calendar",
+   384→    category: "inputs",
+   385→    description:
+   386→      "A full-featured date picker calendar with single, range, and multi selection modes, configurable weekday layout, week numbers, and min/max constraints.",
+   387→    longDescription:
+   388→      "A framework-independent date picker calendar built on the native Date object (no external date library). Three selection modes — single, range, and multi — are supported with live range preview, prev/next month navigation, an optional Today shortcut, configurable first day of week, weekday header formats, optional ISO week numbers, adjacent-month day rendering, per-date and per-weekday disables, min/max constraints, today and weekend highlighting, and a configurable cell size. The grid is always six rows tall so the calendar's height is stable across months. The component injects its own scoped CSS (.calendar- prefix) and only uses the brand lemon as its accent.",
+   389→    status: "stable",
+   390→    tags: ["Vanilla JS", "Interactive", "Configurable"],
+   391→    capabilities: ["Keyboard Support", "Themeable", "Accessible", "Range Preview", "Week Numbers", "3 Selection Modes"],
+   392→    whenToUse: [
+   393→      "You need a date picker in an inspector, form, or booking panel.",
+   394→      "You want single, range, or multi selection from one component.",
+   395→      "You need min/max constraints plus per-date and per-weekday disables.",
+   396→      "You need ISO week numbers or a configurable first day of week.",
+   397→    ],
+   398→    whenNotToUse: [
+   399→      "You need a time-of-day picker (use a clock component).",
+   400→      "You need a recurring-event editor with custom RRULE strings.",
+   401→      "You need a year-less month picker (use a month-strip component).",
+   402→    ],
+   403→    properties: [
+   404→      { name: "mode", type: "'single' | 'range' | 'multi'", default: "'single'", description: "Selection behavior. Range shows a live hover preview between clicks." },
+   405→      { name: "selectedDate", type: "Date | null", default: "null", description: "Single-mode selection." },
+   406→      { name: "selectedRange", type: "{ start, end }", default: "{ null, null }", description: "Range-mode selection. End < start is auto-swapped." },
+   407→      { name: "selectedDates", type: "Date[]", default: "[]", description: "Multi-mode selection." },
+   408→      { name: "minDate", type: "Date", default: "undefined", description: "Earliest selectable date." },
+   409→      { name: "maxDate", type: "Date", default: "undefined", description: "Latest selectable date." },
+   410→      { name: "firstDayOfWeek", type: "number", default: "0", description: "0 = Sunday, 1 = Monday, ... 6 = Saturday." },
+   411→      { name: "weekdayFormat", type: "'narrow' | 'short' | 'long'", default: "'short'", description: "Weekday header label width." },
+   412→      { name: "showWeekNumbers", type: "boolean", default: "false", description: "Show the ISO week-number column." },
+   413→      { name: "showTodayButton", type: "boolean", default: "true", description: "Show the Today shortcut in the header." },
+   414→      { name: "showAdjacentMonths", type: "boolean", default: "true", description: "Render prev/next-month days in the trailing cells." },
+   415→      { name: "disabledDates", type: "Date[]", default: "[]", description: "Specific dates to disable." },
+   416→      { name: "disabledDaysOfWeek", type: "number[]", default: "[]", description: "Disable specific weekdays (0–6)." },
+   417→      { name: "todayHighlight", type: "boolean", default: "true", description: "Bold today with a small lemon dot." },
+   418→      { name: "weekendHighlight", type: "boolean", default: "false", description: "Apply the weekend color to Saturday/Sunday." },
+   419→      { name: "cellSize", type: "number", default: "36", description: "Pixel size of each day cell (clamped to 20–80)." },
+   420→    ],
+   421→    methods: [
+   422→      { signature: "getSelectedDate()", description: "Returns the single-mode selection.", returns: "Date | null" },
+   423→      { signature: "getSelectedRange()", description: "Returns the range-mode selection.", returns: "{ start: Date | null; end: Date | null }" },
+   424→      { signature: "getSelectedDates()", description: "Returns the multi-mode selection.", returns: "Date[]" },
+   425→      { signature: "setSelectedDate(date: Date | null)", description: "Sets the single-mode selection." },
+   426→      { signature: "setSelectedRange(start, end)", description: "Sets the range. End < start is auto-swapped." },
+   427→      { signature: "setSelectedDates(dates: Date[])", description: "Sets the multi-mode selection." },
+   428→      { signature: "setMode(mode)", description: "Switches selection mode. The selection is normalized for the new mode." },
+   429→      { signature: "setMinDate(date: Date)", description: "Sets the earliest selectable date." },
+   430→      { signature: "setMaxDate(date: Date)", description: "Sets the latest selectable date." },
+   431→      { signature: "setFirstDayOfWeek(day: number)", description: "Sets the first day of the week (0 = Sunday)." },
+   432→      { signature: "setShowWeekNumbers(on: boolean)", description: "Toggles the week-number column." },
+   433→      { signature: "setCellSize(n: number)", description: "Sets the pixel size of each day cell (20–80)." },
+   434→      { signature: "today()", description: "Navigates to the current month with today selected." },
+   435→      { signature: "on(event, handler)", description: "Subscribes to select, change, or navigate." },
+   436→      { signature: "off(event, handler)", description: "Unsubscribes from an event." },
+   437→      { signature: "destroy()", description: "Removes the component and cleans up all listeners and DOM." },
+   438→    ],
+   439→    events: [
+   440→      { name: "select", payload: "CalendarEventPayload", description: "Fires when the user clicks an enabled day." },
+   441→      { name: "change", payload: "CalendarEventPayload", description: "Fires on any selection or view change (user or programmatic)." },
+   442→      { name: "navigate", payload: "CalendarEventPayload", description: "Fires when the visible month changes." },
+   443→    ],
+   444→    defaults: {
+   445→      mode: "single",
+   446→      firstDayOfWeek: 0,
+   447→      weekdayFormat: "short",
+   448→      showWeekNumbers: false,
+   449→      showTodayButton: true,
+   450→      showAdjacentMonths: true,
+   451→      todayHighlight: true,
+   452→      weekendHighlight: false,
+   453→      cellSize: 36,
+   454→    },
+   455→  },
+   456→  {
+   457→    slug: "custom-button",
+   458→    name: "Custom Button",
+   459→    category: "inputs",
+   460→    description:
+   461→      "A versatile button with configurable text, icon, four variants, three sizes, and full disabled/fullWidth control.",
+   462→    longDescription:
+   463→      "A framework-independent button component for the Workshop UI library. Renders a real <button> element with configurable content (text, icon, or both), icon positioning (left/right/top/bottom), four visual variants (primary, secondary, outline, ghost), and three sizes (sm, md, lg). Icons can be any of the built-in Lucide-style SVG names or, when iconType is \"image\", a URL or data URI rendered as an <img>. The component injects its own scoped CSS (prefixed .custom-button-) so it has no dependency on the platform's stylesheet.",
+   464→    status: "stable",
+   465→    tags: ["Vanilla JS", "Configurable", "DOM-based"],
+   466→    capabilities: ["Keyboard Support", "Themeable", "Accessible", "Icon + Image", "4 Variants", "3 Sizes"],
+   467→    whenToUse: [
+   468→      "You need a button in an inspector, toolbar, or panel header with consistent styling across the Workshop UI library.",
+   469→      "You want to compose an icon and a label in one of four positions (left/right/top/bottom).",
+   470→      "You need a square icon-only button (no label) for compact toolbars.",
+   471→      "You want to mix inline-SVG icons and <img>-based brand/asset images through one API.",
+   472→    ],
+   473→    whenNotToUse: [
+   474→      "You need a hyperlink (use a real <a> element instead).",
+   475→      "You need a toggle or checkbox-style control (use the Toggle Group component).",
+   476→      "You need a button styled to match an external design system.",
+   477→    ],
+   478→    properties: [
+   479→      { name: "text", type: "string", default: "\"\"", description: "The button label text. Empty for an icon-only button." },
+   480→      { name: "icon", type: "string", default: "\"\"", description: "A built-in Lucide-style icon name (e.g. \"plus\", \"check\") when iconType=\"icon\", or an image URL/data URI when iconType=\"image\"." },
+   481→      { name: "iconType", type: "\"icon\" | \"image\"", default: "\"icon\"", description: "Renders the icon as an inline SVG (\"icon\") or as an <img> (\"image\")." },
+   482→      { name: "iconPosition", type: "\"left\" | \"right\" | \"top\" | \"bottom\"", default: "\"left\"", description: "Position of the icon relative to the text. Top/bottom produce a stacked layout." },
+   483→      { name: "variant", type: "\"primary\" | \"secondary\" | \"outline\" | \"ghost\"", default: "\"primary\"", description: "Visual style. primary=lemon, secondary=purple-strong, outline=transparent+border, ghost=transparent." },
+   484→      { name: "size", type: "\"sm\" | \"md\" | \"lg\"", default: "\"md\"", description: "Button size. sm=h-8/text-xs, md=h-9/text-sm, lg=h-10/text-base." },
+   485→      { name: "disabled", type: "boolean", default: "false", description: "Disabled state. Blocks click events and removes from tab order." },
+   486→      { name: "fullWidth", type: "boolean", default: "false", description: "Stretches the button to fill its parent's width." },
+   487→    ],
+   488→    methods: [
+   489→      { signature: "setText(text: string)", description: "Replaces the button label. Pass an empty string for an icon-only button." },
+   490→      { signature: "setIcon(icon: string, type?: \"icon\" | \"image\")", description: "Sets the icon. Pass an empty string to remove it. Optionally switches iconType at the same time." },
+   491→      { signature: "setIconPosition(pos: CustomButtonIconPosition)", description: "Moves the icon to left/right/top/bottom relative to the text." },
+   492→      { signature: "setVariant(variant: CustomButtonVariant)", description: "Switches the visual variant (primary/secondary/outline/ghost)." },
+   493→      { signature: "setSize(size: CustomButtonSize)", description: "Switches the size (sm/md/lg)." },
+   494→      { signature: "setDisabled(disabled: boolean)", description: "Enables or disables the button." },
+   495→      { signature: "setFullWidth(fullWidth: boolean)", description: "Toggles full-width behavior." },
+   496→      { signature: "getElement()", description: "Returns the underlying <button> element.", returns: "HTMLButtonElement" },
+   497→      { signature: "on(event: \"click\", handler: () => void)", description: "Subscribes to the click event." },
+   498→      { signature: "off(event: string, handler: Function)", description: "Unsubscribes from an event." },
+   499→      { signature: "destroy()", description: "Removes the component and cleans up all listeners." },
+   500→    ],
+   501→    events: [
+   502→      { name: "click", payload: "(no payload)", description: "Fires when the button is clicked. Disabled buttons do not fire this event." },
+   503→    ],
+   504→    defaults: {
+   505→      text: "",
+   506→      icon: "",
+   507→      iconType: "icon",
+   508→      iconPosition: "left",
+   509→      variant: "primary",
+   510→      size: "md",
+   511→      disabled: false,
+   512→      fullWidth: false,
+   513→    },
+   514→  },
+   515→  {
+   516→    slug: "toggle-group",
+   517→    name: "Toggle Group",
+   518→    category: "inputs",
+   519→    description:
+   520→      "A group of toggle buttons with selectable state, closable buttons, drag-to-reorder, and dynamic add/remove.",
+   521→    longDescription:
+   522→      "A group of toggle buttons that mimics the behavior of inspector-style control clusters found in creative tools and developer panels. Each button supports an icon and label, can be selected (single- or multi-select), can be made closable with an embedded X, and can be reordered via drag-and-drop or arrow keys. The component manages its own button DOM internally and does not depend on an external button component.",
+   523→    status: "stable",
+   524→    tags: ["Vanilla JS", "Interactive", "Configurable"],
+   525→    capabilities: ["Keyboard Support", "Themeable", "Accessible", "Drag-to-reorder", "Closable", "Multi-select"],
+   526→    whenToUse: [
+   527→      "You need a compact cluster of selectable buttons in an inspector or toolbar.",
+   528→      "You want single- or multi-select toggle behavior with programmatic control.",
+   529→      "You need closable buttons that users can remove at runtime.",
+   530→      "You need drag-to-reorder support for a small set of options.",
+   531→    ],
+   532→    whenNotToUse: [
+   533→      "You need a primary navigation menu (use a real nav component).",
+   534→      "You need a single on/off switch (use a switch component).",
+   535→      "You need a dropdown with many options (use a select component).",
+   536→    ],
+   537→    properties: [
+   538→      { name: "items", type: "ToggleButtonItem[]", default: "[Bold, Italic, Underline]", description: "The toggle buttons. Each has id, label, optional icon, and selected flag." },
+   539→      { name: "multiselect", type: "boolean", default: "false", description: "Allow multiple selections. When false, clicking a button selects it and deselects others." },
+   540→      { name: "closable", type: "boolean", default: "false", description: "Show an embedded X button on each toggle. Clicking X fires a close event and removes the item." },
+   541→      { name: "reorderable", type: "boolean", default: "false", description: "Allow drag-to-reorder using pointer events. Arrow keys also reorder when a button is focused." },
+   542→      { name: "orientation", type: "'horizontal' | 'vertical'", default: "'horizontal'", description: "Layout direction of the group." },
+   543→      { name: "variant", type: "'primary' | 'secondary' | 'outline'", default: "'outline'", description: "Button visual style. Selected state always applies a lemon ring on top of the variant." },
+   544→      { name: "size", type: "'sm' | 'md' | 'lg'", default: "'md'", description: "Button height and font size." },
+   545→    ],
+   546→    methods: [
+   547→      { signature: "getItems()", description: "Returns the current items (id, label, icon, selected).", returns: "ToggleButtonItem[]" },
+   548→      { signature: "setItems(items)", description: "Replaces all items. Preserves the single-select invariant when multiselect is off." },
+   549→      { signature: "addItem(item)", description: "Adds a new button. Generates an id if none is provided." },
+   550→      { signature: "removeItem(id)", description: "Removes the button with the given id." },
+   551→      { signature: "getSelected()", description: "Returns the ids of all selected buttons.", returns: "string[]" },
+   552→      { signature: "setSelected(ids)", description: "Sets the selected buttons by id. In single-select mode, only the first id is honored." },
+   553→      { signature: "setMultiselect(on)", description: "Toggles multi-select mode. When turning off, keeps only the first selected item." },
+   554→      { signature: "setClosable(on)", description: "Shows or hides the X button on each toggle without rebuilding the items." },
+   555→      { signature: "setReorderable(on)", description: "Enables or disables drag-to-reorder." },
+   556→      { signature: "setOrientation(orientation)", description: "Switches between horizontal and vertical layout." },
+   557→      { signature: "setVariant(variant)", description: "Changes the button visual style (primary, secondary, outline)." },
+   558→      { signature: "setSize(size)", description: "Changes the button size (sm, md, lg)." },
+   559→      { signature: "on(event, handler)", description: "Subscribes to an event (change, reorder, close, select)." },
+   560→      { signature: "off(event, handler)", description: "Unsubscribes from an event." },
+   561→      { signature: "destroy()", description: "Removes the component and cleans up all listeners and DOM." },
+   562→    ],
+   563→    events: [
+   564→      { name: "change", payload: "{ items, selected }", description: "Fires when selection changes, items are reordered, or items are added/removed." },
+   565→      { name: "select", payload: "{ selected, item }", description: "Fires when the user clicks a toggle (before the change event)." },
+   566→      { name: "reorder", payload: "{ items }", description: "Fires after a drag-to-reorder completes (or arrow-key reorder)." },
+   567→      { name: "close", payload: "{ id, items }", description: "Fires when a button's X is clicked; the item is removed before the event fires." },
+   568→    ],
+   569→    defaults: {
+   570→      multiselect: false,
+   571→      closable: false,
+   572→      reorderable: false,
+   573→      orientation: "horizontal",
+   574→      variant: "outline",
+   575→      size: "md",
+   576→    },
+   577→  },
+   578→  {
+   579→    slug: "smart-context-menu",
+   580→    name: "Smart Context Menu",
+   581→    category: "layout",
+   582→    description:
+   583→      "A context menu overlay that renders command items from the command registry, with smart positioning bounded by a container element.",
+   584→    longDescription:
+   585→      "A context menu overlay component that renders command items from the shared command registry. Each menu item shows the command's label, optional Lucide-style icon, and optional keyboard shortcut (as styled kbd badges). On show, the menu measures its natural size and flips/clamps to stay within a bounds element so it never overflows the live canvas area. Disabled commands are visually muted and not clickable. Arrow keys navigate items, Enter selects, Escape closes, and click-outside dismisses.",
+   586→    status: "stable",
+   587→    tags: ["Vanilla JS", "Interactive", "Overlay"],
+   588→    capabilities: ["Keyboard Support", "Smart Positioning", "Accessible", "Command Registry", "Disabled Items", "Click-outside Close"],
+   589→    whenToUse: [
+   590→      "You need a right-click context menu inside a canvas, panel, or editor area.",
+   591→      "You want to surface a list of commands (with shortcuts) bound to a specific UI region.",
+   592→      "You need the menu to stay inside a bounds element when opened near the edges.",
+   593→      "You want keyboard navigation (Arrow keys, Enter, Escape) on top of mouse interaction.",
+   594→    ],
+   595→    whenNotToUse: [
+   596→      "You need a top-level application menu bar (use a real menu component).",
+   597→      "You need nested submenus with deep hierarchy (this is a flat menu).",
+   598→      "You need a tooltip instead of a click-action menu (use the Smart Tooltip component).",
+   599→    ],
+   600→    properties: [
+   601→      { name: "bounds", type: "HTMLElement", default: "(required)", description: "The container element that bounds the menu. The menu auto-positions to stay inside this element." },
+   602→      { name: "commandIds", type: "string[]", default: "[]", description: "Command IDs to render as menu items, in display order. Looked up via the command registry." },
+   603→      { name: "title", type: "string", default: "undefined", description: "Optional title shown in the menu header. Pass undefined for no header." },
+   604→    ],
+   605→    methods: [
+   606→      { signature: "show(x: number, y: number)", description: "Show the menu at a viewport-relative (clientX, clientY) position. Auto-flips and clamps to stay inside the bounds." },
+   607→      { signature: "hide()", description: "Hide the menu. Fires the hide event." },
+   608→      { signature: "isVisible()", description: "Returns whether the menu is currently visible.", returns: "boolean" },
+   609→      { signature: "setCommandIds(ids: string[])", description: "Swap the visible commands at runtime. Re-renders the items." },
+   610→      { signature: "setTitle(title: string | undefined)", description: "Update the optional header title. Pass undefined to remove the header." },
+   611→      { signature: "on(event: \"select\", handler: (commandId: string) => void)", description: "Subscribe to the select event (fires when the user clicks an enabled item)." },
+   612→      { signature: "on(event: \"hide\", handler: () => void)", description: "Subscribe to the hide event (fires when the menu is closed)." },
+   613→      { signature: "off(event: string, handler: Function)", description: "Unsubscribe from an event." },
+   614→      { signature: "destroy()", description: "Removes the component, restores the container's position style, and cleans up all listeners." },
+   615→    ],
+   616→    events: [
+   617→      { name: "select", payload: "string", description: "Fires when the user clicks an enabled item. Carries the command ID." },
+   618→      { name: "hide", payload: "(none)", description: "Fires when the menu is closed (escape, click outside, window blur, or selection)." },
+   619→    ],
+   620→    defaults: {
+   621→      commandIds: [],
+   622→      title: undefined,
+   623→    },
+   624→  },
+   625→  {
+   626→    slug: "smart-tooltip",
+   627→    name: "Smart Tooltip",
+   628→    category: "layout",
+   629→    description:
+   630→      "A tooltip overlay that renders a command's label, description, and keyboard shortcut, with smart positioning bounded by a container element.",
+   631→    longDescription:
+   632→      "A tooltip overlay component that renders a command's label, description, and keyboard shortcut from the shared command registry. The tooltip attaches to a target element and shows on mouseenter (or focus). It renders the command's icon, bold label, optional description, and the shortcut as styled kbd badges. On show, the tooltip measures its natural size, places itself on the preferred side of the target (top/bottom/left/right), flips to the opposite side if the preferred side overflows the bounds, then clamps to stay inside.",
+   633→    status: "stable",
+   634→    tags: ["Vanilla JS", "Interactive", "Overlay"],
+   635→    capabilities: ["Keyboard Support", "Smart Positioning", "Accessible", "Command Registry", "Auto-flip", "Focus + Hover"],
+   636→    whenToUse: [
+   637→      "You need a tooltip that shows a command's description and shortcut next to a toolbar button.",
+   638→      "You want the tooltip to flip to the opposite side when the preferred side would overflow the panel.",
+   639→      "You want the tooltip to show on both hover and focus (keyboard accessibility).",
+   640→      "You want the tooltip content driven by the shared command registry (single source of truth).",
+   641→    ],
+   642→    whenNotToUse: [
+   643→      "You need a click-to-open menu (use the Smart Context Menu component).",
+   644→      "You need rich interactive content inside the tooltip (it is read-only).",
+   645→      "You need a popover with focus trapping (use a dialog component instead).",
+   646→    ],
+   647→    properties: [
+   648→      { name: "bounds", type: "HTMLElement", default: "(required)", description: "The container element that bounds the tooltip. The tooltip flips and clamps to stay inside this element." },
+   649→      { name: "commandId", type: "string", default: "(required)", description: "Command ID to display. Looked up via the command registry for label, description, icon, and shortcut." },
+   650→      { name: "position", type: "\"top\" | \"bottom\" | \"left\" | \"right\"", default: "\"top\"", description: "Preferred position relative to the target. Auto-flips to the opposite side if it would overflow the bounds." },
+   651→    ],
+   652→    methods: [
+   653→      { signature: "attachTo(target: HTMLElement)", description: "Attach the tooltip to a target element. mouseenter/focus shows; mouseleave/blur hides. Detaches the previous target if any." },
+   654→      { signature: "detach()", description: "Detach from the current target and hide the tooltip." },
+   655→      { signature: "show()", description: "Manually show the tooltip. Requires a target to be attached." },
+   656→      { signature: "hide()", description: "Manually hide the tooltip." },
+   657→      { signature: "setCommandId(id: string)", description: "Change the displayed command at runtime. Re-renders the tooltip content." },
+   658→      { signature: "setPosition(pos: SmartTooltipPosition)", description: "Change the preferred position. The tooltip auto-flips if the preferred side overflows the bounds." },
+   659→      { signature: "on(event: \"show\" | \"hide\", handler: () => void)", description: "Subscribe to a show or hide event." },
+   660→      { signature: "off(event: string, handler: Function)", description: "Unsubscribe from an event." },
+   661→      { signature: "destroy()", description: "Detaches, removes the tooltip DOM, restores the container's position style, and cleans up all listeners." },
+   662→    ],
+   663→    events: [
+   664→      { name: "show", payload: "(none)", description: "Fires when the tooltip becomes visible (mouseenter or focus on the target, or a manual show() call)." },
+   665→      { name: "hide", payload: "(none)", description: "Fires when the tooltip is hidden (mouseleave, blur, or a manual hide() call)." },
+   666→    ],
+   667→    defaults: {
+   668→      position: "top",
+   669→    },
+   670→  },
+   671→  {
+   672→    slug: "board",
+   673→    name: "Board",
+   674→    category: "layout",
+   675→    description:
+   676→      "An infinite canvas with pan/zoom, grid system, snapping, selection, and alignment commands — the foundation for Excalidraw-style editors and node graphs.",
+   677→    longDescription:
+   678→      "An infinite-canvas Board component built on a single <canvas> element. Supports pan (space-drag, middle-click, or two-finger scroll), zoom toward cursor (Ctrl/Cmd + wheel), rubber-band selection, per-item drag, and a full grid system with dots or lines plus sub-grid divisions. Items are circles, rectangles, or triangles with position, size, rotation, and color. Two lattice types are computed per item: a local lattice (the item's rotated bounding box) and a global lattice (the axis-aligned bounding box). Alignment commands (left/center-h/right/top/center-v/bottom) operate on the global lattices of the selected items; distribution commands (horizontal/vertical) evenly space three or more items. Zoom-to-fit and zoom-to-fit-selection frame the canvas around all items or just the selection. Snapping can be enabled to grid lines, to other items' edges and centers, or both. The Board integrates with the shared command registry and ShortcutHandler for keyboard shortcuts (1/2/3 to add shapes, Delete to remove, Shift+Cmd+L/E/R/T/M/B to align, Shift+Cmd+H/J to distribute, Cmd+0 / Shift+Cmd+0 to fit).",
+   679→    status: "stable",
+   680→    tags: ["Vanilla JS", "Canvas", "Interactive"],
+   681→    capabilities: ["Infinite Pan/Zoom", "Grid System", "Snapping", "Multi-Select", "Align & Distribute", "Keyboard Shortcuts", "Rotated Items"],
+   682→    whenToUse: [
+   683→      "You need an infinite-canvas editing surface (Excalidraw-style, node graphs, vector art, diagram editors).",
+   684→      "You want pan/zoom with cursor-targeted zoom and a configurable dot or line grid.",
+   685→      "You need multi-select with rubber-band selection and per-item drag.",
+   686→      "You need alignment and distribution commands across selected items.",
+   687→      "You want snapping to grid lines, to other items' edges/centers, or both.",
+   688→    ],
+   689→    whenNotToUse: [
+   690→      "You need a simple fixed-size drawing surface without pan/zoom (use a plain <canvas> with your own renderer).",
+   691→      "You need rich text editing, embedded HTML, or DOM-based content (the Board renders everything to a single <canvas>).",
+   692→      "You need complex vector paths, boolean operations, or per-vertex editing (the Board supports rectangles, circles, and triangles only).",
+   693→      "You need collaborative real-time editing built in (the Board is single-user; wire it to your own transport layer).",
+   694→    ],
+   695→    properties: [
+   696→      { name: "gridMode", type: "\"dots\" | \"lines\" | \"none\"", default: "\"dots\"", description: "Grid rendering mode. Dots renders small dots at every sub-grid intersection (larger at main intersections). Lines renders both sub-grid and main grid lines. None disables the grid entirely." },
+   697→      { name: "gridSize", type: "number", default: "40", description: "Base grid size in board units. Sub-grid lines/dots are placed every gridSize / subGridDivisions units. Minimum 4." },
+   698→      { name: "subGridDivisions", type: "number", default: "4", description: "Number of sub-divisions per grid cell. A value of 4 means 4 sub-cells per main cell. Minimum 1." },
+   699→      { name: "snapToGrid", type: "boolean", default: "false", description: "When true, dragged items snap to the nearest grid intersection (using gridSize)." },
+   700→      { name: "snapToItems", type: "boolean", default: "false", description: "When true, dragged items snap to other items' edges and centers when within 8 screen pixels (scaled by 1/zoom)." },
+   701→      { name: "background", type: "string", default: "\"#15151a\"", description: "Canvas background fill color. Applied via ctx.fillRect each render." },
+   702→    ],
+   703→    methods: [
+   704→      { signature: "addItem(type, x, y, w, h, rotation?, color?)", description: "Add a new item at (x, y) — the center in board coordinates — with width w, height h, optional rotation in degrees, and optional color (defaults to the lemon accent). Returns the new item's ID.", returns: "string" },
+   705→      { signature: "removeItem(id)", description: "Remove an item by ID. Also removes it from the current selection." },
+   706→      { signature: "getItems()", description: "Return a shallow copy of all items.", returns: "BoardItem[]" },
+   707→      { signature: "getSelectedIds()", description: "Return the IDs of the currently selected items.", returns: "string[]" },
+   708→      { signature: "getSelectedItems()", description: "Return the currently selected items (in selection order).", returns: "BoardItem[]" },
+   709→      { signature: "selectItem(id, additive?)", description: "Select an item. If additive is false (default), clears the previous selection first." },
+   710→      { signature: "clearSelection()", description: "Clear the current selection." },
+   711→      { signature: "setGridMode(mode)", description: "Update the grid mode at runtime." },
+   712→      { signature: "setGridSize(n)", description: "Update the base grid size at runtime (minimum 4)." },
+   713→      { signature: "setSubGridDivisions(n)", description: "Update the sub-grid divisions at runtime (minimum 1)." },
+   714→      { signature: "setSnapToGrid(on)", description: "Enable or disable snapping to grid lines." },
+   715→      { signature: "setSnapToItems(on)", description: "Enable or disable snapping to other items' edges and centers." },
+   716→      { signature: "getView()", description: "Return the current view (panX, panY, zoom).", returns: "BoardView" },
+   717→      { signature: "setView(panX, panY, zoom)", description: "Set the view. Zoom is clamped to [0.05, 10]." },
+   718→      { signature: "zoomToFit()", description: "Frame the view around all items. Resets to (0, 0, 1) if there are no items." },
+   719→      { signature: "zoomToFitSelection()", description: "Frame the view around the selected items. Falls back to zoomToFit if nothing is selected." },
+   720→      { signature: "align(type)", description: "Align selected items. Requires at least 2 selected. type is one of \"left\" | \"center-h\" | \"right\" | \"top\" | \"center-v\" | \"bottom\". Alignment is computed against the global (axis-aligned) lattices." },
+   721→      { signature: "distribute(type)", description: "Evenly space selected items along an axis. Requires at least 3 selected. type is \"horizontal\" or \"vertical\"." },
+   722→      { signature: "getLocalLattice(item)", description: "Return the item's local lattice — its bounding box rotated with the item.", returns: "Lattice" },
+   723→      { signature: "getGlobalLattice(item)", description: "Return the item's global lattice — the axis-aligned bounding box of the rotated rect.", returns: "Lattice" },
+   724→      { signature: "on(event, handler)", description: "Subscribe to a \"selection\", \"change\", or \"view\" event." },
+   725→      { signature: "off(event, handler)", description: "Unsubscribe from an event." },
+   726→      { signature: "destroy()", description: "Remove the canvas, disconnect the ResizeObserver, clear listeners, and mark the instance destroyed." },
+   727→    ],
+   728→    events: [
+   729→      { name: "selection", payload: "{ ids: string[] }", description: "Fires when the selection changes (click, shift-click, rubber-band, escape, or programmatic select/clear)." },
+   730→      { name: "change", payload: "{ type: string, ... }", description: "Fires when items change. type is one of \"add\", \"remove\", \"move\", \"move-end\", \"nudge\", \"align\", \"distribute\". Carries additional fields (e.g. item, id, alignType, distributeType) depending on the type." },
+   731→      { name: "view", payload: "BoardView", description: "Fires when the view (panX, panY, zoom) changes — pan, zoom, setView, zoomToFit, zoomToFitSelection." },
+   732→    ],
+   733→    defaults: {
+   734→      gridMode: "dots",
+   735→      gridSize: 40,
+   736→      subGridDivisions: 4,
+   737→      snapToGrid: false,
+   738→      snapToItems: false,
+   739→      background: "#15151a",
+   740→    },
+   741→  },
+   742→  {
+   743→    slug: "nodes-graph",
+   744→    name: "Nodes Graph",
+   745→    category: "layout",
+   746→    description:
+   747→      "A node-based graph editor on an infinite canvas with two connection modes — mindmap (arrowhead paths between side midpoints) and sockets (typed input/output sockets with type-mismatch rendering).",
+   748→    longDescription:
+   749→      "NodesGraph is a node-graph editor built on top of the Board component. It renders rectangular node boxes on the infinite canvas and draws connecting paths between them. Two connection modes are supported: mindmap mode routes paths between the centers of node sides and decorates them with start/end arrowheads (Obsidian/mindmap style); sockets mode routes paths between typed input and output sockets on the right and left sides of nodes, renders type-mismatched connections in red, and hides the input control of a validly-connected socket (Blender nodes-graph style). Path shapes include bezier, step, and straight, with optional centered labels and color derivation from socket data types or connection state. Switch modes at runtime with setMode and the graph re-routes all paths automatically.",
+   750→    status: "unstable",
+   751→    tags: ["Vanilla JS", "Canvas", "Graph", "Experimental"],
+   752→    capabilities: ["Mindmap Mode", "Sockets Mode", "Typed Connections", "Path Shapes", "Labels", "Type-Mismatch Rendering"],
+   753→    whenToUse: [
+   754→      "You need a node-based editor — mindmaps, flow diagrams, or Blender-style socket graphs.",
+   755→      "You want both Obsidian-style arrowhead connections and typed input/output sockets in one component.",
+   756→      "You want type-mismatched connections to render in red and valid connections to hide the input control.",
+   757→      "You need multiple path shapes (bezier, step, straight) with optional centered labels.",
+   758→    ],
+   759→    whenNotToUse: [
+   760→      "You need a plain infinite canvas without node or path semantics (use the Board directly).",
+   761→      "You need interactive drag-to-connect between sockets (not yet implemented — paths are added programmatically).",
+   762→      "You need DOM-based node content with rich text or embedded HTML (nodes are rendered to the canvas).",
+   763→      "You need real-time collaborative editing built in (NodesGraph is single-user).",
+   764→    ],
+   765→    properties: [
+   766→      { name: "mode", type: "\"mindmap\" | \"sockets\"", default: "\"mindmap\"", description: "Connection routing style. Mindmap draws paths with arrowheads between side midpoints. Sockets draws paths between typed input/output sockets without heads." },
+   767→      { name: "gridMode", type: "\"dots\" | \"lines\" | \"none\"", default: "\"dots\"", description: "Grid visualization, delegated to the underlying Board." },
+   768→      { name: "gridSize", type: "number", default: "40", description: "Base grid size in board units, delegated to the underlying Board." },
+   769→      { name: "snapToGrid", type: "boolean", default: "false", description: "When true, dragged nodes snap to the nearest grid intersection." },
+   770→      { name: "background", type: "string", default: "\"#15151a\"", description: "Canvas background fill color, delegated to the underlying Board." },
+   771→    ],
+   772→    methods: [
+   773→      { signature: "addNode({ x, y, width?, height?, title, color?, sockets?, connectionSide? })", description: "Add a node at (x, y) — the center in board coordinates — with the given width, height, title, optional color, optional sockets (for sockets mode), and optional connectionSide (for mindmap mode, default \"right\"). Returns the new node's id.", returns: "string" },
+   774→      { signature: "removeNode(id)", description: "Remove a node by id. Also removes any paths connected to the removed node." },
+   775→      { signature: "getNodes()", description: "Return a shallow copy of all nodes.", returns: "GraphNode[]" },
+   776→      { signature: "addPath({ fromNodeId, toNodeId, fromSide?, toSide?, fromSocketId?, toSocketId?, shape?, color?, label? })", description: "Add a path between two nodes. In sockets mode, paths with both fromSocketId and toSocketId are type-checked: a mismatch sets path.invalid (rendered red), a match hides the input control. Returns the new path's id.", returns: "string" },
+   777→      { signature: "removePath(id)", description: "Remove a path by id. Restores any input control that was hidden by a valid connection." },
+   778→      { signature: "getPaths()", description: "Return a shallow copy of all paths.", returns: "GraphPath[]" },
+   779→      { signature: "getMode()", description: "Return the current connection mode.", returns: "GraphMode" },
+   780→      { signature: "setMode(mode)", description: "Switch between \"mindmap\" and \"sockets\". Re-renders all paths." },
+   781→      { signature: "on(event, handler)", description: "Subscribe to a \"change\", \"connect\", or \"disconnect\" event." },
+   782→      { signature: "off(event, handler)", description: "Unsubscribe from an event." },
+   783→      { signature: "destroy()", description: "Destroy the underlying Board, clear all listeners and registries." },
+   784→    ],
+   785→    events: [
+   786→      { name: "change", payload: "{ type: string, ... }", description: "Fires when a node or path is added/removed, or when a node is moved/resized/rotated. type is one of \"add-node\", \"remove-node\", \"add-path\", \"remove-path\"." },
+   787→      { name: "connect", payload: "{ path: GraphPath }", description: "Fires when a path is added and is valid (no type mismatch)." },
+   788→      { name: "disconnect", payload: "{ path: GraphPath, reason?: string }", description: "Fires when a path is removed, or when an added path is type-mismatched (reason: \"type-mismatch\")." },
+   789→    ],
+   790→    defaults: {
+   791→      mode: "mindmap",
+   792→      gridMode: "dots",
+   793→      gridSize: 40,
+   794→      snapToGrid: false,
+   795→      background: "#15151a",
+   796→    },
+   797→  },
+   798→];
+   799→
+   800→// Planned/placeholder components for the directory — clearly marked as planned
+   801→export const plannedComponents: { slug: string; name: string; category: string; description: string }[] = [
+   802→  { slug: "color-field", name: "Color Field", category: "color", description: "A two-dimensional saturation/value field with a hue slider." },
+   803→  { slug: "palette", name: "Palette", category: "color", description: "A swatch-based palette component with slots and recent colors." },
+   804→  { slug: "range-control", name: "Range Control", category: "inputs", description: "A precision numeric slider with units and keyboard editing." },
+   805→];
+   806→
+   807→export function getComponent(slug: string): ComponentMeta | undefined {
+   808→  return components.find((c) => c.slug === slug);
+   809→}
+   810→
+   811→export function getCategory(slug: string): CategoryMeta | undefined {
+   812→  return categories.find((c) => c.slug === slug);
+   813→}
+   814→
+   815→export function componentsByCategory(category: string): ComponentMeta[] {
+   816→  return components.filter((c) => c.category === category);
+   817→}
+   818→
+   819→export interface ExampleMeta {
+   820→  slug: string;
+   821→  title: string;
+   822→  category: "Creative tools" | "Developer tools" | "Productivity";
+   823→  description: string;
+   824→  components: string[];
+   825→  interactive: boolean;
+   826→}
+   827→
+   828→export const examples: ExampleMeta[] = [
+   829→  {
+   830→    slug: "creative-inspector",
+   831→    title: "Creative application inspector",
+   832→    category: "Creative tools",
+   833→    description:
+   834→      "An example of color controls inside a visual editing workspace, with a fill-color property bound to the Color Wheel Picker.",
+   835→    components: ["color-wheel"],
+   836→    interactive: true,
+   837→  },
+   838→  {
+   839→    slug: "settings-panel",
+   840→    title: "Application settings panel",
+   841→    category: "Productivity",
+   842→    description:
+   843→      "A demonstration of how controls can be organized in a software settings interface.",
+   844→    components: ["color-wheel"],
+   845→    interactive: true,
+   846→  },
+   847→  {
+   848→    slug: "theme-editor",
+   849→    title: "Theme editor",
+   850→    category: "Developer tools",
+   851→    description:
+   852→      "A developer utility for picking accent colors and previewing them across a small set of surfaces.",
+   853→    components: ["color-wheel"],
+   854→    interactive: true,
+   855→  },
+   856→];
+   857→
+   858→export interface ChangelogEntry {
+   859→  version: string;
+   860→  date: string;
+   861→  added: string[];
+   862→  improved: string[];
+   863→  fixed: string[];
+   864→  breaking: string[];
+   865→}
+   866→
+   867→export const changelog: ChangelogEntry[] = [
+   868→  {
+   869→    version: "0.1.0",
+   870→    date: "2025-01-15",
+   871→    added: [
+   872→      "Initial Color Wheel Picker component with triangle, square, disk, and none modes.",
+   873→      "HSV color model with HEX, RGB, and HSL conversion utilities.",
+   874→      "Public API: setColor, getColor, setShape, setSize, setHue, on, off, destroy.",
+   875→      "input and change events for continuous and committed selection.",
+   876→    ],
+   877→    improved: [],
+   878→    fixed: [],
+   879→    breaking: [],
+   880→  },
+   881→];
+   882→
+   883→export interface DocSection {
+   884→  slug: string;
+   885→  title: string;
+   886→  description: string;
+   887→  route: Route;
+   888→}
+   889→
+   890→export const docSections: DocSection[] = [
+   891→  {
+   892→    slug: "installation",
+   893→    title: "Installation",
+   894→    description: "Setup, distribution, and your first component.",
+   895→    route: { name: "docs-installation" },
+   896→  },
+   897→  {
+   898→    slug: "concepts",
+   899→    title: "Core concepts",
+   900→    description: "Architecture, lifecycle, and component conventions.",
+   901→    route: { name: "docs-concepts" },
+   902→  },
+   903→  {
+   904→    slug: "theming",
+   905→    title: "Theming",
+   906→    description: "Design tokens, CSS custom properties, and customization.",
+   907→    route: { name: "docs-theming" },
+   908→  },
+   909→  {
+   910→    slug: "api",
+   911→    title: "API reference",
+   912→    description: "Methods, events, and properties for every component.",
+   913→    route: { name: "docs-api" },
+   914→  },
+   915→];
+   916→

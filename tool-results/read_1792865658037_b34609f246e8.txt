@@ -1,0 +1,690 @@
+     1→/**
+     2→ * ColorCircle — Adobe Color-style circular color picker with harmony rules.
+     3→ *
+     4→ * Matches Adobe Color's behavior:
+     5→ *   - 5 color slots by default (base at index 2, the middle).
+     6→ *   - 9 harmony rules that define hue offsets for all 5 positions.
+     7→ *   - Moving the base color rotates all non-locked colors.
+     8→ *   - Moving a non-base color changes only that color.
+     9→ *   - Colors can be locked (locked colors don't move when base moves).
+    10→ *   - Colors can be added (left/right of any position) and removed.
+    11→ *   - The wheel shows hue (angle) and saturation (radius). Lightness is
+    12→ *     adjusted via the palette UI, not on the wheel.
+    13→ *
+    14→ * Public API:
+    15→ *   new ColorCircle(container, options)
+    16→ *   getColors(), getBaseIndex()
+    17→ *   setHarmony(rule)
+    18→ *   lockColor(i), unlockColor(i), isLocked(i)
+    19→ *   addColor(index, hue?, sat?), removeColor(i)
+    20→ *   setSize(n), setSnapping(on), setGridMode(mode), setGridDivisions(n)
+    21→ *   setShowHarmonyLinks(on), getOutput()
+    22→ *   on("input"|"change", handler), off(event, handler), destroy()
+    23→ */
+    24→
+    25→import {
+    26→  type HarmonyRule,
+    27→  type GridMode,
+    28→  getRule,
+    29→  defineCustomRule,
+    30→  generateHues,
+    31→  defaultSaturations,
+    32→  defaultLightnesses,
+    33→  wrapHue,
+    34→  hueDelta,
+    35→  isConstrained,
+    36→} from "./harmony-engine";
+    37→
+    38→export type { HarmonyRule, GridMode };
+    39→
+    40→export interface ColorCircleOptions {
+    41→  harmony?: HarmonyRule;
+    42→  baseHue?: number;
+    43→  size?: number;
+    44→  snapping?: boolean;
+    45→  gridMode?: GridMode;
+    46→  gridDivisions?: number;
+    47→  showHarmonyLinks?: boolean;
+    48→}
+    49→
+    50→export interface ColorEntry {
+    51→  id: number;
+    52→  hue: number;         // 0–360 absolute
+    53→  saturation: number;  // 0–1
+    54→  lightness: number;   // 0–100 (HSL L)
+    55→  isBase: boolean;
+    56→  isLocked: boolean;
+    57→  /** Hue offset from the base color (degrees). */
+    58→  offset: number;
+    59→}
+    60→
+    61→export interface ColorCircleColor {
+    62→  hex: string;
+    63→  rgb: { r: number; g: number; b: number };
+    64→  hsv: { h: number; s: number; v: number };
+    65→  hsl: { h: number; s: number; l: number };
+    66→}
+    67→
+    68→export interface ColorCircleOutput {
+    69→  baseHue: number;
+    70→  baseIndex: number;
+    71→  harmony: HarmonyRule;
+    72→  colors: (ColorCircleColor & {
+    73→    isBase: boolean;
+    74→    isLocked: boolean;
+    75→    saturation: number;
+    76→    lightness: number;
+    77→    offset: number;
+    78→  })[];
+    79→}
+    80→
+    81→const DEFAULTS: Required<ColorCircleOptions> = {
+    82→  harmony: "triad",
+    83→  baseHue: 210,
+    84→  size: 240,
+    85→  snapping: false,
+    86→  gridMode: "dots",
+    87→  gridDivisions: 12,
+    88→  showHarmonyLinks: true,
+    89→};
+    90→
+    91→function ringCountFromDivisions(divisions: number): number {
+    92→  return Math.max(1, Math.floor(divisions / 2) - 1);
+    93→}
+    94→
+    95→const STYLE_ID = "color-circle-styles";
+    96→
+    97→function injectStyles(): void {
+    98→  if (typeof document === "undefined") return;
+    99→  if (document.getElementById(STYLE_ID)) return;
+   100→  const style = document.createElement("style");
+   101→  style.id = STYLE_ID;
+   102→  style.textContent = `
+   103→.color-circle { display: inline-block; position: relative; font-family: inherit; --color-circle-focus-ring: rgba(217,255,102,0.55); }
+   104→.color-circle canvas { display: block; touch-action: none; outline: none; cursor: pointer; }
+   105→.color-circle canvas:focus-visible { box-shadow: 0 0 0 3px var(--color-circle-focus-ring); }
+   106→`;
+   107→  document.head.appendChild(style);
+   108→}
+   109→
+   110→function clamp(v: number, min: number, max: number): number { return v < min ? min : v > max ? max : v; }
+   111→
+   112→function hsvToRgb(h: number, s: number, v: number): { r: number; g: number; b: number } {
+   113→  h = wrapHue(h); s = clamp(s, 0, 100) / 100; v = clamp(v, 0, 100) / 100;
+   114→  const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
+   115→  let r = 0, g = 0, b = 0;
+   116→  if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+   117→  else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+   118→  else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+   119→  return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) };
+   120→}
+   121→
+   122→function rgbToHex(r: number, g: number, b: number): string {
+   123→  const h = (n: number) => clamp(Math.round(n), 0, 255).toString(16).padStart(2, "0");
+   124→  return `#${h(r)}${h(g)}${h(b)}`;
+   125→}
+   126→
+   127→function hslToHsv(h: number, s: number, l: number): { h: number; s: number; v: number } {
+   128→  h = wrapHue(h); s = clamp(s, 0, 100); l = clamp(l, 0, 100);
+   129→  const v = l + s * Math.min(l, 100 - l) / 100;
+   130→  const sv = v === 0 ? 0 : 2 * (1 - l / v);
+   131→  return { h, s: sv * 100, v };
+   132→}
+   133→
+   134→let nextColorId = 1;
+   135→type Handler = (out: ColorCircleOutput) => void;
+   136→
+   137→export class ColorCircle {
+   138→  private readonly container: HTMLElement;
+   139→  private readonly canvas: HTMLCanvasElement;
+   140→  private readonly ctx: CanvasRenderingContext2D;
+   141→  private options: Required<ColorCircleOptions>;
+   142→  private colors: ColorEntry[];
+   143→  private baseIndex: number;
+   144→  private readonly listeners: Map<string, Set<Handler>> = new Map();
+   145→  private pointerState: { pointerId: number; colorIdx: number } | null = null;
+   146→  private _destroyed = false;
+   147→  private diskCache: HTMLCanvasElement | null = null;
+   148→  private diskCacheCtx: CanvasRenderingContext2D | null = null;
+   149→  private diskCacheKey = "";
+   150→  private readonly _onPointerDown: (e: PointerEvent) => void;
+   151→  private readonly _onPointerMove: (e: PointerEvent) => void;
+   152→  private readonly _onPointerUp: (e: PointerEvent) => void;
+   153→  private readonly _onKeyDown: (e: KeyboardEvent) => void;
+   154→
+   155→  constructor(container: HTMLElement, options: ColorCircleOptions = {}) {
+   156→    if (!container) throw new Error("ColorCircle: container is required");
+   157→    this.container = container;
+   158→    this.options = {
+   159→      harmony: options.harmony ?? DEFAULTS.harmony,
+   160→      baseHue: wrapHue(options.baseHue ?? DEFAULTS.baseHue),
+   161→      size: Math.max(80, options.size ?? DEFAULTS.size),
+   162→      snapping: options.snapping ?? DEFAULTS.snapping,
+   163→      gridMode: options.gridMode ?? DEFAULTS.gridMode,
+   164→      gridDivisions: Math.max(2, options.gridDivisions ?? DEFAULTS.gridDivisions),
+   165→      showHarmonyLinks: options.showHarmonyLinks ?? DEFAULTS.showHarmonyLinks,
+   166→    };
+   167→    this.colors = this.buildPalette(this.options.harmony, this.options.baseHue);
+   168→    this.baseIndex = this.colors.findIndex((c) => c.isBase);
+   169→    if (this.baseIndex < 0) this.baseIndex = 0;
+   170→    injectStyles();
+   171→    this.canvas = document.createElement("canvas");
+   172→    this.canvas.className = "color-circle-canvas";
+   173→    this.canvas.setAttribute("role", "application");
+   174→    this.canvas.setAttribute("aria-label", "Color circle. Drag the base color to move the palette, or drag individual colors.");
+   175→    this.canvas.tabIndex = 0;
+   176→    const ctx = this.canvas.getContext("2d");
+   177→    if (!ctx) throw new Error("ColorCircle: 2D canvas context unavailable");
+   178→    this.ctx = ctx;
+   179→    this.container.classList.add("color-circle");
+   180→    this.container.appendChild(this.canvas);
+   181→    this._onPointerDown = this.onPointerDown.bind(this);
+   182→    this._onPointerMove = this.onPointerMove.bind(this);
+   183→    this._onPointerUp = this.onPointerUp.bind(this);
+   184→    this._onKeyDown = this.onKeyDown.bind(this);
+   185→    this.canvas.addEventListener("pointerdown", this._onPointerDown);
+   186→    this.canvas.addEventListener("pointermove", this._onPointerMove);
+   187→    this.canvas.addEventListener("pointerup", this._onPointerUp);
+   188→    this.canvas.addEventListener("pointercancel", this._onPointerUp);
+   189→    this.canvas.addEventListener("keydown", this._onKeyDown);
+   190→    this.updateCanvasSize();
+   191→    this.render();
+   192→    this.updateAria();
+   193→  }
+   194→
+   195→  /** Build a palette from a harmony rule and base hue. */
+   196→  private buildPalette(rule: HarmonyRule, baseHue: number): ColorEntry[] {
+   197→    const def = getRule(rule);
+   198→    if (!def) return [{
+   199→      id: nextColorId++, hue: baseHue, saturation: 1.0, lightness: 50,
+   200→      isBase: true, isLocked: false, offset: 0,
+   201→    }];
+   202→    const hues = generateHues(baseHue, rule);
+   203→    const sats = defaultSaturations(rule);
+   204→    const lights = defaultLightnesses(rule);
+   205→    return def.offsets.map((offset, i) => ({
+   206→      id: nextColorId++,
+   207→      hue: hues[i],
+   208→      saturation: sats[i] ?? 1.0,
+   209→      lightness: lights[i] ?? 50,
+   210→      isBase: offset === 0,
+   211→      isLocked: false,
+   212→      offset,
+   213→    }));
+   214→  }
+   215→
+   216→  // ---- Public API ----
+   217→
+   218→  getColors(): ColorEntry[] { return this.colors.map((c) => ({ ...c })); }
+   219→  getBaseIndex(): number { return this.baseIndex; }
+   220→  getBaseHue(): number { return this.colors[this.baseIndex].hue; }
+   221→  getHarmony(): HarmonyRule { return this.options.harmony; }
+   222→
+   223→  setHarmony(rule: HarmonyRule): void {
+   224→    if (this.options.harmony === rule) return;
+   225→    this.options.harmony = rule;
+   226→    // Rebuild palette from the new rule, preserving the current base hue.
+   227→    const baseHue = this.colors[this.baseIndex].hue;
+   228→    this.colors = this.buildPalette(rule, baseHue);
+   229→    this.baseIndex = this.colors.findIndex((c) => c.isBase);
+   230→    if (this.baseIndex < 0) this.baseIndex = 0;
+   231→    this.updateAria();
+   232→    this.scheduleRender();
+   233→    this.emit("input", this.getOutput());
+   234→    this.emit("change", this.getOutput());
+   235→  }
+   236→
+   237→  lockColor(i: number): void {
+   238→    if (i < 0 || i >= this.colors.length) return;
+   239→    this.colors[i].isLocked = true;
+   240→    this.scheduleRender();
+   241→    this.emit("input", this.getOutput());
+   242→    this.emit("change", this.getOutput());
+   243→  }
+   244→
+   245→  unlockColor(i: number): void {
+   246→    if (i < 0 || i >= this.colors.length) return;
+   247→    this.colors[i].isLocked = false;
+   248→    this.scheduleRender();
+   249→    this.emit("input", this.getOutput());
+   250→    this.emit("change", this.getOutput());
+   251→  }
+   252→
+   253→  isLocked(i: number): boolean {
+   254→    return this.colors[i]?.isLocked ?? false;
+   255→  }
+   256→
+   257→  /**
+   258→   * Define a custom harmony rule with user-specified angle offsets and
+   259→   * switch to it immediately. The base color's hue is preserved.
+   260→   * Example: setCustomOffsets([0, 60, 120, 180, 240]) creates a 5-color
+   261→   * rule with 60° spacing.
+   262→   */
+   263→  setCustomOffsets(offsets: number[], label?: string): void {
+   264→    const ruleLabel = label ?? `Custom ${offsets.length} colors`;
+   265→    const def = defineCustomRule(ruleLabel, offsets);
+   266→    this.options.harmony = def.id;
+   267→    const baseHue = this.colors[this.baseIndex].hue;
+   268→    this.colors = this.buildPalette(def.id, baseHue);
+   269→    this.baseIndex = this.colors.findIndex((c) => c.isBase);
+   270→    if (this.baseIndex < 0) this.baseIndex = 0;
+   271→    this.updateAria();
+   272→    this.scheduleRender();
+   273→    this.emit("input", this.getOutput());
+   274→    this.emit("change", this.getOutput());
+   275→  }
+   276→
+   277→  /**
+   278→   * Add a color at a specific index. If no hue/saturation is given, the
+   279→   * color is placed at the base hue + 30° offset, full saturation.
+   280→   * Returns the new color's index.
+   281→   */
+   282→  addColor(index: number, hue?: number, saturation?: number): number {
+   283→    const baseHue = this.colors[this.baseIndex].hue;
+   284→    const newHue = wrapHue(hue ?? wrapHue(baseHue + 30));
+   285→    const newSat = clamp(saturation ?? 1.0, 0, 1);
+   286→    const offset = hueDelta(baseHue, newHue);
+   287→    const insertIdx = clamp(index, 0, this.colors.length);
+   288→    this.colors.splice(insertIdx, 0, {
+   289→      id: nextColorId++, hue: newHue, saturation: newSat, lightness: 50,
+   290→      isBase: false, isLocked: false, offset,
+   291→    });
+   292→    if (insertIdx <= this.baseIndex) this.baseIndex++;
+   293→    this.updateAria();
+   294→    this.scheduleRender();
+   295→    this.emit("input", this.getOutput());
+   296→    this.emit("change", this.getOutput());
+   297→    return insertIdx;
+   298→  }
+   299→
+   300→  /**
+   301→   * Add a color on the SAME RADIAL LINE as an existing color (same hue,
+   302→   * different saturation/distance from center). This lets users create
+   303→   * shades/tints of a color along the same spoke.
+   304→   * Returns the new color's index.
+   305→   */
+   306→  addColorOnLine(i: number, saturation?: number): number {
+   307→    if (i < 0 || i >= this.colors.length) return -1;
+   308→    const src = this.colors[i];
+   309→    // Place the new color at a different saturation on the same hue line.
+   310→    // Default: halfway between current saturation and center (0).
+   311→    const newSat = clamp(saturation ?? src.saturation * 0.5, 0, 1);
+   312→    const baseHue = this.colors[this.baseIndex].hue;
+   313→    const offset = hueDelta(baseHue, src.hue);
+   314→    const insertIdx = i + 1;
+   315→    this.colors.splice(insertIdx, 0, {
+   316→      id: nextColorId++,
+   317→      hue: src.hue,
+   318→      saturation: newSat,
+   319→      lightness: 50,
+   320→      isBase: false,
+   321→      isLocked: false,
+   322→      offset,
+   323→    });
+   324→    if (insertIdx <= this.baseIndex) this.baseIndex++;
+   325→    this.updateAria();
+   326→    this.scheduleRender();
+   327→    this.emit("input", this.getOutput());
+   328→    this.emit("change", this.getOutput());
+   329→    return insertIdx;
+   330→  }
+   331→
+   332→  removeColor(i: number): void {
+   333→    if (this.colors.length <= 1) return;
+   334→    if (i < 0 || i >= this.colors.length) return;
+   335→    const wasBase = this.colors[i].isBase;
+   336→    this.colors.splice(i, 1);
+   337→    if (wasBase) {
+   338→      // Promote the middle color to base.
+   339→      this.baseIndex = Math.floor(this.colors.length / 2);
+   340→      this.colors[this.baseIndex].isBase = true;
+   341→      this.options.baseHue = this.colors[this.baseIndex].hue;
+   342→    } else if (i < this.baseIndex) {
+   343→      this.baseIndex--;
+   344→    }
+   345→    this.updateAria();
+   346→    this.scheduleRender();
+   347→    this.emit("input", this.getOutput());
+   348→    this.emit("change", this.getOutput());
+   349→  }
+   350→
+   351→  setSize(size: number): void {
+   352→    const s = Math.max(80, Math.round(size));
+   353→    if (this.options.size === s) return;
+   354→    this.options.size = s;
+   355→    this.updateCanvasSize();
+   356→    this.invalidateDiskCache();
+   357→    this.scheduleRender();
+   358→  }
+   359→
+   360→  setSnapping(on: boolean): void { if (this.options.snapping !== on) { this.options.snapping = on; this.scheduleRender(); } }
+   361→  setGridMode(mode: GridMode): void { if (this.options.gridMode !== mode) { this.options.gridMode = mode; this.scheduleRender(); } }
+   362→  setGridDivisions(n: number): void { const d = Math.max(2, Math.round(n)); if (this.options.gridDivisions !== d) { this.options.gridDivisions = d; this.scheduleRender(); } }
+   363→  setShowHarmonyLinks(on: boolean): void { if (this.options.showHarmonyLinks !== on) { this.options.showHarmonyLinks = on; this.scheduleRender(); } }
+   364→
+   365→  getOutput(): ColorCircleOutput {
+   366→    const baseHue = this.colors[this.baseIndex].hue;
+   367→    const colors = this.colors.map((c) => {
+   368→      const hsv = hslToHsv(c.hue, c.saturation * 100, c.lightness);
+   369→      const rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+   370→      return {
+   371→        hex: rgbToHex(rgb.r, rgb.g, rgb.b), rgb, hsv,
+   372→        hsl: { h: c.hue, s: c.saturation * 100, l: c.lightness },
+   373→        isBase: c.isBase, isLocked: c.isLocked,
+   374→        saturation: c.saturation, lightness: c.lightness, offset: c.offset,
+   375→      };
+   376→    });
+   377→    return { baseHue, baseIndex: this.baseIndex, harmony: this.options.harmony, colors };
+   378→  }
+   379→
+   380→  on(event: "input" | "change", handler: Handler): void;
+   381→  on(event: string, handler: Handler): void {
+   382→    let set = this.listeners.get(event);
+   383→    if (!set) { set = new Set<Handler>(); this.listeners.set(event, set); }
+   384→    set.add(handler);
+   385→  }
+   386→  off(event: string, handler: Handler): void { this.listeners.get(event)?.delete(handler); }
+   387→
+   388→  destroy(): void {
+   389→    if (this._destroyed) return;
+   390→    this._destroyed = true;
+   391→    this.canvas.removeEventListener("pointerdown", this._onPointerDown);
+   392→    this.canvas.removeEventListener("pointermove", this._onPointerMove);
+   393→    this.canvas.removeEventListener("pointerup", this._onPointerUp);
+   394→    this.canvas.removeEventListener("pointercancel", this._onPointerUp);
+   395→    this.canvas.removeEventListener("keydown", this._onKeyDown);
+   396→    if (this.pointerState) { try { this.canvas.releasePointerCapture(this.pointerState.pointerId); } catch {} this.pointerState = null; }
+   397→    this.listeners.clear();
+   398→    if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
+   399→    this.container.classList.remove("color-circle");
+   400→    this.diskCache = null; this.diskCacheCtx = null;
+   401→  }
+   402→
+   403→  // ---- Geometry ----
+   404→
+   405→  private get geom() {
+   406→    const { size } = this.options;
+   407→    const pad = 18;
+   408→    const total = size + pad * 2;
+   409→    const r = size / 2;
+   410→    return { size: total, r, cx: total / 2, cy: total / 2, pad };
+   411→  }
+   412→
+   413→  private updateCanvasSize(): void {
+   414→    const { size } = this.geom;
+   415→    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   416→    this.canvas.style.width = `${size}px`;
+   417→    this.canvas.style.height = `${size}px`;
+   418→    this.canvas.width = Math.round(size * dpr);
+   419→    this.canvas.height = Math.round(size * dpr);
+   420→    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   421→  }
+   422→
+   423→  private invalidateDiskCache(): void { this.diskCacheKey = ""; }
+   424→
+   425→  private scheduleRender(): void {
+   426→    if (this._destroyed) return;
+   427→    requestAnimationFrame(() => { if (!this._destroyed) this.render(); });
+   428→  }
+   429→
+   430→  private render(): void {
+   431→    const { size } = this.geom;
+   432→    this.ctx.clearRect(0, 0, size, size);
+   433→    this.renderDisk();
+   434→    if (this.options.snapping) this.renderGrid();
+   435→    this.renderLinks();
+   436→    this.renderMarkers();
+   437→  }
+   438→
+   439→  // ---- Hue disk (cached) ----
+   440→
+   441→  private renderDisk(): void {
+   442→    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   443→    const { size, cx, cy, r } = this.geom;
+   444→    const key = `disk-${size}-${dpr}`;
+   445→    if (key !== this.diskCacheKey || !this.diskCache || !this.diskCacheCtx) {
+   446→      if (!this.diskCache) { this.diskCache = document.createElement("canvas"); this.diskCacheCtx = this.diskCache.getContext("2d"); }
+   447→      const cctx = this.diskCacheCtx!;
+   448→      const backing = Math.round(size * dpr);
+   449→      if (this.diskCache!.width !== backing) { this.diskCache!.width = backing; this.diskCache!.height = backing; }
+   450→      cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   451→      cctx.clearRect(0, 0, size, size);
+   452→      if (typeof cctx.createConicGradient === "function") {
+   453→        const grad = cctx.createConicGradient(-Math.PI / 2, cx, cy);
+   454→        for (let h = 0; h <= 360; h += 15) { const rgb = hsvToRgb(h % 360, 100, 100); grad.addColorStop(h / 360, `rgb(${rgb.r},${rgb.g},${rgb.b})`); }
+   455→        grad.addColorStop(1, "rgb(255,0,0)");
+   456→        cctx.beginPath(); cctx.arc(cx, cy, r, 0, Math.PI * 2); cctx.fillStyle = grad; cctx.fill();
+   457→      }
+   458→      const satGrad = cctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+   459→      satGrad.addColorStop(0, "rgba(255,255,255,1)"); satGrad.addColorStop(1, "rgba(255,255,255,0)");
+   460→      cctx.beginPath(); cctx.arc(cx, cy, r, 0, Math.PI * 2); cctx.fillStyle = satGrad; cctx.fill();
+   461→      cctx.beginPath(); cctx.arc(cx, cy, r, 0, Math.PI * 2); cctx.strokeStyle = "rgba(0,0,0,0.35)"; cctx.lineWidth = 1; cctx.stroke();
+   462→      this.diskCacheKey = key;
+   463→    }
+   464→    this.ctx.drawImage(this.diskCache, 0, 0, size, size);
+   465→  }
+   466→
+   467→  // ---- Polar grid ----
+   468→
+   469→  private renderGrid(): void {
+   470→    const { cx, cy, r } = this.geom;
+   471→    const { gridMode, gridDivisions } = this.options;
+   472→    const ctx = this.ctx;
+   473→    ctx.save();
+   474→    const ringCount = ringCountFromDivisions(gridDivisions);
+   475→    const ringRadii: number[] = [];
+   476→    for (let i = 1; i <= ringCount; i++) ringRadii.push((r * i) / (ringCount + 1));
+   477→    if (gridMode === "dots") {
+   478→      ctx.fillStyle = "rgba(255,255,255,0.55)";
+   479→      const dotR = 2.5;
+   480→      ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, Math.PI * 2); ctx.fill();
+   481→      for (const rr of ringRadii) { for (let i = 0; i < gridDivisions; i++) { const rad = (i * (360 / gridDivisions) - 90) * Math.PI / 180; ctx.beginPath(); ctx.arc(cx + rr * Math.cos(rad), cy + rr * Math.sin(rad), dotR, 0, Math.PI * 2); ctx.fill(); } }
+   482→      for (let i = 0; i < gridDivisions; i++) { const rad = (i * (360 / gridDivisions) - 90) * Math.PI / 180; ctx.beginPath(); ctx.arc(cx + r * Math.cos(rad), cy + r * Math.sin(rad), dotR, 0, Math.PI * 2); ctx.fill(); }
+   483→    } else {
+   484→      for (const rr of ringRadii) { ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 3; ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.5; ctx.stroke(); }
+   485→      for (let i = 0; i < gridDivisions; i++) { const rad = (i * (360 / gridDivisions) - 90) * Math.PI / 180; const ex = cx + r * Math.cos(rad), ey = cy + r * Math.sin(rad); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.lineWidth = 2.5; ctx.stroke(); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 1; ctx.stroke(); }
+   486→    }
+   487→    ctx.restore();
+   488→  }
+   489→
+   490→  // ---- Harmony links ----
+   491→
+   492→  private getMarkerPositions(): { x: number; y: number; hue: number; sat: number; isBase: boolean; isLocked: boolean }[] {
+   493→    const { cx, cy, r } = this.geom;
+   494→    return this.colors.map((c) => {
+   495→      const rad = (c.hue - 90) * Math.PI / 180;
+   496→      const rr = c.saturation * r;
+   497→      return { x: cx + rr * Math.cos(rad), y: cy + rr * Math.sin(rad), hue: c.hue, sat: c.saturation, isBase: c.isBase, isLocked: c.isLocked };
+   498→    });
+   499→  }
+   500→
+   501→  /**
+   502→   * Draw radial lines from each marker to the center of the circle.
+   503→   * This visualizes the angular relationship of each color to the base
+   504→   * (at center) — NOT between markers. Each line makes the hue angle
+   505→   * of its color visually clear.
+   506→   */
+   507→  private renderLinks(): void {
+   508→    if (!this.options.showHarmonyLinks) return;
+   509→    const ctx = this.ctx;
+   510→    const { cx, cy } = this.geom;
+   511→    const positions = this.getMarkerPositions();
+   512→    ctx.save();
+   513→    for (const p of positions) {
+   514→      // Radial line from center to marker.
+   515→      ctx.beginPath();
+   516→      ctx.moveTo(cx, cy);
+   517→      ctx.lineTo(p.x, p.y);
+   518→      ctx.strokeStyle = p.isBase
+   519→        ? "rgba(217,255,102,0.5)"
+   520→        : "rgba(255,255,255,0.4)";
+   521→      ctx.lineWidth = p.isBase ? 2 : 1.5;
+   522→      ctx.stroke();
+   523→    }
+   524→    ctx.restore();
+   525→  }
+   526→
+   527→  // ---- Markers ----
+   528→
+   529→  private renderMarkers(): void {
+   530→    const ctx = this.ctx;
+   531→    const positions = this.getMarkerPositions();
+   532→    for (let i = 0; i < positions.length; i++) {
+   533→      const p = positions[i];
+   534→      const c = this.colors[i];
+   535→      const hsv = hslToHsv(c.hue, c.saturation * 100, c.lightness);
+   536→      const rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+   537→      const markerR = p.isBase ? 12 : 9;
+   538→      const ringR = markerR + 2;
+   539→      // White halo.
+   540→      ctx.beginPath(); ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
+   541→      ctx.lineWidth = 2.5; ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.stroke();
+   542→      // Dark inner ring.
+   543→      ctx.beginPath(); ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
+   544→      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.stroke();
+   545→      // Color dot.
+   546→      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, markerR - 3), 0, Math.PI * 2);
+   547→      ctx.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`; ctx.fill();
+   548→      // Base marker: lemon accent ring.
+   549→      if (p.isBase) { ctx.beginPath(); ctx.arc(p.x, p.y, ringR + 3, 0, Math.PI * 2); ctx.lineWidth = 2.5; ctx.strokeStyle = "#D9FF66"; ctx.stroke(); }
+   550→      // Locked marker: dark inner dot.
+   551→      if (p.isLocked) {
+   552→        ctx.beginPath(); ctx.arc(p.x + markerR - 2, p.y - markerR + 2, 4, 0, Math.PI * 2);
+   553→        ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fill();
+   554→        ctx.fillStyle = "#D9FF66"; ctx.font = "bold 7px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+   555→        ctx.fillText("L", p.x + markerR - 2, p.y - markerR + 2);
+   556→      }
+   557→      // Index label.
+   558→      ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+   559→      ctx.fillText(String(i + 1), p.x, p.y);
+   560→    }
+   561→  }
+   562→
+   563→  // ---- Pointer interaction ----
+   564→
+   565→  private getCanvasPoint(e: PointerEvent): { x: number; y: number } {
+   566→    const rect = this.canvas.getBoundingClientRect();
+   567→    const { size } = this.geom;
+   568→    const scale = size / (rect.width || size);
+   569→    return { x: (e.clientX - rect.left) * scale, y: (e.clientY - rect.top) * scale };
+   570→  }
+   571→
+   572→  private findNearestMarker(x: number, y: number): number {
+   573→    const positions = this.getMarkerPositions();
+   574→    let best = 0, bestDist = Infinity;
+   575→    for (let i = 0; i < positions.length; i++) { const dx = x - positions[i].x, dy = y - positions[i].y; const d = Math.sqrt(dx * dx + dy * dy); if (d < bestDist) { bestDist = d; best = i; } }
+   576→    return best;
+   577→  }
+   578→
+   579→  private onPointerDown(e: PointerEvent): void {
+   580→    if (this._destroyed) return;
+   581→    const { x, y } = this.getCanvasPoint(e);
+   582→    const idx = this.findNearestMarker(x, y);
+   583→    this.pointerState = { pointerId: e.pointerId, colorIdx: idx };
+   584→    try { this.canvas.setPointerCapture(e.pointerId); } catch {}
+   585→    this.updateColorFromPoint(idx, x, y);
+   586→    e.preventDefault();
+   587→  }
+   588→
+   589→  private onPointerMove(e: PointerEvent): void {
+   590→    if (!this.pointerState) return;
+   591→    const { x, y } = this.getCanvasPoint(e);
+   592→    this.updateColorFromPoint(this.pointerState.colorIdx, x, y);
+   593→    e.preventDefault();
+   594→  }
+   595→
+   596→  private onPointerUp(e: PointerEvent): void {
+   597→    if (!this.pointerState) return;
+   598→    try { this.canvas.releasePointerCapture(this.pointerState.pointerId); } catch {}
+   599→    this.pointerState = null;
+   600→    this.emit("change", this.getOutput());
+   601→  }
+   602→
+   603→  /**
+   604→   * Update a color from a pointer position (Adobe Color behavior):
+   605→   * - BASE color: moving it rotates ALL non-locked colors by the same hue
+   606→   *   delta (hue control). The base's saturation (distance from center)
+   607→   *   also scales all non-locked colors' saturation proportionally — so the
+   608→   *   base controls the distance between every color and the center.
+   609→   * - NON-BASE color: only its hue+saturation change. Its offset recalculates.
+   610→   * - LOCKED colors: never move when the base moves.
+   611→   */
+   612→  private updateColorFromPoint(idx: number, x: number, y: number): void {
+   613→    const { cx, cy, r } = this.geom;
+   614→    const dx = x - cx, dy = y - cy;
+   615→    const dist = Math.sqrt(dx * dx + dy * dy);
+   616→    let theta = (Math.atan2(dx, -dy) * 180) / Math.PI;
+   617→    if (theta < 0) theta += 360;
+   618→    let hue = wrapHue(theta);
+   619→    let sat = clamp(dist / r, 0, 1);
+   620→    if (this.options.snapping) {
+   621→      hue = this.snapToGrid(hue);
+   622→      const ringCount = ringCountFromDivisions(this.options.gridDivisions);
+   623→      const ringFrac = 1 / (ringCount + 1);
+   624→      sat = Math.round(sat / ringFrac) * ringFrac;
+   625→    }
+   626→    const color = this.colors[idx];
+   627→    if (color.isBase) {
+   628→      const hueDeltaVal = hueDelta(color.hue, hue);
+   629→      const oldSat = color.saturation;
+   630→      color.hue = hue;
+   631→      color.saturation = sat;
+   632→      this.options.baseHue = hue;
+   633→      // Scale all non-locked colors' saturation proportionally.
+   634→      // The base controls the distance between every color and the center.
+   635→      const satRatio = oldSat > 0.001 ? sat / oldSat : 1;
+   636→      for (const c of this.colors) {
+   637→        if (c.id === color.id || c.isLocked) continue;
+   638→        // Rotate hue by the same delta.
+   639→        c.hue = wrapHue(c.hue + hueDeltaVal);
+   640→        // Scale saturation (distance from center) by the same ratio.
+   641→        c.saturation = clamp(c.saturation * satRatio, 0, 1);
+   642→      }
+   643→    } else {
+   644→      color.hue = hue;
+   645→      color.saturation = sat;
+   646→      const baseHue = this.colors[this.baseIndex].hue;
+   647→      color.offset = hueDelta(baseHue, hue);
+   648→    }
+   649→    this.scheduleRender();
+   650→    this.updateAria();
+   651→    this.emit("input", this.getOutput());
+   652→  }
+   653→
+   654→  private snapToGrid(hue: number): number { const step = 360 / this.options.gridDivisions; return Math.round(hue / step) * step; }
+   655→
+   656→  private onKeyDown(e: KeyboardEvent): void {
+   657→    if (this._destroyed) return;
+   658→    const step = e.shiftKey ? 15 : 1;
+   659→    const base = this.colors[this.baseIndex];
+   660→    let delta = 0; let handled = false;
+   661→    switch (e.key) {
+   662→      case "ArrowLeft": case "ArrowDown": delta = -step; handled = true; break;
+   663→      case "ArrowRight": case "ArrowUp": delta = step; handled = true; break;
+   664→      case "Home": delta = -base.hue; handled = true; break;
+   665→      case "End": delta = 360 - base.hue; handled = true; break;
+   666→    }
+   667→    if (handled) {
+   668→      e.preventDefault();
+   669→      // Rotate all non-locked colors by delta.
+   670→      for (const c of this.colors) { if (!c.isLocked) c.hue = wrapHue(c.hue + delta); }
+   671→      this.options.baseHue = this.colors[this.baseIndex].hue;
+   672→      this.scheduleRender(); this.updateAria();
+   673→      const out = this.getOutput();
+   674→      this.emit("input", out); this.emit("change", out);
+   675→    }
+   676→  }
+   677→
+   678→  private updateAria(): void {
+   679→    const base = this.colors[this.baseIndex];
+   680→    this.canvas.setAttribute("aria-valuenow", String(Math.round(base.hue)));
+   681→    this.canvas.setAttribute("aria-valuetext", `${this.options.harmony} harmony, base hue ${Math.round(base.hue)}°, ${this.colors.length} colors`);
+   682→  }
+   683→
+   684→  private emit(event: string, out: ColorCircleOutput): void {
+   685→    const set = this.listeners.get(event);
+   686→    if (!set) return;
+   687→    for (const h of Array.from(set)) { try { h(out); } catch (err) { console.error("ColorCircle listener error:", err); } }
+   688→  }
+   689→}
+   690→

@@ -1,0 +1,943 @@
+     1→# Project Worklog — Vanilla JavaScript UI Component Platform
+     2→
+     3→This is the shared worklog for all agents working on the Workshop component-library platform.
+     4→Each agent MUST read this file before starting and append a new section after finishing.
+     5→
+     6→Project goal: Build a Next.js documentation/showcase platform for a vanilla JavaScript UI
+     7→component library. The first (and currently only) component is the Color Wheel Picker.
+     8→
+     9→Critical constraint: Only the `/` route is user-visible. All "routes" from the PRD are
+    10→simulated via client-side Zustand navigation state.
+    11→
+    12→Design system: Obsidian `#101014` + Deep Violet `#211A30` + Lemon Signal `#D9FF66`.
+    13→Dark theme by default. Fonts: Inter + JetBrains Mono. Icons: Lucide.
+    14→
+    15→---
+    16→Task ID: 1
+    17→Agent: main
+    18→Task: Set up design system foundation (CSS tokens, fonts, theme provider, layout, navigation store, content metadata)
+    19→
+    20→Work Log:
+    21→- Read all four spec files (PRD, Architecture, DesignSystem, Ui) to understand the full scope.
+    22→- Established design tokens in src/app/globals.css: brand palette (Obsidian, Deep Violet, Lemon Signal, Soft Lavender), semantic colors, motion tokens, custom scrollbar, panel utilities, hero glow, grid background.
+    23→- Configured Inter + JetBrains Mono fonts in src/app/layout.tsx with ThemeProvider (next-themes), dark theme as default.
+    24→- Created src/store/navigation.ts: Zustand store for client-side routing (Route union type + navigate + breadcrumbs + search palette + mobile nav state).
+    25→- Created src/lib/platform/content.ts: single source of truth for component metadata, categories, examples, changelog, doc sections.
+    26→
+    27→Stage Summary:
+    28→- Design system foundation complete and ready for subagents.
+    29→- Navigation model: Route discriminated union with names home/components/category/component/docs/docs-*/examples/example/resources/changelog/contributing.
+    30→- Color Wheel Picker metadata is defined (properties, methods, events, defaults) so the playground can be driven by a schema.
+    31→- Next: vanilla JS Color Wheel Picker component (Task 2), then platform shell + views (Tasks 3–5).
+    32→
+    33→---
+    34→Task ID: 2
+    35→Agent: full-stack-developer
+    36→Task: Build vanilla JS Color Wheel Picker component
+    37→
+    38→Work Log:
+    39→- Read worklog (Task 1 design-system foundation) and PRD §3–8 to lock the component contract before coding.
+    40→- Created `src/lib/components/color-wheel/color-utils.ts` (308 lines): pure color math — `hsvToRgb` / `rgbToHsv` / `rgbToHex` / `hexToRgb` / `hsvToHsl` / `hslToHsv`, a `parseColor` that accepts hex / `rgb()` / `hsl()` / named colors / `{r,g,b}` / `{h,s,v}` / `{h,s,l}` objects, plus `formatHex`, `toColorOutput`, `clamp`, `clampHue`. No DOM, no side effects, no dependencies.
+    41→- Created `src/lib/components/color-wheel/color-wheel-picker.ts` (1166 lines): the `ColorWheelPicker` class.
+    42→  - Single `<canvas>` renderer; scoped CSS injected once per document (`#color-wheel-picker-styles`) with `--color-picker-*` custom properties for host overrides (marker borders, focus ring, background).
+    43→  - Geometry: `innerR = size/2`, `wheelInnerR = innerR + wheelSpacing`, `wheelOuterR = wheelInnerR + wheelThickness`, `total = wheelOuterR * 2`, `cx = cy = total/2` — wheel stays centered on the inner shape.
+    44→  - Hue mapping: 0° at top, clockwise; `angle = -π/2 + hue·π/180`; inverse `theta = atan2(dx, -dy)`.
+    45→  - Hue wheel: 360 one-degree arc segments filled with `hsl(i, 100%, 50%)`. Cached as an offscreen canvas keyed by `(total, dpr)` so it only re-renders when geometry or DPR changes.
+    46→  - Triangle: equilateral HSV triangle (A=top/white, B=bottom-right/pure hue, C=bottom-left/black). Per-pixel barycentric rendering with ~1px anti-aliased coverage. `V = α+β`, `S = β/V`.
+    47→  - Square: inscribed square (`side = innerR·√2`) with 3 stacked gradients — pure hue → white-to-transparent (S) → transparent-to-black (V). Clipped to the square.
+    48→  - Disk: polar mapping `r → S`, `θ → V = (1+cos θ)/2`. Smooth, seam-free; the tracked `diskTheta` field disambiguates the two θ values that map to the same V so the inner marker stays where the user dragged it.
+    49→  - `none` mode: only the wheel + a solid filled inner circle in the current color; inner area is non-interactive.
+    50→  - Inner-shape canvas cached per `(shape, total, dpr, hue)` so SV drags only redraw the cheap markers and hue drags only re-render the inner shape (not the wheel).
+    51→  - Markers: hue marker = white-halo + dark-ring + pure-hue dot at the wheel mid-radius; inner marker = same triple-ring with the selected color in the center. Both stay perceivable against any hue/SV.
+    52→  - Pointer interaction: `pointerdown` routes by radius (wheel ring vs inner circle vs gap); `setPointerCapture` for clean dragging; `pointermove` updates hue or SV continuously; `input` fires on every move, `change` on `pointerup`/`pointercancel`. Triangle drag clamps barycentric to ≥ 0 and renormalizes; square clamps to `[0,1]`; disk clamps radius.
+    53→  - Keyboard: `ArrowLeft/Right` adjust hue by 1° (Shift = 10°); `Ctrl/Cmd+ArrowLeft/Right` adjust saturation; `ArrowUp/Down` adjust value (Shift = 10); `Home/End` wrap hue. Each key press emits `input` + `change`.
+    54→  - Public API exactly matches the PRD contract: `constructor(container, options?)`, `setColor(color)`, `getColor()`, `setShape(shape)`, `setSize(size)`, `setHue(hue)`, `on/off(event, handler)`, `destroy()`. `setColor`/`setHue` accept programmatic updates and fire `input` + `change`. `setShape`/`setSize` preserve the current color (geometry-only changes).
+    55→  - Tiny internal EventEmitter: `Map<string, Set<ColorHandler>>`. `emit` clones the handler set to a plain array so a handler unsubscribing during dispatch doesn't skip siblings; listener errors are caught and logged so a single bad handler can't crash the picker.
+    56→  - `ResizeObserver` watches the canvas and refreshes the backing store + caches on DPR changes (e.g. window moved between monitors) — disconnected in `destroy()`.
+    57→  - `destroy()` is idempotent: removes all pointer/keyboard listeners, releases pointer capture, disconnects the ResizeObserver, clears the handler map, removes the canvas from the DOM, drops the container class, clears the canvas, and nulls both offscreen caches.
+    58→- Created `src/lib/components/color-wheel/index.ts` re-exporting the class, the `Shape`/`ColorPickerOptions` types, the `RGB`/`HSV`/`HSL`/`ColorOutput`/`ColorInput` types, and the color-math utilities.
+    59→- Ran `bun run lint` — clean (0 errors, 0 warnings) after fixing two issues: replaced the `Function` type on `on`/`off` overloads with the explicit `ColorHandler = (color: ColorOutput) => void` to satisfy `@typescript-eslint/no-unsafe-function-type`, and removed an unused `eslint-disable-next-line no-console` directive. Ran `bunx tsc --noEmit` — no type errors in the new files (only unrelated pre-existing errors in `examples/` and `skills/`).
+    60→
+    61→Stage Summary:
+    62→- Vanilla TS Color Wheel Picker is complete and self-contained (no React/Next.js imports). Files produced:
+    63→  - `src/lib/components/color-wheel/color-utils.ts` — color math (HSV/RGB/HSL/HEX + parser).
+    64→  - `src/lib/components/color-wheel/color-wheel-picker.ts` — `ColorWheelPicker` class (canvas renderer, pointer + keyboard, caching, public API, scoped CSS).
+    65→  - `src/lib/components/color-wheel/index.ts` — public barrel.
+    66→- Public API surface (final):
+    67→  - `new ColorWheelPicker(container, options?: { shape?, size?, wheelThickness?, wheelSpacing?, hue?, color? })`
+    68→  - `setColor(color: string)`, `getColor(): ColorOutput`, `setShape(shape)`, `setSize(size)`, `setHue(hue)`, `on("input"|"change", handler)`, `off(event, handler)`, `destroy()`
+    69→  - `ColorOutput = { hex, rgb{r,g,b}, hsv{h,s,v}, hsl{h,s,l} }`
+    70→- Geometry notes:
+    71→  - Component total = `size + 2·(wheelSpacing + wheelThickness)`; wheel centered on inner shape; resizing via `setSize()` re-derives everything from `size`.
+    72→  - Hue 0° at top, clockwise; markers track the same angular convention.
+    73→  - Triangle uses barycentric `(α, β, γ)` with `V = α+β`, `S = β/V`; inverse `α = V(1−S)`, `β = SV`, `γ = 1−V`. Vertex order: top=white, bottom-right=pure hue, bottom-left=black.
+    74→  - Disk uses `r → S`, `θ → V = (1+cos θ)/2`; smooth, no seam, with a tracked `diskTheta` to disambiguate the two θ values that yield the same V (so the inner marker stays where the user dragged).
+    75→- Caching: wheel cached per `(total, dpr)`; inner shape cached per `(shape, total, dpr, hue)`. SV drags only redraw markers; hue drags only re-render the inner shape; size/shape changes invalidate the relevant caches.
+    76→- Ready to be wrapped by a React component (Task 4) and showcased by the platform shell (Tasks 3/5). No globals.css / layout.tsx / route changes were made.
+    77→
+    78→---
+    79→Task ID: 3
+    80→Agent: main
+    81→Task: Build Zustand navigation store + global shell (header, sidebar, footer, search palette, mobile nav)
+    82→
+    83→Work Log:
+    84→- Created src/store/navigation.ts: Zustand store with Route union type (home/components/category/component/docs/docs-*/examples/example/resources/changelog/contributing), navigate(), breadcrumbs(), routeLabel() helpers, search palette + mobile nav state.
+    85→- Created src/components/platform/brand.tsx: geometric Workshop brand mark (three offset rounded squares + center node).
+    86→- Created src/components/platform/theme-toggle.tsx: light/dark toggle using next-themes.
+    87→- Created src/components/platform/header.tsx: sticky top header with brand, primary nav (Components/Documentation/Examples/Resources), search trigger with ⌘K, theme toggle, github link, mobile menu button.
+    88→- Created src/components/platform/sidebar.tsx: collapsible library/docs/project nav groups driven by content.ts metadata, auto-opens the active group, shows planned components as disabled.
+    89→- Created src/components/platform/footer.tsx: sticky-to-bottom footer with 4 link columns + brand blurb + status note.
+    90→- Created src/components/platform/mobile-nav.tsx: slide-in drawer for narrow screens.
+    91→- Created src/components/platform/search-palette.tsx: ⌘K command palette overlay with grouped results, arrow-key navigation, Enter to open, Esc to close.
+    92→- Created src/components/platform/code-block.tsx: CodeBlock (with copy button, filename, language label, traffic-light header) + CopyableValue chip.
+    93→- Created src/components/platform/breadcrumbs.tsx: Breadcrumbs + PageOverline.
+    94→- Created src/components/platform/shell.tsx: PlatformShell (header + optional sidebar + main + footer) + PageContainer.
+    95→- Created src/components/color-wheel/color-wheel-picker-react.tsx: React wrapper around the vanilla ColorWheelPicker — owns the instance, forwards prop changes via imperative API, forwards input/change events.
+    96→- Created src/components/color-wheel/color-wheel-playground.tsx: the full component detail page — live preview (canvas), property inspector (shape segmented control, size/thickness/spacing sliders, hex input with validation), output bar + copyable values, code panel (JS/HTML/CSS/API tabs with live-synced code), and documentation section with properties/methods/events/accessibility/troubleshooting tables.
+    97→
+    98→Stage Summary:
+    99→- Platform shell is complete and renders all chrome (header/sidebar/footer/search/mobile nav).
+   100→- The Color Wheel playground is fully wired: real vanilla JS component ↔ property inspector ↔ output panel ↔ generated code, all synchronized.
+   101→- Next: launch parallel subagents for Home view, Components+Category views, Documentation views, and Examples+Changelog+Contributing views (Tasks 5-a/b/c/d). These subagents will create view components that the main page.tsx will switch between based on the navigation store's route.
+   102→- IMPORTANT for subagents: views must be default-exported React components from src/components/views/, must NOT import the platform shell (the shell is provided by page.tsx), and must use useNavigation() for any in-app navigation. They receive no props.
+   103→
+   104→---
+   105→Task ID: 5-c
+   106→Agent: full-stack-developer
+   107→Task: Build FIVE documentation view components (docs landing, installation, concepts, theming, API reference)
+   108→
+   109→Work Log:
+   110→- Read worklog (Tasks 1–3) to lock the design system, navigation model, and existing platform primitives (Breadcrumbs, PageOverline, CodeBlock, PageContainer) before writing any view code.
+   111→- Read `src/lib/platform/content.ts` to consume the single source of truth for `components`, `categories`, and `docSections`. The Color Wheel Picker exposes `methods` (8 entries), `events` (input + change), and `properties` (6 entries) — all surfaced verbatim by the API view.
+   112→- Created `src/components/views/docs-view.tsx` (DocsView, default export, no props):
+   113→  - Breadcrumbs + PageOverline "Documentation" + H1 + intro paragraph.
+   114→  - "Getting started" hero `.panel` with a lemon CTA button that navigates to `docs-installation` via `useNavigation((s) => s.navigate)`.
+   115→  - 2×2 grid of doc-section cards driven by `docSections`, each with a Lucide icon (Download/Boxes/Palette/Code), title, description, and an arrow link that navigates to the section's `route`.
+   116→  - "What you'll find here" section: a 2-column bullet list of six docs coverage areas (lifecycle, configuration, events, theming, accessibility, framework interop) each with a lemon icon.
+   117→- Created `src/components/views/docs-installation-view.tsx` (DocsInstallationView):
+   118→  - Breadcrumbs + PageOverline + H1 "Installation" + intro.
+   119→  - "Prerequisites" subsection: 3-column `.panel` listing the three prerequisites with lemon check icons.
+   120→  - "Choose a distribution method" subsection: a `role="tablist"` segmented control with two options (Package manager / Direct import) implemented as a small state-managed toggle (`useState<DistributionMethod>`). Each tab shows the appropriate `CodeBlock`(s): bash install + JS import for the package tab, single HTML `<script type="module">` for the CDN tab.
+   121→  - "Include the CSS" subsection: CodeBlock html with the `<link rel="stylesheet">` tag.
+   122→  - "Add a container" subsection: CodeBlock html with `<div id="color-picker"></div>`.
+   123→  - "Initialize the component" subsection: CodeBlock javascript with the full `new ColorWheelPicker(...)` + `picker.on("change", ...)` example exactly as specified.
+   124→  - "Verify" subsection: short paragraph + a `.panel` callout with the lemon check icon and the exact "what you should see" copy.
+   125→  - "Troubleshooting" subsection: a `<dl>` of 4 symptom/fix pairs rendered as `.panel` cards with a purple-soft alert icon on the symptom side and a left-border separator before the fix.
+   126→- Created `src/components/views/docs-concepts-view.tsx` (DocsConceptsView):
+   127→  - Breadcrumbs + PageOverline + H1 "Core concepts" + intro.
+   128→  - 2×2 grid of concept cards: "Component initialization" (Boxes), "State and updates" (SlidersHorizontal), "Events and lifecycle" (Radio), "Framework interoperability" (Layers).
+   129→  - "Component initialization" section: explanation of containers/options/defaults + a CodeBlock javascript showing construction with shape/size/wheelThickness/color overrides.
+   130→  - "State and updates" section: explanation that the component owns its DOM and state; setColor/setShape/setSize update both; getColor() reads; geometry-only setters preserve the color. CodeBlock javascript with the three setters + getColor destructure.
+   131→  - "Events and lifecycle" section: explanation of `input` (continuous) vs `change` (committed) with a bulleted list, plus on/off/destroy lifecycle notes. CodeBlock javascript with subscribe + unsubscribe + destroy.
+   132→  - "Framework interoperability" section: explanation that the component is vanilla JS and the host should NOT re-create the instance on every render. A lemon-tinted callout box emphasizes the rule, followed by a CodeBlock tsx showing a thin React wrapper using two `useEffect`s (mount-once construction with `eslint-disable-next-line react-hooks/exhaustive-deps`, then separate effects forwarding `color` and `shape` prop changes through the imperative API).
+   133→- Created `src/components/views/docs-theming-view.tsx` (DocsThemingView):
+   134→  - Breadcrumbs + PageOverline + H1 "Theming and customization" + intro.
+   135→  - "Design tokens" section: explains the platform's semantic tokens (--surface/--text-primary/--border) vs the library's prefixed --color-picker-* variables. CodeBlock css with the exact token foundation from DesignSystem.md §11 (5 variables).
+   136→  - "Supported customization points" section: a `.panel` table with three columns (Variable / Default / Purpose) listing all 5 public --color-picker-* variables.
+   137→  - "Light and dark themes" section: explanation that the canvas is transparent and adapts to its container, plus a before/after pair of `.panel` cards (dark surface with white-bordered marker, light surface with dark-bordered marker) — each with a static visual mock and a contrast note.
+   138→  - "Interaction states" section: 2-column list of Focus (lemon ring), Hover (cursor change), Disabled, Selected states with lemon icons.
+   139→  - "Before-and-after example" section: two `.panel` cards side-by-side — "Default" (white marker border) vs "Customized" (lemon marker border) — each with a static colored-circle visual mock. Followed by a CodeBlock css showing how to scope overrides per surface.
+   140→- Created `src/components/views/docs-api-view.tsx` (DocsApiView):
+   141→  - Breadcrumbs + PageOverline + H1 "API reference" + intro.
+   142→  - Search input (`<input type="search">`) with a Search icon, a clear-X button when non-empty, and a hint that filtering is local only. Filters entries by name/description/type/payload/returns/default (case-insensitive substring).
+   143→  - For each component in `components`: an `<section>` with the component name as h2, a short description, and an "Open component" button that navigates to the component's `component` route.
+   144→  - Entries are built from `meta.methods`, `meta.events`, and `meta.properties` (typed as `ApiEntry` with a `kind` discriminator), then grouped by kind (Methods / Events / Properties) with overline headers. Empty groups are skipped.
+   145→  - Each entry is a `.panel` card with: a type badge (Method → lemon border/bg/text; Event → purple-soft border/bg/text; Property → muted border/bg/text), the signature/name in lemon mono, a description, and a metadata row (Returns for methods, Payload for events, Type + Default for properties). A small "Open component" link button on the right.
+   146→  - When a search yields no matches for a component, a `.panel` empty-state card is shown instead of the groups.
+   147→- Styling discipline across all five files:
+   148→  - All five default-export a single named client component (`DocsView`, `DocsInstallationView`, `DocsConceptsView`, `DocsThemingView`, `DocsApiView`), no props, `"use client"` directive at the top.
+   149→  - Only accent color used is the brand lemon (`text-brand-lemon` / `bg-brand-lemon` / `border-brand-lemon/40`) plus the secondary purple-soft accent for the Event badge and Troubleshooting icons. No indigo/blue.
+   150→  - All code examples go through `CodeBlock` from `@/components/platform/code-block`.
+   151→  - All page chrome goes through `Breadcrumbs` + `PageOverline` from `@/components/platform/breadcrumbs` and `PageContainer` from `@/components/platform/shell`.
+   152→  - In-app navigation uses `useNavigation((s) => s.navigate)` from `@/store/navigation`; routes are typed via `Route`.
+   153→  - Typography follows the requested prose-like hierarchy: h2 `text-2xl font-semibold mt-10`, h3 `text-base font-semibold`, paragraphs `text-sm leading-relaxed text-muted-foreground` capped at `max-w-[720px]`.
+   154→  - No emojis, no test files, no shell/header/sidebar/footer duplication, no new routes, no navigation.ts modifications.
+   155→- Ran `bun run lint` — 0 errors, 0 warnings on the new files. (The single pre-existing warning is an unused `eslint-disable-next-line` in `color-wheel-picker-react.tsx`, untouched by this task.)
+   156→- Checked `dev.log` — server compiles cleanly and serves `/` 200. No new runtime errors introduced by these views.
+   157→
+   158→Stage Summary:
+   159→- Five documentation view components are complete and ready to be wired into `page.tsx` by the integration step:
+   160→  - `src/components/views/docs-view.tsx` — DocsView (documentation landing)
+   161→  - `src/components/views/docs-installation-view.tsx` — DocsInstallationView (installation guide)
+   162→  - `src/components/views/docs-concepts-view.tsx` — DocsConceptsView (core concepts)
+   163→  - `src/components/views/docs-theming-view.tsx` — DocsThemingView (theming and customization)
+   164→  - `src/components/views/docs-api-view.tsx` — DocsApiView (searchable API reference)
+   165→- All views share the same shell contract: Breadcrumbs → PageOverline → H1 → intro → page-specific sections, all wrapped in `PageContainer`. They will render correctly inside the existing `PlatformShell` once `page.tsx` switches on the `docs` / `docs-installation` / `docs-concepts` / `docs-theming` / `docs-api` route names.
+   166→- No platform primitives, navigation store, or content metadata were modified — the views are pure consumers of the existing API.
+   167→
+   168→---
+   169→Task ID: 5-b
+   170→Agent: full-stack-developer
+   171→Task: Build the Components directory view and the Category overview view
+   172→
+   173→Work Log:
+   174→- Read worklog (Tasks 1–3 and the in-flight Task 5-c docs views) to lock the design system, navigation model, content metadata, and the styling conventions other view agents are using (PageContainer width="wide", Breadcrumbs + PageOverline + H1 + intro pattern, `.panel`/`.overline`/`.bg-grid`/`bg-brand-lemon`/`bg-brand-purple-strong` tokens, lemon-only accent — no indigo/blue).
+   175→- Read `src/lib/platform/content.ts` to consume `components`, `plannedComponents`, `categories`, `getCategory`, `componentsByCategory`, and the `ComponentStatus` type as the single source of truth for the directory.
+   176→- Read `src/store/navigation.ts` to confirm the available route shapes (`{ name: "component", category, slug }`, `{ name: "category", category }`) and the `componentsQuery` / `setComponentsQuery` / `componentsCategory` / `setComponentsCategory` slice the directory needs to bind to.
+   177→- Peeked at `examples-view.tsx` to copy the static 36-segment `MiniColorWheel` SVG pattern so directory and category thumbnails stay visually consistent with the rest of the platform (no per-card canvas mount).
+   178→- Created `src/components/views/components-view.tsx` (`ComponentsView`, default export, `"use client"`, no props):
+   179→  - Breadcrumbs → PageOverline "Components" → H1 "Components" → supporting text "Browse functional UI building blocks for applications and software."
+   180→  - Search input bound to `useNavigation((s) => s.componentsQuery)` / `setComponentsQuery`, with a `Search` icon on the left and a conditional clear-`X` button on the right. Filters by name / description / category / tags (case-insensitive substring on a joined haystack).
+   181→  - Category pill row (`All`, `Color`, `Inputs`, `Layout`, `Data Display`) bound to `componentsCategory` / `setComponentsCategory`. The active pill uses `bg-brand-purple-strong` with a `bg-brand-lemon` dot indicator.
+   182→  - Status filter pills (`Stable` / `Beta` / `Experimental`) using **local** React state — the navigation store doesn't track status, so this transient filter is kept local. Multi-select toggle pills with a lemon-tinted active state.
+   183→  - A unified `ALL_ENTRIES` array merges `components` (status from `meta.status`) and `plannedComponents` (status = `"planned"`) so the same filter pipeline handles both. Filtering combines search + category + status; when no status filter is selected, planned entries still pass through so the roadmap stays visible.
+   184→  - Result count row: "{available} available · {planned} planned" with a "Reset filters" link that appears when any filter is active.
+   185→  - Grid: 1 col mobile / 2 col `sm` / 3 col `lg`. Each card:
+   186→    - Preview area (`h-[120px]`, `.bg-grid`, `border-b`): the Color Wheel card shows the `MiniColorWheel` SVG with a real inner triangle (white → #4287f5 → #0a1450 gradient + lemon marker dot); planned cards show a `Boxes` icon + a "Planned" mono label.
+   187→    - Body: name (`font-medium`), 2-line description (`line-clamp-2`), and a footer row with the category (mono, muted) + a `StatusBadge` (lemon dot + "Available" for stable, muted dot + "Planned" for planned).
+   188→    - Stable card is a `<button>` that `navigate`s to `{ name: "component", category, slug }`; hover state lifts the border to lemon with a `0_0_0_1px` lemon ring. Planned card is a non-interactive `<div>` with `opacity-60` and a "Planned — not yet available" tooltip.
+   189→  - Empty state: a dashed `.panel` with "No components match "{query}"" (or "No components match your filters" when no query) + a "Clear search" button that resets query, category, and status filters.
+   190→- Created `src/components/views/category-view.tsx` (`CategoryView`, default export, `"use client"`, no props):
+   191→  - Defensive guard: reads `useNavigation((s) => s.route)`; if `route.name !== "category"` returns `null`. Falls back to a short "Unknown category" message if `getCategory(route.category)` returns undefined.
+   192→  - Header: Breadcrumbs → PageOverline "Category" → a 48px `.panel` icon tile rendered in `text-brand-lemon` (mapped via `CATEGORY_ICONS` from `Palette` / `SlidersHorizontal` / `LayoutPanelLeft` / `Table2`) → H1 with the category name → supporting text = `category.description`.
+   193→  - Capabilities row: lemon-dot pills built from `category.capabilities`.
+   194→  - Use cases subsection: 2-column list (`grid sm:grid-cols-2`) of `category.useCases`, each with a lemon bullet dot.
+   195→  - "Components" section header with a count "{available} available · {planned} planned" and a `border-b` separator.
+   196→  - Available components: large horizontal cards (`flex-col lg:flex-row lg:items-center`) with:
+   197→    - Left: a 140×120 `.panel` `.bg-grid` thumbnail containing the `MiniColorWheel` SVG (or the category icon as a fallback).
+   198→    - Middle: name (`text-lg font-semibold`), description, and a tag row of mono badges.
+   199→    - Right: a `StatusBadge` pill + an "Explore component →" affordance with a lemon arrow that translates on hover.
+   200→    - The whole card is a `<button>` that navigates to the component detail route; hover lifts the border to lemon.
+   201→  - Planned components subsection: a separate muted "Planned" header + a 3-col grid of `.panel opacity-60` cards showing name, description, category, and a "Planned" status badge — non-interactive (no button, `title` tooltip).
+   202→  - Guidance card at the bottom: for the `color` category, a detailed "Choosing a color selector" `.panel` with a 2×2 grid of `GuidanceRow` entries explaining wheel+triangle vs wheel+square vs wheel+disk vs wheel-only (none). Other categories get a generic "Choosing a {category} component" `.panel` placeholder noting the category is on the roadmap.
+   203→- Styling discipline across both files:
+   204→  - Both default-export a single named client component, no props, `"use client"` at the top.
+   205→  - Only accent colors used are the brand lemon (`text-brand-lemon` / `bg-brand-lemon` / `border-brand-lemon/40`) plus `bg-brand-purple-strong` for active pills and the inner SVG. No indigo/blue.
+   206→  - In-app navigation uses `useNavigation((s) => s.navigate)`; routes are typed via `Route` casts.
+   207→  - All chrome comes from `Breadcrumbs` + `PageOverline` (`@/components/platform/breadcrumbs`) and `PageContainer` (`@/components/platform/shell`).
+   208→  - `cn` from `@/lib/utils` for conditional classes.
+   209→  - No emojis, no test files, no shell/header/sidebar/footer duplication, no new routes, no navigation.ts modifications.
+   210→- Ran `bun run lint` — 0 errors. Only the pre-existing `react-hooks/exhaustive-deps` warning in `color-wheel-picker-react.tsx` remains; my two view files are clean. (One initial a11y warning about `aria-disabled` on an `<li>` in the planned-components grid was resolved by removing the redundant attribute — the planned cards have no interactive child, so the disabled semantics are conveyed by the static, low-opacity presentation and the `title` tooltip.)
+   211→- Checked `dev.log` — server compiles cleanly (`✓ Compiled in 162ms` / `✓ Compiled in 187ms`) and serves `/` 200. No new runtime errors introduced.
+   212→
+   213→Stage Summary:
+   214→- Two view components are complete and ready to be wired into `page.tsx`:
+   215→  - `src/components/views/components-view.tsx` — `ComponentsView` (the `/components` directory page with search + category + status filters, a 1/2/3-column card grid, an empty state, and result counts).
+   216→  - `src/components/views/category-view.tsx` — `CategoryView` (the `/components/[category]` page with category icon, capabilities, use cases, an available-components list of large horizontal cards, a planned-components subsection, and a "Choosing a color selector" guidance card).
+   217→- The Color Wheel Picker is the only stable card; `color-field`, `palette`, and `range-control` appear as planned, muted, non-interactive cards. Search + category + status filters all combine correctly.
+   218→- No platform primitives, navigation store, or content metadata were modified — the views are pure consumers of the existing API.
+   219→
+   220→---
+   221→Task ID: 5-a
+   222→Agent: full-stack-developer
+   223→Task: Build the Home view for the Workshop component-library platform
+   224→
+   225→Work Log:
+   226→- Read the worklog (Tasks 1–3) to understand the design-system foundation, the vanilla Color Wheel Picker contract, and the platform shell. Confirmed the home route hides the left sidebar (shell.tsx shows sidebar only when route.name !== "home"), so HomeView gets the full content width.
+   227→- Inspected globals.css brand tokens (bg-brand-lemon, text-brand-lemon, bg-brand-purple-strong, text-brand-purple-soft, .overline, .panel, .panel-raised, .bg-grid, .hero-glow), the navigation store Route union + navigate(), content.ts (categories / examples / componentsByCategory / plannedComponents), the ColorWheelPickerReact wrapper (mounts the vanilla picker, forwards prop changes via imperative API, forwards input/change events), and CodeBlock (filename + language + copy button).
+   228→- Created `src/components/views/home-view.tsx` — a single default-exported client component `HomeView` (no props) rendering six sections in order, each in its own semantic <section> with aria-label and separated by border-b border-border:
+   229→  1. Hero — `.hero-glow` + `.bg-grid` background. Left column (lg:col-span-7): overline "Workshop · Vanilla JS UI", large headline "UI components for real software.", supporting copy, two CTAs ("Explore components" → navigate components, lemon primary; "Get started" → navigate docs-installation, outline), and three overline+value stat chips (FRAMEWORK/Independent, INTERACTION/Functional, CUSTOMIZATION/Composable) as small `.panel` tiles. Right column (lg:col-span-5): a workshop-style "library index" card (`.panel-raised`) with a status-dot header (lemon dot + "workshop / library" + "v0.1.0") and a divided list of the four categories with their live status labels — previews the categories section and reads like an inspector panel rather than a marketing graphic.
+   230→  2. Featured component — overline "Featured component", title "Color Wheel Picker", the required description line "Color Wheel Picker — Interactive preview · Vanilla JavaScript", a short paragraph, three lemon-dot bullets, and a "Open component" button (→ navigate component/color/color-wheel). Right side: a live, interactive `<ColorWheelPickerReact shape="triangle" size={180} color="#D9FF66" onInput={...} />` mounted inside a `.panel` with `.bg-grid`. Added a small live-hex readout (color swatch + uppercase hex + "live" tag) below the picker so the interactivity is observable — the `color` prop is a constant string so the wrapper never re-calls setColor after mount, avoiding a render feedback loop while `onInput` keeps the readout in sync.
+   231→  3. Explore categories — overline "Categories", heading "Explore categories", responsive grid (1 / sm:2 / lg:4). Each card is a button mapping the category's `icon` string field to a Lucide component via a `CATEGORY_ICONS` lookup ({Palette, SlidersHorizontal, LayoutPanelLeft, Table2}); shows icon tile, name, description (line-clamp-3), and an honest `categoryStatus()` label ("1 ready · 2 planned" / "1 ready" / "N planned" / "Coming soon") computed from componentsByCategory + plannedComponents so empty categories don't advertise a fake count. Clicking navigates to { name: "category", category: cat.slug }.
+   232→  4. Why this library — overline "Principles", heading "Why this library", three benefit cards (Boxes/"Framework independent", Wrench/"Application-focused", Layers/"Composable & themeable") each with a lemon icon tile and a concise description grounded in the PRD positioning (no React/Vue/Next.js inside components; built for editors/inspectors/dev tools, not marketing; themeable via CSS variables).
+   233→  5. Quick start — overline "Quick start", heading "Get going in seconds", short intro, two stacked CodeBlocks in a lg:2-col grid: (1) bash install `npm install @workshop/color-wheel`, (2) javascript usage importing ColorWheelPicker, constructing it with { shape: "triangle", size: 180 }, and subscribing to "change". A "Read the docs" outline button below → navigate docs-installation.
+   234→  6. Featured examples — overline "Examples", heading "Featured examples", responsive md:3-col grid of all three examples from content.ts. Each card: category badge (mono pill), title, description, and a lemon "Explore" link → navigate { name: "example", slug: ex.slug }.
+   235→- Visual style: obsidian background with deep-violet panels and lemon accents only — no indigo or blue anywhere. Hover states are subtle background/border shifts (hover:border-brand-lemon/40, hover:bg-accent/40) — no scale transforms. Generous vertical rhythm (py-16 lg:py-24 between sections; py-20 lg:py-28 on the hero). Mobile-first: single column, stacking to 2/4 columns at sm/lg breakpoints. All interactive elements are real <button>s with focus-visible rings.
+   236→- Verified: `bun run lint` — 0 errors, 0 warnings in home-view.tsx (the only lint warning is a pre-existing unused eslint-disable in color-wheel-picker-react.tsx). `bunx tsc --noEmit` — no type errors in home-view.tsx (the only TS errors are pre-existing and in unrelated files: examples/, skills/, brand.tsx). Dev server log shows clean compiles and GET / 200.
+   237→- Did NOT touch page.tsx, navigation.ts, the shell, or any other file. HomeView is a pure view component ready to be rendered by the parent page.tsx route switch (parent task).
+   238→
+   239→Stage Summary:
+   240→- Home view is complete at `src/components/views/home-view.tsx` (single default export `HomeView`, client component, no props).
+   241→- All six required sections implemented with the specified copy, CTAs, navigation targets, live interactive Color Wheel Picker, CodeBlocks, and category/example cards.
+   242→- Brand-consistent (obsidian + deep violet + lemon; no indigo/blue), responsive (1/2/4 column grids), accessible (semantic sections, aria-labels, focus rings, keyboard-accessible buttons), and workshop-toned (inspector-style hero panel, honest status counts, no marketing exaggeration).
+   243→- Ready for the parent page.tsx to import and render HomeView when route.name === "home".
+   244→
+   245→---
+   246→Task ID: 5-d
+   247→Agent: full-stack-developer
+   248→Task: Build Examples + Resources + Changelog + Contributing view components
+   249→
+   250→Work Log:
+   251→- Read worklog (Tasks 1–3 + Task 5-b sibling-agent record) and the existing `components-view.tsx` to lock visual conventions (Breadcrumbs + PageOverline + PageContainer + lemon filter pills + static `MiniColorWheel` SVG preview).
+   252→- Created `src/components/views/examples-view.tsx` — `ExamplesView`:
+   253→  - Breadcrumbs + `PageOverline "Examples"` + H1 + intro.
+   254→  - Local-state filter row: All examples / Creative tools / Developer tools / Productivity.
+   255→  - Grid: 1 col mobile / 2 col tablet / 3 col desktop. Each card is a single button that navigates to `{ name: "example", slug }`.
+   256→  - Card preview = static `MiniColorWheel` SVG on a `.bg-grid` background, with a "Live" lemon-dot badge on interactive examples.
+   257→  - Empty state with "Show all examples" reset button.
+   258→- Created `src/components/views/example-detail-view.tsx` — `ExampleDetailView`:
+   259→  - Reads slug via `useNavigation((s) => s.route)`; if not found, renders a not-found message with a "Back to examples" link.
+   260→  - Breadcrumbs (Home / Examples / Example title) + `PageOverline "Examples / {category}"` + H1 + description.
+   261→  - Three REAL interactive demos keyed by slug:
+   262→    - `creative-inspector`: mock inspector left panel ("Selected object: Shape 01", Fill color swatch + hex, stroke row) and a right panel with `<ColorWheelPickerReact shape="triangle" size={160} />` whose `onInput` updates the fill swatch + hex.
+   263→    - `settings-panel`: mock Appearance rows (Theme color / Density / Font size / Reduce motion) with a live swatch + `<ColorWheelPickerReact shape="square" size={140} />`.
+   264→    - `theme-editor`: three preview surfaces (Button / Surface / Border) driven by the accent color + `<ColorWheelPickerReact shape="disk" size={140} />`.
+   265→  - Each demo has a "Reset" button (in the panel header) that resets local state and remounts the picker via a `key` bump.
+   266→  - "Components used" section: for each slug in `example.components`, render a card linking to the component page via `navigate({ name: "component", category, slug })`.
+   267→  - "Implementation" section: a `CodeBlock` per example with a short JS snippet showing the wiring.
+   268→  - Footer: "All examples" back button + slug mono label.
+   269→- Created `src/components/views/resources-view.tsx` — `ResourcesView`:
+   270→  - Local `RESOURCES` array (6 entries: Color model primer, Keyboard accessibility for canvas components, Embedding vanilla in React, Embedding vanilla in Vue, Building a property inspector, Design tokens and CSS architecture).
+   271→  - Each entry has a type (Recipes / Accessibility / Guides / Integration), a title, description, and a destination — internal nav (`docs-concepts`, `docs-theming`, `docs-installation`, `docs-api`, `examples`) or external link with `ExternalLink` icon.
+   272→  - Filter pills (All / Recipes / Accessibility / Guides / Integration) drive the visible cards.
+   273→  - Cards: icon by type, title, 2-line description, destination link with arrow.
+   274→  - Empty state with "Show all resources" reset.
+   275→- Created `src/components/views/changelog-view.tsx` — `ChangelogView`:
+   276→  - Reverse-chronological timeline from the real `changelog` array (sorted by date desc). One release card per entry.
+   277→  - Filter pills (All / Added / Improved / Fixed / Breaking) hide entries/subsections with no matching change type.
+   278→  - Each release card: version (font-mono, large) + formatted date. Subsections grouped by change type; only non-empty ones render.
+   279→  - Each change item gets a small colored dot: Added = lemon, Improved = brand-purple-soft, Fixed = muted sky (`bg-sky-400`), Breaking = destructive. (Sky is a muted semantic blue, used sparingly per spec; lemon/purple dominate.)
+   280→  - Breaking sections render inside a destructive-tinted callout (`border-destructive/30 bg-destructive/5`).
+   281→  - Vertical timeline: `<ol>` with `border-l border-border` and a per-entry lemon dot pinned to the left border.
+   282→  - Header includes a small count summary (N releases · M changes total).
+   283→  - Empty state for filters that match nothing.
+   284→- Created `src/components/views/contributing-view.tsx` — `ContributingView`:
+   285→  - Breadcrumbs + `PageOverline "Project"` + H1 + intro.
+   286→  - Two-column layout: main content (8 sections) + sticky right-rail TOC.
+   287→  - TOC uses `IntersectionObserver` to highlight the active section as you scroll; numbered list with lemon active state.
+   288→  - Sections (each h2 with a Lucide icon chip): Contribution overview, Component design principles (8 cards), Public API conventions (with `CodeBlock` showing the constructor + options + on/off + destroy pattern), Accessibility requirements (4-item bulleted list with lemon dots), Testing expectations, Documentation requirements, Issue reporting (external GitHub link), Pull request workflow (6-step numbered list).
+   289→  - Icons next to headings: ListChecks, GitBranch, FileCode, Accessibility, Bug, GitPullRequest.
+   290→- Verified with `bun run lint` (0 errors / 0 warnings in new files; one pre-existing warning in `color-wheel-picker-react.tsx`) and `bunx tsc --noEmit` (no errors in any view file; remaining errors are pre-existing in `examples/`, `skills/`, `brand.tsx`). Dev server log shows clean compiles after edits.
+   291→
+   292→Stage Summary:
+   293→- All five view components are complete, default-exported, client components, take no props, and live in `src/components/views/`. They use the existing design system (brand tokens, `.overline`, `.panel`, `.bg-grid`, `PageContainer`, `Breadcrumbs`, `PageOverline`, `CodeBlock`) and `useNavigation` for in-app navigation. No new routes, no navigation.ts edits, no shell duplication, no indigo/blue primary, no emojis, no test files.
+   294→- File paths created:
+   295→  - `src/components/views/examples-view.tsx`
+   296→  - `src/components/views/example-detail-view.tsx`
+   297→  - `src/components/views/resources-view.tsx`
+   298→  - `src/components/views/changelog-view.tsx`
+   299→  - `src/components/views/contributing-view.tsx`
+   300→- Work record also written to `/agent-ctx/5-d-views.md`.
+   301→- Next: the main agent can wire these (plus the sibling agents' home/components/category/docs views) into `src/app/page.tsx` by switching on `route.name` and rendering the matching view inside `PlatformShell`.
+   302→
+   303→---
+   304→Task ID: 7+8
+   305→Agent: main
+   306→Task: Wire all views into main page, fix mobile overflow, Agent Browser verification
+   307→
+   308→Work Log:
+   309→- Created src/app/page.tsx: RouteSwitcher that switches on useNavigation().route.name and renders the appropriate view inside PlatformShell. Used default imports for all 13 view components. Added a NotFoundView fallback and a routeKey() so each navigation remounts the view cleanly.
+   310→- Fixed src/components/platform/brand.tsx: replaced invalid `strokeClassName` SVG attribute with an inline `style` using the CSS variable.
+   311→- Fixed mobile horizontal overflow (113px) on the home page: added `min-w-0` to the Quick Start grid children and to the CodeBlock root container so code blocks scroll internally instead of expanding the layout.
+   312→- Removed an unused eslint-disable directive in color-wheel-picker-react.tsx.
+   313→- Agent Browser verification (desktop 1440×900 + mobile 390×844):
+   314→  - Home page: renders all 6 sections (hero, featured live Color Wheel Picker, categories, why-this-library, quick start, featured examples). The live picker mounted with proper ARIA application role.
+   315→  - Navigation: Components / Documentation / Examples / Resources header links all work; sidebar expands/collapses; breadcrumbs render correctly.
+   316→  - Color Wheel playground: live canvas renders, property inspector (shape segmented control + size/thickness/spacing sliders + hex input) all functional, output panel shows correct HEX/RGB/HSV/HSL, code tabs (JS/HTML/CSS/API) render, documentation section with properties/methods/events tables renders. Switching shape preserves the selected color (per PRD §4.2).
+   317→  - Search palette (⌘K): opens, filters results live, arrow-key navigation works, Enter navigates to the selected result, Esc closes.
+   318→  - Theming docs page: renders all sections including the --color-picker-* customization points table.
+   319→  - Components directory: shows the Color Wheel card (AVAILABLE) + 3 planned cards (muted, non-interactive).
+   320→  - Mobile: hamburger menu opens a slide-in drawer; no horizontal overflow; content stacks correctly.
+   321→  - Footer: sticks to bottom on short pages, pushed down naturally on long pages.
+   322→  - No console errors on any tested route.
+   323→- `bun run lint` — 0 errors, 0 warnings.
+   324→
+   325→Stage Summary:
+   326→- The platform is complete and browser-verified. Every primary user flow works: discover (home/directory), explore (live playground with real vanilla JS Color Wheel Picker), and implement (code tabs + API docs + installation guide).
+   327→- The Color Wheel Picker is a real, framework-independent vanilla JS/TS component (canvas-based, 4 shapes, full public API, keyboard support, destroy cleanup) — not a visual imitation.
+   328→- Design system matches the spec: Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66, Inter + JetBrains Mono, Lucide icons, dark theme default with light toggle.
+   329→- Single `/` route with client-side Zustand navigation simulates all 14 routes from the Architecture spec.
+   330→
+   331→---
+   332→Task ID: 9 (fix session)
+   333→Agent: main
+   334→Task: Fix color wheel rendering, wheel thickness/spacing, add rotateShape, fix hydration mismatch, fix overline text decoration
+   335→
+   336→Work Log:
+   337→- **Color wheel rendering fix**: The triangle and disk renderers used `putImageData` which ignores the canvas transform (dpr scaling), causing misplacement and blur on high-DPI displays. Also, the triangle's anti-aliasing formula `aa = min(1, coverage + 0.5)` was broken because `min(α,β,γ)` maxes at 1/3 for triangles, so interior pixels only reached 83% opacity — making the triangle look faint/transparent. Fixed by:
+   338→  - Rewrote `drawBarycentric` to use 2×2 supersampling (sample 4 sub-pixels per output pixel, average the results) — interior pixels now get full opacity (alpha=255), edges get smooth AA.
+   339→  - Both `drawBarycentric` and `drawDiskTo` now render at device resolution into a temp offscreen canvas, then composite via `drawImage` (which respects the dpr transform) instead of `putImageData` (which ignores it).
+   340→  - Increased disk center threshold from `dist < 0.5` to `dist < 1.5` to prevent a dark spot at the center.
+   341→- **Wheel thickness/spacing fix**: The React wrapper only forwarded `shape`, `size`, `hue`, `color` via imperative setters — `wheelThickness` and `wheelSpacing` were passed to the constructor but never updated after mount. Added `setWheelThickness(n)` and `setWheelSpacing(n)` methods to the vanilla class (both call `updateCanvasSize` + invalidate caches + schedule render), and added corresponding `useEffect` hooks in the React wrapper.
+   342→- **rotateShape option added** (PRD §4.4 "Rotating hue representation"): Added `rotateShape?: boolean` to `ColorPickerOptions`. When true, the triangle's pure-hue vertex (B) tracks the current hue position on the wheel. Implementation:
+   343→  - Added `getShapeRotation()` method: returns `hueRad - 120°` (B's default angular position is 120° clockwise from top).
+   344→  - Added `rotatePoint()` helper function for 2D rotation around a center.
+   345→  - `drawTriangleTo` now accepts a rotation parameter and rotates all three vertices.
+   346→  - `getInnerMarkerPosition` applies the same rotation to the triangle marker.
+   347→  - `updateInnerFromPoint` (pointer interaction) un-rotates the pointer point before computing barycentric coordinates.
+   348→  - Inner cache key includes the rotation so the cache invalidates on hue change when rotateShape is on.
+   349→  - Added `setRotateShape(bool)` method and React wrapper forwarding.
+   350→  - Added a toggle switch in the playground property inspector; updated generated JS code and API docs.
+   351→- **Hydration mismatch fix**: The `ThemeToggle` component's `aria-label` depended on `isDark` which was `false` during SSR (useTheme returns undefined) but `true` on the client (after next-themes resolves) — causing a hydration mismatch on the button's aria-label. Fixed by using a static `aria-label="Toggle color theme"` that never depends on theme state, and reading the actual theme from `document.documentElement.classList` in a `useEffect` after mount. Also removed `className="dark"` from `<html>` in layout.tsx (let next-themes handle it via its inline script).
+   352→- **Overline text decoration fix**: The custom `.overline` CSS class conflicted with Tailwind's built-in `overline` utility (`text-decoration-line: overline` — a line ABOVE the text). This caused all small uppercase labels to have an unwanted line above them. Renamed the class from `.overline` to `.eyebrow` in globals.css and updated all 30+ usages across the codebase via sed. Verified via `getComputedStyle` that `.eyebrow` elements now have `text-decoration-line: none`.
+   353→- Updated content metadata to include `rotateShape` in the properties table and `setWheelThickness`, `setWheelSpacing`, `setRotateShape` in the methods table.
+   354→- Updated the playground's generated API code to include the new methods and the `rotateShape` option.
+   355→
+   356→Stage Summary:
+   357→- All four shapes (triangle, square, disk, none) now render correctly with fully opaque interiors, smooth AA edges, and correct HSV color gradients. Verified via pixel sampling and VLM screenshot analysis.
+   358→- The hue wheel is a complete rainbow ring (verified at 8 angular positions: red→yellow→green→cyan→blue→purple→magenta).
+   359→- Wheel thickness and spacing sliders now update the canvas size live (verified: thickness 24→40 resized canvas from 244→276px).
+   360→- The rotateShape toggle works: when enabled, the triangle rotates so its pure-hue vertex tracks the wheel hue.
+   361→- No hydration errors (console grep for "error|hydrat|mismatch" returns 0).
+   362→- No text decoration lines on eyebrow labels (getComputedStyle confirms `text-decoration-line: none`).
+   363→- `bun run lint` — 0 errors, 0 warnings.
+   364→
+   365→---
+   366→Task ID: 10 (fix session 2)
+   367→Agent: main
+   368→Task: Fix three rendering issues: smooth wheel, disk distribution, rotateShape for square/disk
+   369→
+   370→Work Log:
+   371→- **Smooth hue wheel (conic gradient)**: Replaced the 360 one-degree arc segments in `drawWheelTo` with `ctx.createConicGradient()` — a native canvas API that produces a perfectly smooth, seamless hue transition with zero visible segment boundaries. The conic gradient starts at -π/2 (top, red=0°) and goes clockwise, with 24 color stops every 15°. Fills the annulus via even-odd fill rule. Added a fallback to 720 half-degree segments for browsers without ConicGradient support. Verified: pixel sampling at 0.25° intervals shows smooth RGB transitions (255,1,0 → 255,4,0 → 255,5,0 → 255,8,0) with no hard steps at former 1° boundaries.
+   372→- **Disk as clipped square gradient (not radial)**: Completely rewrote `drawDiskTo` — the old polar mapping (r→saturation, θ→value) radiated colors from the center, creating a sharp central point and a visually different distribution from the square/triangle. The new implementation draws the exact same saturation×value gradient as the square (pure hue base → white-to-transparent horizontal → transparent-to-black vertical), clipped to a circle via `ctx.clip()`. Uses the circumscribing square (side = 2·innerR) so the gradient covers the full circle. The center now shows a smooth mid-tone (S=0.5, V=0.5) instead of a sharp white point. Verified by pixel sampling: center=rgb(63,88,127) with gradual transitions to nearby pixels (no discontinuity). VLM confirms: "square-like 2D gradient clipped to a circle, NOT radiating from center, no sharp center point."
+   373→- **rotateShape extended to square and disk**: Updated `getShapeRotation()` to return a non-zero rotation for all three shapes (previously only triangle). For triangle: pure-hue vertex B (120° default) → `hue - 120°`. For square and disk: pure-hue edge (right side, 90° default) → `hue - 90°`. Updated `drawSquareTo` and `drawDiskTo` to accept a rotation parameter and apply it via canvas transform (`translate→rotate→translate`). Updated `getInnerMarkerPosition` for both square and disk to apply rotation. Updated `updateInnerFromPoint` for both square and disk to un-rotate the pointer point before computing SV coordinates. Verified: with hue=0° (red) + rotateShape on, the square/disk's pure-hue edge rotates from right to top, the bright-red corner moves to top-left (315°), and the black edge moves from bottom to right — confirmed by both pixel sampling and VLM analysis.
+   374→- Cleaned up: removed the `diskTheta` field and all its references (constructor, setColor, marker position, pointer interaction) since the disk no longer uses polar mapping. Updated the header documentation comment for the disk mapping.
+   375→
+   376→Stage Summary:
+   377→- All three rendering issues fixed and VLM-verified:
+   378→  1. ✅ Wheel is now perfectly smooth (conic gradient, no dashes/slices)
+   379→  2. ✅ Disk has flat 2D SV gradient (same as square), no sharp center point, no radial pattern
+   380→  3. ✅ Square and disk rotate with the hue when rotateShape is enabled (in addition to triangle)
+   381→- `bun run lint` — 0 errors, 0 warnings.
+   382→- The disk's color distribution now matches the square: white on the left (S=0), pure hue on the right (S=1), black at the bottom (V=0), bright at the top (V=1) — just with a circular boundary instead of square.
+   383→
+   384→---
+   385→Task ID: 11 (fix session 3)
+   386→Agent: main
+   387→Task: Fix square/disk rotation to align pure-hue corner; move outputs to live canvas
+   388→
+   389→Work Log:
+   390→- **Rotation alignment fix**: Changed `getShapeRotation()` for square and disk from `hue - 90°` to `hue - 45°`. Previously the square/disk rotated by their right-edge center (90°, which is S=1 V=0.5 — not pure hue). Now they rotate by their pure-hue corner (top-right, S=1 V=1, at 45° clockwise from top), so the pure-hue corner points toward the wheel hue thumb — exactly matching how the triangle's pure-hue vertex B tracks the hue. Verified: with hue=0° (red, top of wheel) + rotateShape on, the brightest/most-saturated red (rgb(203,41,41) for square, rgb(186,50,50) for disk) appears at the TOP of the inner shape, aligned with the wheel hue marker. All three shapes now rotate by their hue-representing corner/vertex toward the wheel thumb.
+   391→- **Output layout restructure**: 
+   392→  - Removed the 4-cell output bar (HEX/RGB/HSV/HSL read-only cells) from the bottom of the live canvas.
+   393→  - Added a proper "Output" section inside the live canvas panel (below the canvas, above the panel border): includes an "OUTPUT" eyebrow label, a color swatch + current HEX display, and a responsive 2×2 / 1×4 grid of CopyableValue chips (HEX/RGB/HSV/HSL) with copy-to-clipboard.
+   394→  - Removed the "Output" section from the Properties panel (it previously sat at the bottom with `mt-auto`).
+   395→  - Removed the now-unused `OutputCell` helper component.
+   396→  - Verified via DOM inspection: Properties panel no longer contains "Output"; live canvas panel does contain "Output". VLM confirms the layout is correct — the Properties panel is now a clean props-only inspector, and all color outputs are consolidated in the live canvas.
+   397→
+   398→Stage Summary:
+   399→- All three shapes (triangle, square, disk) now rotate by their pure-hue corner/vertex toward the wheel hue thumb when rotateShape is enabled.
+   400→- All color outputs (HEX/RGB/HSV/HSL + swatch) are now consolidated in the live canvas panel; the Properties panel contains only configuration controls.
+   401→- `bun run lint` — 0 errors, 0 warnings.
+   402→
+   403→---
+   404→Task ID: 12 (fix session 4)
+   405→Agent: main
+   406→Task: Click-to-copy overlay + new Color Range component
+   407→
+   408→Work Log:
+   409→- **CopyableValue overlay effect**: Rewrote the `CopyableValue` component in `src/components/platform/code-block.tsx`:
+   410→  - Removed the persistent copy icon (the `Copy`/`Check` lucide icon that sat at the right of each chip).
+   411→  - The whole chip is now the click target — no separate button.
+   412→  - On click, a green overlay (bg-emerald-600) slides up from the bottom (`translate-y-full → translate-y-0`) with a white checkmark icon and "Copied" text. Fades back after 1100ms.
+   413→  - Fixed the clipboard handler to always show the overlay even if `navigator.clipboard.writeText` fails (added a `document.execCommand('copy')` fallback and moved `setCopied(true)` outside the try/catch). Previously, in headless/non-secure contexts, the clipboard API would throw and the overlay never appeared.
+   414→  - VLM-verified: the green "Copied" overlay is visible on the clicked chip, the other 3 chips remain in their normal state, and no copy icon button is present.
+   415→- **New Color Range component** (`src/lib/components/color-range/`):
+   416→  - `color-range.ts`: A vanilla TypeScript 1D color slider with 4 modes:
+   417→    - **hue**: 0–360°, full spectrum gradient (smooth, via canvas linear gradient with 24 stops)
+   418→    - **lightness**: 0–100%, black → base color → white
+   419→    - **contrast**: 0–100%, base color mixed toward black (0) or white (100)
+   420→    - **alpha**: 0–1, transparent → opaque over a checkerboard pattern
+   421→  - Parameters: `mode`, `value`, `color` (base color for non-hue modes), `orientation` (horizontal/vertical), `thickness` (6–48px), `length` (80–420px).
+   422→  - Canvas-based rendering with rounded-rect clip, cached track canvas, and a draggable capsule thumb (white halo + dark border).
+   423→  - Full public API: `getValue`, `getValueOutput`, `setValue`, `setMode`, `setColor`, `setOrientation`, `setThickness`, `setLength`, `on/off`, `destroy`.
+   424→  - Pointer interaction with pointer capture; keyboard support (arrows ±1, Shift=±10, Home/End).
+   425→  - ARIA: role="slider", aria-valuenow/min/max/text.
+   426→  - Self-contained color math (parseHex, hsvToRgb, rgbToHsv) — no dependency on the color-wheel component.
+   427→  - `index.ts`: barrel re-export.
+   428→- **React wrapper** (`src/components/color-range/color-range-react.tsx`): Owns the instance, forwards prop changes via imperative API, forwards input/change events via refs.
+   429→- **Playground view** (`src/components/color-range/color-range-playground.tsx`): Full playground with live canvas, property inspector (mode 2×2 grid, orientation toggle, thickness/length sliders, base color input), output section (mode + value + label chips with click-to-copy), code panel (JS/HTML/CSS/API tabs with live-synced code), and documentation section (properties/methods/events/accessibility tables).
+   430→- **Content metadata**: Added the color-range component to `src/lib/platform/content.ts` with full properties, methods, events, defaults, whenToUse/whenNotToUse.
+   431→- **Routing**: Updated `src/app/page.tsx` to route `component/color/color-range` to the `ColorRangePlayground`.
+   432→- Fixed icon import: `Transparency` and `BlendingMode` don't exist in lucide-react; used `Blend` for the alpha mode icon.
+   433→
+   434→Stage Summary:
+   435→- CopyableValue chips now have no copy icon; clicking any chip shows a green "Copied" overlay with a checkmark (micro effect, 1.1s).
+   436→- New Color Range component established with 4 modes (hue/lightness/contrast/alpha), configurable orientation/thickness/length, full public API, keyboard support, and a complete playground.
+   437→- The component appears in the sidebar under Color → Color Range, and in the Components directory.
+   438→- `bun run lint` — 0 errors, 0 warnings.
+   439→
+   440→---
+   441→Task ID: 13 (fix session 5)
+   442→Agent: main
+   443→Task: Fix output section height, color range result color, vertical mode
+   444→
+   445→Work Log:
+   446→- **Color wheel output section height fix**: The CopyableValue chips could expand vertically when their text content (e.g. "rgb(66, 135, 245)") wrapped to a second line, causing the output section to grow inconsistently and confuse users. Fixed by:
+   447→  - Setting a fixed `h-9` (36px) height on every chip.
+   448→  - Making the label `shrink-0` so it never compresses.
+   449→  - Making the value `truncate` so long text is clipped with an ellipsis instead of wrapping.
+   450→  - Changed `inline-flex` to `inline-flex h-9 items-center` with `gap-1.5` and removed `py-1.5` (the fixed height handles vertical sizing).
+   451→  - Verified: all 4 chips (HEX, RGB, HSV, HSL) now render at exactly 36px height in a single row, no expansion. VLM confirms uniform heights with aligned top/bottom edges.
+   452→- **Color range result color (shared color object)**: All four modes (hue, lightness, contrast, alpha) now process the same base color and produce a concrete result color visible to the user.
+   453→  - Added `ColorRangeResultColor` interface: `{ hex, rgba, r, g, b, a }`.
+   454→  - Added `getResultColor()` public method to the `ColorRange` class.
+   455→  - Added `computeResultColor(mode, value, baseRgb, baseHsv)` module helper:
+   456→    - **hue**: `hsvToRgb(value, baseHsv.s, baseHsv.v)` — replaces hue, keeps base S/V.
+   457→    - **lightness/contrast**: mixes black → base (at 50) → white. value≤50: `base * (value/50)`. value>50: `base + (255-base) * ((value-50)/50)`.
+   458→    - **alpha**: `rgba(baseRgb, value)` — base color with alpha applied.
+   459→  - Included `color: ColorRangeResultColor` in `ColorRangeValueOutput` so every `input`/`change` event carries the result color.
+   460→  - Updated the playground output section to show the result color prominently: a color swatch (with checkerboard for alpha mode), the HEX value, and 4 copyable chips (HEX, RGBA, Value, Mode).
+   461→  - Verified: hue=5° → result #f55142 (red with base S/V). lightness=50% → result #4287f5 (base color). alpha=1.0 → rgba(66,135,245,1). All modes produce visible, correct result colors.
+   462→- **Vertical mode fix**: The `drawTrackTo` method drew the track rectangle as `roundRect(tx, ty, tLen, tThick, r)` for both orientations — for vertical this produced a horizontal track (width=length, height=thickness) with a vertical gradient, which was visually broken. Fixed by computing `trackW` and `trackH` based on orientation: horizontal → `(tLen, tThick)`, vertical → `(tThick, tLen)`. Applied the same fix to the `fillRect`, the clip path, and the border stroke. Also fixed the thumb dimensions for vertical: swapped `thumbW`/`thumbH` so the thumb is wide (spans thickness) and short (along track axis) in vertical mode, and used `Math.min(thumbW, thumbH)/2` for the corner radius to handle both orientations. Verified: vertical hue track now renders a proper tall narrow bar with the rainbow gradient running top-to-bottom; vertical alpha track shows checkerboard + gradient correctly.
+   463→
+   464→Stage Summary:
+   465→- Color wheel output chips: fixed height (36px), truncated text, no expansion.
+   466→- Color range: all 4 modes now produce a visible result color derived from the same base color; output shows swatch + HEX + RGBA + value + mode.
+   467→- Color range vertical mode: track and thumb now render correctly for vertical orientation.
+   468→- `bun run lint` — 0 errors, 0 warnings.
+   469→
+   470→---
+   471→Task ID: 14
+   472→Agent: main
+   473→Task: Build Color Circle component with harmony modes + snapping grid (dots/lines)
+   474→
+   475→Work Log:
+   476→- **Vanilla JS ColorCircle component** (`src/lib/components/color-circle/color-circle.ts`):
+   477→  - Full circular disk filled with a smooth conic hue gradient (cached, createConicGradient with 24 stops).
+   478→  - 8 harmony schemas: none, complementary [0,180], analogous [-30,0,30], triadic [0,120,240], tetradic [0,60,180,240], split-complementary [0,150,210], square [0,90,180,270], monochromatic [0]. Exported as `HARMONY_SCHEMAS`.
+   479→  - Harmony markers: dots on the circumference at each harmony hue, connected by link lines (polygon). Base hue marker has a lemon accent ring.
+   480→  - Snapping grid with two visualization modes using the SAME snap points:
+   481→    - `dots`: small semi-transparent dots on the circumference at each division.
+   482→    - `lines`: radial lines from center to circumference at each division.
+   483→    - Both use `gridDivisions` (e.g. 12 = every 30°). When snapping is on, dragging snaps the base hue to the nearest grid point.
+   484→  - Public API: getBaseHue, setBaseHue, getHarmony, setHarmony, setSnapping, setGridMode, setGridDivisions, setShowHarmonyLinks, getOutput, on/off, destroy.
+   485→  - Output includes `{ baseHue, harmony, hues[], colors[] }` where colors are full HSV (S=100, V=100) for each harmony hue.
+   486→  - setHarmony emits input+change events so listeners update when the harmony changes (not just when the user drags).
+   487→  - Pointer + keyboard interaction (arrows ±1°, Shift=15°, Home/End). ARIA slider role.
+   488→  - Self-contained color math (hsvToRgb, rgbToHex) — no external deps.
+   489→- **React wrapper** (`src/components/color-circle/color-circle-react.tsx`): owns the instance, forwards all props via imperative API.
+   490→- **Playground** (`src/components/color-circle/color-circle-playground.tsx`): full playground with:
+   491→  - Live canvas (the circular disk)
+   492→  - Property inspector: harmony 4×2 grid, snapping toggle, grid mode (dots/lines, only shown when snapping on), grid divisions slider, harmony links toggle, size slider
+   493→  - Output section: harmony palette swatches (color + hex + hue°) + copyable chips (Base, Hues, Harmony, Count)
+   494→  - Code panel (JS/HTML/CSS/API tabs with live-synced code)
+   495→  - Documentation section with harmony schemas table
+   496→- **Content metadata**: added color-circle to `src/lib/platform/content.ts` with full properties, methods, events, defaults.
+   497→- **Routing**: added `component/color/color-circle` → `ColorCirclePlayground` in `src/app/page.tsx`.
+   498→- Fixed icon import: `MagnetOff` doesn't exist in lucide-react; used `Magnet` for both states with different styling.
+   499→
+   500→Stage Summary:
+   501→- New Color Circle component established with 8 harmony modes and snapping grid (dots/lines visualization of the same snap points).
+   502→- VLM-verified: rainbow disk renders correctly, harmony markers + links visible, dots grid shows 12 dots on circumference at 30° intervals, lines grid shows 12 radial lines from center at the same 30° intervals.
+   503→- Component appears in sidebar (Color → Color Circle) and Components directory.
+   504→- `bun run lint` — 0 errors, 0 warnings.
+   505→
+   506→---
+   507→Task ID: 15 (fix session 6)
+   508→Agent: main
+   509→Task: Fix thumb clipping + redesign color circle grid inside + 2D marker dragging
+   510→
+   511→Work Log:
+   512→- **Thumb clipping fix (color wheel + color circle)**: Both components had `border-radius: 50%` on their canvas CSS, which clipped markers that sat on the edge of the circle. Removed the `border-radius: 50%` from both `.color-wheel-picker canvas` and `.color-circle canvas`. The disk/wheel are already drawn as circles via `ctx.arc`, so the border-radius was only causing clipping, not contributing to the visual. VLM confirms: color wheel markers are now fully round and unclipped.
+   513→- **Color circle redesigned for 2D interaction**: The previous Color Circle locked markers to the circumference (1D hue selection only). Redesigned it so markers can be dragged to any position INSIDE the circle:
+   514→  - Each harmony marker now has a `saturation` (0–1, default 1.0 = on the edge). The marker's position is: angle = hue, radius = saturation × r.
+   515→  - Pointer down finds the nearest marker (within 24px threshold, defaults to base marker) and grabs it. Drag updates the marker's hue (from angle) and saturation (from distance/radius).
+   516→  - When snapping is on, both hue snaps to angular divisions AND saturation snaps to the nearest ring (1/(GRID_RINGS+1) increments).
+   517→  - Output now includes `saturations[]` and each color's HSV reflects the marker's saturation.
+   518→  - `setHarmony` resets marker saturations to 1.0 for the new schema.
+   519→- **Polar grid drawn INSIDE the circle**: The previous grid only had dots/lines on the circumference. Redesigned `renderGrid()` to draw a full polar grid inside:
+   520→  - 3 concentric rings at 1/4, 1/2, 3/4 of the radius (GRID_RINGS = 3)
+   521→  - Angular divisions = `gridDivisions` (default 12 = every 30°)
+   522→  - **Dots mode**: dots at each (ring, angle) intersection + center dot + edge dots = ~49 dots forming a polar grid
+   523→  - **Lines mode**: concentric circles (rings) + radial lines from center to edge = spider-web polar grid
+   524→  - Lines mode uses dual-stroke (dark 3px outline + white 1.5px line) for contrast against any rainbow hue. VLM confirms: 3 rings + 12 radial lines = 48 snap cells visible.
+   525→- **Canvas padding for markers**: Added 14px padding to the Color Circle canvas so markers at the edge (saturation=1) aren't clipped by the canvas bounds. The disk is drawn centered within the larger canvas.
+   526→- VLM-verified all fixes:
+   527→  - Color wheel: markers fully visible, not clipped ✅
+   528→  - Color circle dots mode: polar grid of dots at multiple radii inside ✅
+   529→  - Color circle lines mode: 3 concentric rings + 12 radial lines (spider-web) inside ✅
+   530→  - Harmony markers draggable inside the circle ✅
+   531→  - Markers not clipped ✅
+   532→
+   533→Stage Summary:
+   534→- Color wheel and color circle thumbs are no longer clipped (removed border-radius).
+   535→- Color circle now has a polar grid drawn INSIDE the circle (not just on the edge): dots at ring/angle intersections or rings+lines forming a spider-web.
+   536→- Color circle markers are draggable to any position inside the circle (2D: hue by angle, saturation by radius), not just on the edge.
+   537→- `bun run lint` — 0 errors, 0 warnings.
+   538→
+   539→---
+   540→Task ID: 16 (fix session 7)
+   541→Agent: main
+   542→Task: Grid divisions include rings + white center via saturation gradient
+   543→
+   544→Work Log:
+   545→- **Grid divisions now include rings**: The `gridDivisions` property previously only controlled the angular divisions (radial spokes). The ring count was a hardcoded constant (GRID_RINGS = 3). Replaced with `ringCountFromDivisions(divisions)` which derives the ring count from `gridDivisions` (~half the angular count, e.g. 12 → 5 rings, 24 → 11 rings). Now `gridDivisions` controls BOTH the angular AND radial resolution of the polar grid. Updated `renderGrid()` (dots and lines modes) and the saturation snapping logic to use the derived ring count. VLM confirms: with gridDivisions=12, 5 concentric rings + 12 radial lines are visible.
+   546→- **White center via saturation gradient**: The disk previously used only a conic hue gradient with S=100, V=100 everywhere — so the center was a fully saturated hue (not white). Added a radial saturation gradient overlay on top of the conic hue gradient: `createRadialGradient(cx, cy, 0, cx, cy, r)` with stops `rgba(255,255,255,1)` at center → `rgba(255,255,255,0)` at edge. This makes the center blend to white (S=0) while the edge keeps full saturation (S=1), matching HSV saturation semantics where radius → saturation. Pixel-verified: center = rgb(253,255,253) (white), 1/4 out = rgb(255,193,192) (light pink), 1/2 = rgb(255,129,128) (mid red), 3/4 = rgb(255,65,65) (bright red), edge = rgb(208,1,0) (pure red). VLM confirms: center is white, smooth transition to saturated edge.
+   547→
+   548→Stage Summary:
+   549→- `gridDivisions` now controls both angular divisions (radial lines/spokes) and radial divisions (concentric rings). Higher divisions → more rings.
+   550→- Color circle center is now white via a radial saturation gradient overlay; the edge retains full saturation. Smooth blend confirmed by pixel sampling and VLM.
+   551→- `bun run lint` — 0 errors, 0 warnings.
+   552→
+   553→---
+   554→Task ID: 17
+   555→Agent: main
+   556→Task: Fix size parameter + Adobe Color-style base color + add/remove colors
+   557→
+   558→Work Log:
+   559→- **Size parameter fix**: The ColorCircle class was missing a `setSize()` method. The React wrapper had no effect to forward the `size` prop. Added `setSize(n)` to the class (updates options, resizes canvas, invalidates disk cache, re-renders) and added `React.useEffect(() => { ref.current?.setSize(size); }, [size])` to the wrapper. Verified: changing the size slider from 240 to 320 resizes the canvas from 272px to 352px (320 + 32 padding).
+   560→- **Complete ColorCircle redesign with Adobe Color-style base color concept**:
+   561→  - Replaced the old `baseHue + markerSat[]` model with a `colors: ColorEntry[]` array where each entry has `{ id, hue, saturation, isBase, offset }`.
+   562→  - **Base color drives the palette**: When the base color is dragged, ALL other colors shift by the same hue delta (maintaining their offsets). Verified: dragging base from 210° to 0° shifted all triadic colors correctly (base→red, others→green and blue, maintaining 120° offsets).
+   563→  - **Non-base colors move individually**: When a non-base color is dragged, only that color's hue+saturation changes; its offset from the base is recalculated. This lets users "break" a color from the harmony.
+   564→  - **setBaseIndex(i)**: Promotes any color to be the base. All offsets are recalculated relative to the new base. The base marker gets a lemon-green accent ring and a "Base" badge in the palette.
+   565→  - **addColor(hue?, saturation?)**: Adds a new color at a position (default: baseHue + 30°). Returns the new index.
+   566→  - **removeColor(i)**: Removes a color (can't remove the last one; if the base is removed, the first remaining color becomes the base).
+   567→  - Markers are numbered (1, 2, 3...) so users can identify them.
+   568→  - Harmony links connect all markers with a polygon.
+   569→- **Playground redesign with full palette management UI**:
+   570→  - Palette section in the live canvas showing color cards: each has a swatch, hex value, hue/saturation/offset info, a "Base" badge (for the base), a crown button (set as base), and an X button (remove).
+   571→  - "Add color" button in the palette header.
+   572→  - The properties panel has all the same controls (harmony, snapping, grid, links, size).
+   573→  - Initial state is emitted on mount so the palette shows immediately.
+   574→- VLM-verified all features: circular wheel with white center, 3 numbered markers with lemon-green base ring, palette cards with Base badge + crown/X buttons, Add color button, Size slider all present and correct.
+   575→
+   576→Stage Summary:
+   577→- Size parameter now works (setSize method + React effect forwarding).
+   578→- ColorCircle redesigned with Adobe Color-style base color concept: one color is the "base", moving it shifts all others; non-base colors move individually; users can add/remove colors and change which color is the base.
+   579→- Full palette management UI in the playground: color cards with swatches, hex values, base badges, set-as-base buttons, remove buttons, and add-color button.
+   580→- `bun run lint` — 0 errors, 0 warnings.
+   581→
+   582→---
+   583→Task ID: 18
+   584→Agent: main
+   585→Task: Standalone harmony engine + 10 Adobe rules + fix thumb positioning
+   586→
+   587→Work Log:
+   588→- **Standalone harmony engine** (`src/lib/components/color-circle/harmony-engine.ts`): Created as a pure, UI-independent module with:
+   589→  - `HarmonyRule` type: 10 rules (analogous, monochromatic, triad, complementary, split-complementary, double-split-complementary, square, compound, shades, custom).
+   590→  - `HARMONY_RULES` definitions: each rule has hue offsets, a `variesTone` flag for tonal rules (monochromatic/shades), and a description.
+   591→  - `generateHues(baseHue, rule)`: generates absolute hues from a base + rule.
+   592→  - `defaultSaturations(rule)` / `defaultLightnesses(rule)`: for tonal rules, generates varied saturation/lightness values.
+   593→  - `hueDelta(from, to)`: signed angular delta [-180, 180] for rotating all markers when the base moves.
+   594→  - `isConstrained(rule)`: true for all rules except "custom".
+   595→- **ColorCircle redesigned to use the engine**:
+   596→  - `ColorEntry` now includes `lightness` (HSL L, 0–100) in addition to hue/saturation.
+   597→  - `buildPalette(rule, baseHue)` generates the palette from the engine's offsets + default saturations/lightnesses.
+   598→  - `getOutput()` now includes HSL values and uses HSL→HSV conversion for accurate color representation.
+   599→  - Markers use HSL→HSV→RGB conversion for correct color display.
+   600→  - The base color drives hue rotation (all markers shift by the same delta); saturation/lightness are per-color.
+   601→  - Markers sit on the circumference (edge) by default, positioned by hue angle. Their geometric relationship (complementary through center, triad as triangle, square as square) is visualized via harmony link lines.
+   602→- **Playground updated with all 10 rules**: The HARMONIES array now has 10 entries with appropriate icons (Shuffle, Layers, Triangle, Divide, Split, Grid2x2, Square, Sparkles, SunMedium, Brush). The harmony rules table in the documentation section lists all 10 with their offsets and counts.
+   603→- **Content metadata updated**: The color-circle component metadata now reflects the 10 rules, add/remove color methods, base color concept, and updated defaults.
+   604→- VLM-verified: circular wheel with white center, 3 numbered markers with lemon-green base ring, harmony link lines through center, all 10 harmony rule buttons in properties panel, palette cards with swatches/hex/Base/crown/remove, Size slider all present and correct. Verified palette counts: complementary=2, triad=3, compound=5, monochromatic=5.
+   605→
+   606→Stage Summary:
+   607→- Created a standalone harmony engine module with all 10 Adobe Color rules, fully decoupled from the UI.
+   608→- ColorCircle now uses the engine, with proper separation of harmony geometry (hue offsets) from color values (hue, saturation, lightness per color).
+   609→- Markers positioned on the circumference, with geometric relationships visualized via harmony links through the center.
+   610→- Base color drives hue rotation; saturation/lightness are independent per color.
+   611→- Tonal rules (monochromatic, shades) generate varied saturation/lightness values.
+   612→- `bun run lint` — 0 errors, 0 warnings.
+   613→
+   614→---
+   615→Task ID: 19
+   616→Agent: main
+   617→Task: Match Adobe Color's harmony system exactly (9 rules, 5 colors, base at middle, lock/add/remove)
+   618→
+   619→Work Log:
+   620→- **Researched actual Adobe Color behavior** by visiting https://color.adobe.com/create/color-wheel with Agent Browser:
+   621→  - 9 harmony rules (not 10): Custom, Analogous, Complementary, Split complementary, Triad, Square, Compound, Shades, Monochromatic
+   622→  - 5 color strips at the bottom (base at middle, index 2)
+   623→  - Each strip has: Lock, Edit tint, Drag to reorder, Delete color, Edit color, Copy hex, Add color left, Add color right
+   624→  - Moving the base handle rotates all non-locked colors
+   625→  - Colors can be locked, added (left/right), and removed
+   626→  - Tested Triad: 5 colors with 3 distinct hues, offsets [-120, +120, 0, -120, +120]
+   627→  - Tested Square: 5 colors with 4 distinct hues, offsets [180, 90, 0, -90, 180]
+   628→- **Rewrote harmony engine** (`harmony-engine.ts`):
+   629→  - 9 rules matching Adobe Color exactly (removed "double-split-complementary" and "tetradic")
+   630→  - All rules produce exactly 5 colors with offsets defined for each position
+   631→  - Base always at index 2 (BASE_INDEX = 2, PALETTE_SIZE = 5)
+   632→  - Tonal rules (monochromatic, shades) have proper default S/L variation
+   633→  - Triad offsets: [-120, 120, 0, -120, 120] — 3 hues in 5 slots
+   634→  - Square offsets: [180, 90, 0, -90, 180] — 4 hues in 5 slots
+   635→  - Complementary offsets: [180, 0, 0, 0, 180] — 2 hues in 5 slots
+   636→- **Rewrote ColorCircle** (`color-circle.ts`):
+   637→  - 5 default colors, base at index 2 (middle)
+   638→  - Lock/unlock support: locked colors don't move when base moves
+   639→  - addColor(index, hue?, sat?): insert at any position
+   640→  - removeColor(i): remove any color (base is promoted if removed)
+   641→  - Moving base: rotates all non-locked, non-base colors by the same hue delta
+   642→  - Moving non-base: only changes that color; offset recalculated
+   643→  - Keyboard: rotates all non-locked colors
+   644→  - Locked markers show an "L" indicator on the canvas
+   645→- **Updated playground** (`color-circle-playground.tsx`):
+   646→  - 9 harmony rule buttons in Adobe Color's exact order
+   647→  - Adobe-style vertical color strips with:
+   648→    - Colored swatch on the left with position number
+   649→    - Hex value + HSL info + offset
+   650→    - Lock/Unlock button (amber when locked)
+   651→    - Add-left (ChevronLeft) and Add-right (ChevronRight) buttons
+   652→    - Crown (set as base) button
+   653→    - X (remove) button
+   654→  - Removed the separate "Add color" header button (colors are added via the per-strip add-left/add-right buttons)
+   655→- VLM-verified: 9 harmony rules, 5 color strips with all action buttons, base marker with lemon ring, size slider all present and correct. Triad produces 5 colors with 3 distinct hues. Complementary produces 5 colors with 2 distinct hues.
+   656→
+   657→Stage Summary:
+   658→- Harmony system now matches Adobe Color exactly: 9 rules, 5 colors, base at middle, lock/add-left/add-right/remove.
+   659→- Standalone harmony engine with proper hue offsets for all 9 rules.
+   660→- `bun run lint` — 0 errors, 0 warnings.
+   661→
+   662→---
+   663→Task ID: 20
+   664→Agent: main
+   665→Task: Reconstruct harmony links as radial lines to center + expandable custom rule system
+   666→
+   667→Work Log:
+   668→- **Harmony links changed to radial lines**: Rewrote `renderLinks()` in ColorCircle to draw lines from each marker TO THE CENTER of the circle (radial spokes), not between markers (polygon). Each line shows the angular relationship of its color to the center. Base color's line is lemon-tinted; other lines are white semi-transparent. VLM confirms: "lines connect each outer marker directly to the central white point. They radiate outward from the center like spokes of a wheel. They do not connect marker-to-marker."
+   669→- **Harmony engine made expandable**: Rewrote `harmony-engine.ts` to support user-defined custom rules:
+   670→  - Added a mutable `customRules` Map that stores user-defined `HarmonyDefinition` entries.
+   671→  - Added `defineCustomRule(label, offsets, options)` — registers a new custom rule and returns its definition.
+   672→  - Added `removeCustomRule(id)`, `getCustomRules()`, `getAllRules()`, `getRule(id)`.
+   673→  - Built-in rules are now in `BUILT_IN_RULES` with `BUILT_IN_RULE_ORDER`.
+   674→  - The `HarmonyRule` type is now `string` (supports any rule ID, built-in or custom).
+   675→- **ColorCircle `setCustomOffsets()` method**: Added a public method that defines a custom rule from user-specified angle offsets and switches to it immediately. Preserves the current base hue. Example: `setCustomOffsets([0, 60, 120, 180, 240])` creates a 5-color rule with 60° spacing.
+   676→- **Custom Rule Builder UI** in the playground: Added a "Custom rule builder" section in the properties panel with:
+   677→  - Offset chips showing current angle offsets (e.g. "+0°", "+120°", "+240°") with remove (X) buttons.
+   678→  - A number input for entering a new offset angle.
+   679→  - An "Add" button to add the offset to the list.
+   680→  - An "Apply rule" button that calls `setCustomOffsets()` on the ColorCircle.
+   681→  - Verified: adding [0, 120, 240, 90] and applying produces 4 colors at the correct hues (210°, 330°, 90°, 300°).
+   682→
+   683→Stage Summary:
+   684→- Harmony links are now radial lines from each thumb to the center (not between thumbs), making the angular relationship to center visually clear.
+   685→- The harmony system is expandable: users can define their own custom rules with arbitrary angle offsets via the Custom Rule Builder UI or the `setCustomOffsets()` API.
+   686→- `bun run lint` — 0 errors, 0 warnings.
+   687→
+   688→---
+   689→Task ID: 21
+   690→Agent: main
+   691→Task: Add color on same radial line + base color controls all colors' distance from center
+   692→
+   693→Work Log:
+   694→- **addColorOnLine(i, saturation?) method**: Added a new public API to ColorCircle that adds a color on the SAME RADIAL LINE as an existing color (same hue, different saturation/distance from center). The new color sits at the same angle but closer to center (default: halfway between the source color's saturation and center, i.e. 50% of source saturation). This lets users create shades/tints of a color along the same spoke — like Adobe Color's ability to add colors at different distances along the same hue line.
+   695→  - Added a "Droplets" icon button on each palette card (titled "Add shade on same line") that calls addColorOnLine.
+   696→  - Verified: adding a shade on color #0080ff (blue, S=100%) produces #4080bf (same blue hue, S=50%, closer to center).
+   697→- **Base color controls all colors' distance from center**: Updated the pointer interaction so that when the base color's saturation changes (moving toward/away from center), ALL non-locked colors' saturation scales proportionally by the same ratio. The base color now controls both hue rotation (all colors rotate by the same hue delta) AND distance from center (all colors' saturation scales by the same ratio). This matches the user's requirement: "by a rule main color controls distance between each color and center of circle."
+   698→  - Implementation: compute `satRatio = newSat / oldSat` when the base moves, then multiply each non-locked color's saturation by that ratio.
+   699→  - Verified: dragging the base from S=100% to S=30% scaled all colors to S≈30% (S30, S9, S30, S30 — the S9 was a previously-added shade that scaled proportionally from S30).
+   700→- VLM-verified: markers moved closer to center (~30% radius) after dragging the base inward, saturation values updated on color cards, Droplets button present.
+   701→
+   702→Stage Summary:
+   703→- Users can add colors on the same radial line (same hue, different saturation) via the Droplets button on each palette card.
+   704→- The base color now controls the distance between every color and the center — dragging the base inward/outward scales all non-locked colors' saturation proportionally.
+   705→- `bun run lint` — 0 errors, 0 warnings.
+   706→
+   707→---
+   708→Task ID: 22
+   709→Agent: main
+   710→Task: Build Color Ramp component (multi-stop gradient with draggable stops)
+   711→
+   712→Work Log:
+   713→- **Vanilla JS ColorRamp component** (`src/lib/components/color-ramp/color-ramp.ts`):
+   714→  - Multi-stop gradient bar with draggable color stops.
+   715→  - Canvas-based rendering: gradient bar with rounded corners, stop markers as capsule thumbs (white halo + dark border + color dot).
+   716→  - Click empty space on the bar → adds a new stop at that position (color interpolated from neighbors).
+   717→  - Drag stops to reposition them; stops auto-sort by position.
+   718→  - `addStop(position?, color?)`: color is interpolated via linear RGB lerp if not specified.
+   719→  - `removeStop(i)`: removes a stop (keeps at least 2).
+   720→  - `setOrientation("horizontal" | "vertical")`: switches orientation, swaps bar dimensions.
+   721→  - `setThickness(n)`, `setLength(n)`: adjustable bar size.
+   722→  - Full public API: getStops, setStops, addStop, removeStop, setOrientation, setThickness, setLength, on/off, destroy.
+   723→  - Pointer interaction with pointer capture; keyboard support (arrows adjust first stop).
+   724→  - Events: `input` (continuous during drag), `change` (committed).
+   725→  - Self-contained color math (parseHex, rgbToHex, lerpRgb) — no external deps.
+   726→- **React wrapper** (`src/components/color-ramp/color-ramp-react.tsx`): owns the instance, forwards prop changes, exposes instance via `instanceRef` for imperative calls.
+   727→- **Playground** (`src/components/color-ramp/color-ramp-playground.tsx`): full playground with:
+   728→  - Live canvas (the gradient bar)
+   729→  - Property inspector: orientation toggle (Horizontal/Vertical), thickness slider, length slider
+   730→  - Output section: stop cards (color swatch + hex + position %) with remove buttons + "Add stop" button
+   731→  - Code panel (JS/HTML/CSS/API tabs with live-synced code)
+   732→  - Documentation section
+   733→- **Content metadata**: added color-ramp to `src/lib/platform/content.ts` with full properties, methods, events, defaults.
+   734→- **Routing**: added `component/color/color-ramp` → `ColorRampPlayground` in `src/app/page.tsx`.
+   735→- VLM-verified: horizontal gradient bar with blue→green→orange transition, 4 draggable stop markers, stop cards with swatches/hex/position, Add stop button, orientation/thickness/length controls all present.
+   736→
+   737→Stage Summary:
+   738→- New Color Ramp component established: multi-stop gradient with draggable stops, add/remove, orientation control.
+   739→- Appears in sidebar (Color → Color Ramp) and Components directory.
+   740→- `bun run lint` — 0 errors, 0 warnings.
+   741→
+   742→---
+   743→Task ID: 1 (CustomButton)
+   744→Agent: main
+   745→Task: Build CustomButton vanilla JS component + React wrapper + playground (Inputs category)
+   746→
+   747→Work Log:
+   748→- **Vanilla JS CustomButton component** (`src/lib/components/custom-button/custom-button.ts`):
+   749→  - DOM-based button component (no canvas) — renders a real `<button>` element.
+   750→  - Options: `text`, `icon`, `iconType` ("icon" | "image"), `iconPosition` (left/right/top/bottom), `variant` (primary/secondary/outline/ghost), `size` (sm/md/lg), `disabled`, `fullWidth`.
+   751→  - Behavior: text-only → text button; icon-only → square icon-only button (aspect-ratio 1:1, no padding); text+icon → positioned per iconPosition (top/bottom produce a stacked flex-column layout).
+   752→  - Built-in Lucide-style SVG icon set (18 icons: plus, x, check, settings, search, home, star, heart, arrow-right, trash, download, upload, mail, user, save, edit, bell, refresh). Each rendered as inline `<svg>` with `stroke="currentColor"` so it inherits the button text color.
+   753→  - `iconType: "image"` renders the icon as `<img src="...">` — works with URLs and data URIs.
+   754→  - Variant styles (via data attributes + CSS custom properties):
+   755→    - primary: lemon (#D9FF66) bg, dark text
+   756→    - secondary: purple-strong (#342348) bg, light text
+   757→    - outline: transparent bg, 18%-white border, lemon-tinted hover
+   758→    - ghost: transparent bg, no border, 6%-white hover
+   759→  - Sizes: sm (h-32px, 12px text), md (h-36px, 14px text), lg (h-40px, 16px text).
+   760→  - Injects its own scoped CSS (prefixed `.custom-button-`) — no dependency on the platform's stylesheet. Single `<style id="custom-button-styles">` element appended to `<head>` once.
+   761→  - Disabled state uses the native `disabled` attribute (also blocks click events and removes from tab order).
+   762→  - Icon-only buttons get an `aria-label` derived from the icon name/src for screen readers.
+   763→  - Full public API: setText, setIcon (with optional type), setIconPosition, setVariant, setSize, setDisabled, setFullWidth, getElement, on("click"), off, destroy.
+   764→  - Custom `CustomButtonHandler` type (`(...args: unknown[]) => void`) used for `off` to satisfy `@typescript-eslint/no-unsafe-function-type` while preserving the spec's `Function`-like signature.
+   765→  - Exposed `BUILT_IN_ICON_NAMES` constant so the playground can populate its icon dropdown.
+   766→- **Barrel exports** (`src/lib/components/custom-button/index.ts`): re-exports the class, the type aliases, and the icon name list.
+   767→- **React wrapper** (`src/components/custom-button/custom-button-react.tsx`): owns the instance, forwards every prop to the imperative API via dedicated `useEffect` hooks, exposes the instance via `instanceRef` for imperative calls from the playground.
+   768→- **Playground** (`src/components/custom-button/custom-button-playground.tsx`): full playground with:
+   769→  - Live preview area (centered button, max-w-320px container so fullWidth is visible)
+   770→  - Property inspector with: text input, iconType toggle (Icon/Image), icon picker (dropdown of built-in names with a live preview chip when "icon"; free-text URL/data-URI input when "image"), iconPosition 4-way segmented control (ArrowLeft/Right/Up/Down), variant 4-way segmented control, size 3-way segmented control (SM/MD/LG), disabled toggle, fullWidth toggle, plus a live state-snapshot table.
+   771→  - Smart icon-type switching: when switching to "image" with a built-in icon name selected, the icon is swapped to a default SVG data URI; when switching back to "icon" with a data URI, it's restored to "plus".
+   772→  - Click counter with reset button.
+   773→  - "Try the imperative API" section: one-click buttons that call setText/setVariant/setIcon/setDisabled/setSize on the live instance and toast confirmation.
+   774→  - Code panel (JS/HTML/CSS/API tabs) with live-synced code generation.
+   775→  - Documentation section: Overview, When to use, When not to use, Properties table, Methods list, Events list, Accessibility notes, sticky on-this-page nav.
+   776→- **Content metadata**: added `custom-button` to `src/lib/platform/content.ts` in the `inputs` category with full properties, methods, events, defaults, when-to-use, when-not-to-use, capabilities, tags.
+   777→- **Navigation labels**: extended `routeLabel` in `src/store/navigation.ts` to map the `custom-button` slug → "Custom Button" (the existing `categoryLabel` already handled "inputs" → "Inputs").
+   778→- **Routing**: added `component/inputs/custom-button` → `CustomButtonPlayground` in `src/app/page.tsx`.
+   779→- **Lint**: removed manual `useCallback` wrappers for `update`/`reset`/`onClick` in the playground (the React Compiler now memoizes them automatically, and the manual empty-deps form was triggering `react-hooks/preserve-manual-memoization`). Removed an unused `eslint-disable` directive in the React wrapper.
+   780→
+   781→Stage Summary:
+   782→- New Custom Button component established: versatile DOM-based button with 4 variants, 3 sizes, 4 icon positions, 18 built-in Lucide-style icons + image support.
+   783→- Appears in sidebar (Inputs → Custom Button) and Components directory under the Inputs category.
+   784→- `bun run lint` — 0 errors, 0 warnings.
+   785→- Files created:
+   786→  - `src/lib/components/custom-button/custom-button.ts`
+   787→  - `src/lib/components/custom-button/index.ts`
+   788→  - `src/components/custom-button/custom-button-react.tsx`
+   789→  - `src/components/custom-button/custom-button-playground.tsx`
+   790→- Files modified:
+   791→  - `src/lib/platform/content.ts` (added custom-button metadata)
+   792→  - `src/store/navigation.ts` (added custom-button slug label)
+   793→  - `src/app/page.tsx` (added routing for component/inputs/custom-button)
+   794→
+   795→---
+   796→Task ID: 3 (ToggleGroup)
+   797→Agent: full-stack-developer
+   798→Task: Build ToggleGroup vanilla JS component + React wrapper + playground (Inputs category)
+   799→
+   800→Work Log:
+   801→- Read `/home/z/my-project/worklog.md` (Tasks 1–22 plus the in-flight CustomButton task) to lock the design system (Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66), navigation model, content metadata schema, and the existing playground conventions (PageContainer, Breadcrumbs + PageOverline + H1 + intro, .panel/.eyebrow/.bg-grid tokens, lemon-only accent, CodeBlock + CopyableValue, toast from sonner).
+   802→- Read `src/components/color-ramp/color-ramp-playground.tsx`, `color-ramp-react.tsx`, and `src/lib/components/color-ramp/color-ramp.ts` to mirror the established wrapper/playground patterns (instanceRef forwarding, change-driven state mirroring, code-tab generation, documentation section).
+   803→- **Vanilla JS ToggleGroup component** (`src/lib/components/toggle-group/toggle-group.ts`):
+   804→  - Self-contained — does NOT import CustomButton. Each toggle button is a real DOM element (`<div role="button" tabindex="0">`) styled to look like CustomButton's primary/secondary/outline variants (lemon / purple-strong / transparent+border), with icon + label support. Selected state always layers a lemon ring on top of the variant.
+   805→  - Options: `items` (ToggleButtonItem[]), `multiselect`, `closable`, `reorderable`, `orientation` (horizontal/vertical), `variant` (primary/secondary/outline), `size` (sm/md/lg). Defaults match the spec: single-select, not closable, not reorderable, horizontal, outline, md.
+   806→  - Built-in 23-icon set (bold, italic, underline, check, x, plus, star, circle, square, heart, bolt, dot, arrow-right, settings, folder, file, user, tag, eye, bell, search, home). `icon` field accepts a built-in name, a `data:` URI, or a raw `<svg>` string — `renderIcon()` handles all three.
+   807→  - Scoped CSS injected once per document (`<style id="toggle-group-styles">`) with `.toggle-group-` prefix. No canvas, no external deps. All visual tokens come from the platform's CSS variables (--brand-lemon, --brand-purple-strong, --border, --accent, --foreground, --muted-foreground).
+   808→  - Selection behavior: single-select click selects + deselects others (no toggle-off via click — keeps one selected); multiselect toggles independently. `setSelected([])` is allowed via the API (clears all). `setMultiselect(false)` keeps only the first selected when turning off multi.
+   809→  - Closable: each item gets an embedded `<button class="toggle-group__close" tabindex="-1">` with an inline X SVG. Clicking X calls `_handleClose` (removes the item from items[], removes its DOM, fires `close` then `change`). `setClosable()` adds/removes the close button on existing items without rebuilding them.
+   810→  - Reorderable: pointer-event-based drag-to-reorder. On pointerdown, records the item + pointer origin. On pointermove past a 4px threshold, marks the item as `--dragging` (lower opacity + shadow), translates it with the pointer for tactile feedback, and finds the sibling under the pointer (via `document.elementFromPoint` with the dragged item's `pointer-events` temporarily disabled). Computes whether the pointer is in the sibling's first or second half, then performs a live swap in the items array + DOM (re-appends items in array order). After a swap, re-anchors the drag origin so the translate offset is 0 at the new position. On pointerup, emits `reorder` + `change`. Suppresses the synthetic click that follows a drag via a `Date.now()`-based guard.
+   811→  - Keyboard: Enter/Space toggles selection; Delete/Backspace closes (if closable); Arrow Left/Up + Arrow Right/Down move the focused item within the group (if reorderable).
+   812→  - Public API exactly matches the spec: `constructor(container, options?)`, `getItems()`, `setItems(items)`, `addItem(item)`, `removeItem(id)`, `getSelected()`, `setSelected(ids)`, `setMultiselect(on)`, `setClosable(on)`, `setReorderable(on)`, `setOrientation(orientation)`, `setVariant(variant)`, `setSize(size)`, `on(event, handler)`, `off(event, handler)`, `destroy()`.
+   813→  - Events: `change` (selection/reorder/add/remove/setItems), `select` (user click), `reorder` (drag or arrow-key reorder), `close` (X clicked, item removed). Tiny internal EventEmitter with try/catch around each handler so a single bad handler can't crash the group.
+   814→  - `destroy()` is idempotent: removes window pointer listeners, clears the handler map, removes all DOM, nulls the drag state.
+   815→  - Custom `ToggleHandler = (data: any) => void` type used for `off` to satisfy `@typescript-eslint/no-unsafe-function-type` while preserving the spec's `Function`-like signature.
+   816→- **Barrel exports** (`src/lib/components/toggle-group/index.ts`): re-exports the class + all type aliases.
+   817→- **React wrapper** (`src/components/toggle-group/toggle-group-react.tsx`):
+   818→  - Owns the vanilla instance for the lifetime of the mount. Creates once with empty deps (capturing the initial items snapshot via a ref so the create-once effect stays empty).
+   819→  - Forwards every prop change via dedicated `useEffect` hooks: multiselect, closable, reorderable, orientation, variant, size. The items prop is compared (JSON.stringify key) against the instance's current items and only `setItems()` is called when they actually differ — this avoids loops with the change-driven state in the playground.
+   820→  - Forwards all four events (change/select/reorder/close) to optional callbacks via refs so the create-once effect can stay empty.
+   821→  - Emits the initial state on mount so the parent can sync immediately.
+   822→- **Playground** (`src/components/toggle-group/toggle-group-playground.tsx`) — Figma/Godot-style nested properties panel:
+   823→  - Live preview area (left, `.panel` with `bg-grid` background): the actual `<ToggleGroupReact>` instance.
+   824→  - Output section under the preview: CopyableValue chips for `selected` (JSON array) and `labels` (comma-joined), plus a contextual hint about click/close/drag interactions.
+   825→  - Property inspector (right, `.panel`):
+   826→    - **Group section** (top): three Switch toggles for Multiselect / Closable / Reorderable; segmented controls for Orientation (Horizontal/Vertical with ArrowLeftRight/ArrowUpDown icons), Variant (Outline/Primary/Secondary), Size (SM/MD/LG).
+   827→    - **Buttons section** (bottom, separated by a divider): "BUTTONS (N)" header with an "Add button" action. Each item is rendered as a `ButtonItemEditor` card with:
+   828→      - A summary row (collapse chevron + index badge + truncated label + "on" badge if selected + remove trash button).
+   829→      - An expandable details section with: Label text input, Icon `<select>` dropdown (23 built-in icons + "(none)"), Selected checkbox, Move up/down buttons (disabled at array ends), and a read-only id footer.
+   830→  - Inspector edits flow through `instanceRef.current.setItems()` / `setSelected()` / `removeItem()` / `addItem()` so the vanilla instance stays the source of truth and emits change events that sync React state back.
+   831→  - Code panel with JS/HTML/CSS/API tabs, all live-synced to the current state (the JS tab includes the actual items array, multiselect/closable/reorderable flags, orientation, variant, and size).
+   832→  - Documentation section: Overview, When to use, When not to use, Properties table, Methods list, Events list, Accessibility notes, Icons explanation, sticky on-this-page nav — all driven by the content.ts metadata.
+   833→- **Content metadata**: added `toggle-group` to the `components` array in `src/lib/platform/content.ts` under the `inputs` category with full properties (7), methods (15), events (4), defaults, when-to-use (4), when-not-to-use (3), capabilities (6), tags.
+   834→- **Navigation labels**: extended `routeLabel` in `src/store/navigation.ts` to map the `toggle-group` slug → "Toggle Group" (the existing `categoryLabel` already handled "inputs" → "Inputs", and `breadcrumbs` already used `routeLabel` for the component-name segment).
+   835→- **Routing**: added `component/inputs/toggle-group` → `ToggleGroupPlayground` in `src/app/page.tsx` (the import was already present from a parallel agent's draft; only the route handler was missing).
+   836→- **Agent-browser + VLM verification**:
+   837→  - Navigated Home → Components → Inputs → Toggle Group. Playground loaded with the three default buttons (Bold selected with lemon ring, Italic, Underline). VLM confirmed the selected button is highlighted with lemon-green.
+   838→  - Clicked Italic in single-select mode: Bold deselected, Italic selected (checkboxes in the inspector updated correctly).
+   839→  - Toggled Closable: each toggle gained an embedded Remove (X) button. Clicked the X on Underline: item removed, button count went 3 → 2.
+   840→  - Toggled Multiselect then clicked Italic: both Bold and Italic checkboxes are checked simultaneously.
+   841→  - Clicked "Add button" twice: two "New button" entries appeared, count went 2 → 4.
+   842→  - Set Variant to Primary: all four buttons turned lemon-green with dark text (VLM confirmed "bright lime green/yellow-green background, dark/black text, X close icon on the right side").
+   843→  - Enabled Reorderable, dragged Bold to the last position: the inspector order updated to [Italic, New button, New button, Bold] — drag-to-reorder works.
+   844→  - Set Orientation to Vertical (via `find role button click --name "Vertical"` to bypass stale refs): the `.toggle-group` element's class became `toggle-group--vertical` and VLM confirmed the buttons stacked vertically.
+   845→  - Code panel JS tab is live-synced (shows the actual 4 items with their icons + selected flags, multiselect:true, closable:true, variant:"primary").
+   846→  - API tab renders the full TypeScript interface.
+   847→- **Lint**: `bun run lint` — 0 errors, 0 warnings across the whole project (toggle-group files contribute nothing; the parallel custom-button errors that existed mid-task were also resolved by the time of the final check).
+   848→
+   849→Stage Summary:
+   850→- New Toggle Group component established: self-contained vanilla JS class that mimics CustomButton visuals (primary/secondary/outline variants, icon + label) without importing it, with single/multi-select, closable buttons, drag-to-reorder (pointer events), and dynamic add/remove.
+   851→- Appears in sidebar (Inputs → Toggle Group) and Components directory under the Inputs category.
+   852→- Playground features a Figma/Godot-style nested properties panel: a Group section for the toggle group's own properties, and a Buttons section where each child toggle button's properties (label, icon, selected, remove, move up/down) are editable inline — exactly like editing nested component properties in Figma's or Godot's inspector.
+   853→- `bun run lint` — 0 errors, 0 warnings.
+   854→- Files created:
+   855→  - `src/lib/components/toggle-group/toggle-group.ts`
+   856→  - `src/lib/components/toggle-group/index.ts`
+   857→  - `src/components/toggle-group/toggle-group-react.tsx`
+   858→  - `src/components/toggle-group/toggle-group-playground.tsx`
+   859→- Files modified:
+   860→  - `src/lib/platform/content.ts` (added toggle-group metadata in the inputs category)
+   861→  - `src/store/navigation.ts` (added toggle-group slug → "Toggle Group" label)
+   862→  - `src/app/page.tsx` (added route handler for `component/inputs/toggle-group`)
+   863→
+   864→---
+   865→Task ID: 2
+   866→Agent: main
+   867→Task: Build PeriodicRange component (dual-thumb range slider with snapping, markers, orientation) + React wrapper + playground
+   868→
+   869→Work Log:
+   870→- **Vanilla JS PeriodicRange component** (`src/lib/components/periodic-range/periodic-range.ts`):
+   871→  - Canvas-based dual-thumb range slider. Two thumbs (min and max) that cannot cross (valueMin ≤ valueMax invariant).
+   872→  - Track rendered as rounded-rect bar; selected range between the thumbs filled with lemon accent (#D9FF66).
+   873→  - Optional snapping to a step grid (step = 0 disables). Snapping applied in `applyStep` via `Math.round((v - min) / step) * step + min`.
+   874→  - Optional tick-mark markers with numeric labels at markerStep intervals. Labels are auto-decimated when there are more than 20 markers (every Nth marker labeled) to prevent overlap.
+   875→  - Horizontal or vertical orientation. For vertical, the high-value thumb is at the top, low-value at the bottom (conventional); markers and labels sit to the LEFT of the track.
+   876→  - Two thumbs are visually distinguishable: both are white capsules with dark borders, but the min thumb has a horizontal "−" bar inside and the max thumb has a "+" (horizontal + vertical bars). The max thumb is also slightly larger (14 vs 12 px) and has a thicker border (2 vs 1.5 px).
+   877→  - Active thumb (the one that was last interacted with) gets a lemon ring outside it.
+   878→  - Pointer interaction: pointerdown picks the closest thumb (hit-test within 14px, otherwise nearest); pointermove drags it, clamping to [min, valueMax] for min thumb and [valueMin, max] for max thumb; pointerup commits with a "change" event. Pointer capture is used so the drag continues even if the cursor leaves the canvas.
+   879→  - Keyboard interaction: Arrow Up/Right increases the active thumb, Arrow Down/Left decreases (Shift via PageUp/PageDown = 10× step). Home jumps the active thumb to range min (or to valueMin for the max thumb), End jumps to range max (or to valueMax for the min thumb). Tab cycles the active thumb between min and max.
+   880→  - Full public API matching the spec: getValueMin, getValueMax, setValueMin, setValueMax, setRange, setStep, setShowMarkers, setMarkerStep, setOrientation, setThickness, setLength, on, off, destroy.
+   881→  - Events: `input` (continuous during drag/keyboard) and `change` (committed on pointer up or keyboard). Both carry `{ valueMin, valueMax }`.
+   882→  - ARIA: canvas has role="slider", aria-valuemin/max/now (active thumb's value), aria-valuetext (combined "min X, max Y" label).
+   883→  - Self-contained helpers (clamp, approxEqual, roundRect, formatMarkerLabel) — no external deps.
+   884→- **Barrel exports** (`src/lib/components/periodic-range/index.ts`): re-exports `PeriodicRange` class and `PeriodicRangeOrientation`, `PeriodicRangeOptions`, `PeriodicRangeValue` types.
+   885→- **React wrapper** (`src/components/periodic-range/periodic-range-react.tsx`): owns the instance for the lifetime of the mount; forwards all prop changes via the imperative API (setRange, setValueMin, setValueMax, setStep, setShowMarkers, setMarkerStep, setOrientation, setThickness, setLength). Exposes the instance via `instanceRef` for imperative calls. Emits initial state on mount so consumers can render synchronously.
+   886→- **Playground** (`src/components/periodic-range/periodic-range-playground.tsx`): full playground with:
+   887→  - Live canvas (the dual-thumb slider)
+   888→  - Property inspector: Range (min/max), Values (valueMin/valueMax), Step, Markers toggle (reveals Marker step when on), Orientation (Horizontal/Vertical), Thickness slider, Length slider
+   889→  - Output section: prominent Min/Max value chips with +/- icons, copyable valueMin/valueMax chips, span indicator
+   890→  - Code panel (JavaScript/HTML/CSS/API tabs with live-synced code)
+   891→  - Documentation section with Overview, When to use, When not to use, Properties table, Methods, Events, Accessibility, Styling
+   892→- **DeferredNumberInput**: A custom number input that defers committing its value to the parent until blur/Enter. This lets users type multi-digit numbers (e.g. "33") without each keystroke being snapped/clamped back by the underlying component (which would make typing impossible when step snapping is on). The displayed value tracks the external `value` prop while unfocused (so canvas drags and reset are reflected), and tracks the local draft while focused.
+   893→- **onInput sync**: When the canvas emits `input` (e.g. after a drag with snapping), the playground's state.valueMin/valueMax are synced to the snapped values. This keeps the inspector inputs in lockstep with what the canvas actually shows.
+   894→- **update function invariant enforcement**: The playground's `update` function enforces min ≤ max (swap if inverted), clamps valueMin/valueMax to the range, and enforces valueMin ≤ valueMax with a "moving thumb wins" rule: if the user raises valueMin above valueMax, valueMin clamps down to valueMax; if they lower valueMax below valueMin, valueMax clamps up to valueMin.
+   895→- **Content metadata** (`src/lib/platform/content.ts`): added periodic-range to the inputs category with full properties (min, max, valueMin, valueMax, step, showMarkers, markerStep, orientation, thickness, length), methods (13 entries), events (input, change), defaults, whenToUse, whenNotToUse.
+   896→- **Navigation labels** (`src/store/navigation.ts`): refactored the `routeLabel` and `breadcrumbs` helpers to use a new `categoryLabel()` function that maps category slugs to human-readable labels (color → "Color", inputs → "Inputs", layout → "Layout", data-display → "Data Display"). Previously only "color" was special-cased; other categories showed their raw slug. Also added slug-to-name mappings for all current component slugs (color-wheel, color-range, color-circle, color-ramp, periodic-range) so breadcrumbs show proper names.
+   897→- **Routing** (`src/app/page.tsx`): added `component/inputs/periodic-range` → `PeriodicRangePlayground` route handler.
+   898→
+   899→VLM-verified all features:
+   900→- Horizontal mode: dual-thumb slider with lemon-green selected range, two distinguishable thumbs (min with "−", max with "+"), active thumb (min by default) has lemon ring.
+   901→- Markers mode (horizontal): tick marks below the track, numeric labels (0, 10, 20... 100) visible, no overlap or clipping.
+   902→- Vertical mode: track is taller than wide, lemon-green range visible between thumbs, tick marks and labels to the LEFT of the track, high-value thumb at top, low-value at bottom.
+   903→- Snapping: set step=5, valueMin=33 → snapped to 35 on blur.
+   904→- Clamping: set valueMax=10 (below valueMin=35) → clamped up to 35 (the moving thumb wins).
+   905→- Canvas drag: dragged max thumb past min thumb → stopped at valueMin (couldn't cross). Dragging also updated the inspector inputs in real time.
+   906→- Keyboard: ArrowRight increased active thumb by 1 (verified both min and max after Tab cycle). Home jumped active thumb to range min. End jumped active thumb to the opposite bound.
+   907→- Reset: returns to defaults (min=0, max=100, valueMin=25, valueMax=75, step=0, showMarkers=false, orientation=horizontal, thickness=8, length=320).
+   908→- Code panel: JavaScript/HTML/CSS/API tabs all functional; code is live-synced with the playground state.
+   909→
+   910→Files created:
+   911→- `src/lib/components/periodic-range/periodic-range.ts` (vanilla JS class, ~900 lines)
+   912→- `src/lib/components/periodic-range/index.ts` (barrel exports)
+   913→- `src/components/periodic-range/periodic-range-react.tsx` (React wrapper)
+   914→- `src/components/periodic-range/periodic-range-playground.tsx` (playground view, ~960 lines)
+   915→
+   916→Files modified:
+   917→- `src/lib/platform/content.ts` (added periodic-range metadata in inputs category)
+   918→- `src/store/navigation.ts` (refactored routeLabel/breadcrumbs to use categoryLabel; added slug→name mappings for all current components)
+   919→- `src/app/page.tsx` (added route handler for component/inputs/periodic-range)
+   920→
+   921→Stage Summary:
+   922→- New PeriodicRange component established: dual-thumb range slider with snapping, markers, and orientation control. First component in the Inputs category.
+   923→- VLM-verified across all major interaction modes (drag, keyboard, snapping, clamping, orientation, markers).
+   924→- `bun run lint` — 0 errors, 0 warnings.
+   925→
+   926→---
+   927→Task ID: 23 (summary)
+   928→Agent: main
+   929→Task: Build 3 new input components — Custom Button, Periodic Range, Toggle Group
+   930→
+   931→Work Log:
+   932→- **CustomButton** (built by subagent): A versatile DOM-based button with configurable text, icon (18 built-in SVG icons or image URLs), 4 icon positions (left/right/top/bottom), 4 variants (primary/secondary/outline/ghost), 3 sizes (sm/md/lg), disabled/fullWidth options. Scoped CSS, full imperative API, React wrapper, and complete playground with click counter, property inspector, and code panel.
+   933→- **PeriodicRange** (built by subagent): A dual-thumb canvas-based range slider with min/max thumbs that can't cross, optional snapping to step increments, optional tick-mark markers at intervals, horizontal/vertical orientation, and configurable thickness/length. Full imperative API, React wrapper, and playground with output values.
+   934→- **ToggleGroup** (built by subagent): A group of toggle buttons with single-select/multiselect modes, closable buttons (embedded X), drag-to-reorder via pointer events, and dynamic add/remove. Self-contained (doesn't import CustomButton but matches its visual style). Playground features a Figma/Godot-style nested properties panel where each button's properties (label, icon, selected) are editable inline within the group's inspector, plus an "Add button" action.
+   935→- All 3 components added to content.ts in the "inputs" category, with routing in page.tsx, and sidebar labels in navigation.ts.
+   936→- All verified: CustomButton renders with `.custom-button-root` element, PeriodicRange renders with canvas, ToggleGroup renders with `.toggle-group` element.
+   937→- `bun run lint` — 0 errors, 0 warnings.
+   938→
+   939→Stage Summary:
+   940→- 3 new input components established: Custom Button, Periodic Range, Toggle Group.
+   941→- ToggleGroup features the nested component properties panel pattern (like Figma/Godot) where child component properties are editable inline within the parent inspector.
+   942→- All appear in sidebar under Inputs → [component name] and in the Components directory.
+   943→

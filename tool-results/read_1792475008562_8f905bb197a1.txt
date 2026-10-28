@@ -1,0 +1,330 @@
+     1→# Project Worklog — Vanilla JavaScript UI Component Platform
+     2→
+     3→This is the shared worklog for all agents working on the Workshop component-library platform.
+     4→Each agent MUST read this file before starting and append a new section after finishing.
+     5→
+     6→Project goal: Build a Next.js documentation/showcase platform for a vanilla JavaScript UI
+     7→component library. The first (and currently only) component is the Color Wheel Picker.
+     8→
+     9→Critical constraint: Only the `/` route is user-visible. All "routes" from the PRD are
+    10→simulated via client-side Zustand navigation state.
+    11→
+    12→Design system: Obsidian `#101014` + Deep Violet `#211A30` + Lemon Signal `#D9FF66`.
+    13→Dark theme by default. Fonts: Inter + JetBrains Mono. Icons: Lucide.
+    14→
+    15→---
+    16→Task ID: 1
+    17→Agent: main
+    18→Task: Set up design system foundation (CSS tokens, fonts, theme provider, layout, navigation store, content metadata)
+    19→
+    20→Work Log:
+    21→- Read all four spec files (PRD, Architecture, DesignSystem, Ui) to understand the full scope.
+    22→- Established design tokens in src/app/globals.css: brand palette (Obsidian, Deep Violet, Lemon Signal, Soft Lavender), semantic colors, motion tokens, custom scrollbar, panel utilities, hero glow, grid background.
+    23→- Configured Inter + JetBrains Mono fonts in src/app/layout.tsx with ThemeProvider (next-themes), dark theme as default.
+    24→- Created src/store/navigation.ts: Zustand store for client-side routing (Route union type + navigate + breadcrumbs + search palette + mobile nav state).
+    25→- Created src/lib/platform/content.ts: single source of truth for component metadata, categories, examples, changelog, doc sections.
+    26→
+    27→Stage Summary:
+    28→- Design system foundation complete and ready for subagents.
+    29→- Navigation model: Route discriminated union with names home/components/category/component/docs/docs-*/examples/example/resources/changelog/contributing.
+    30→- Color Wheel Picker metadata is defined (properties, methods, events, defaults) so the playground can be driven by a schema.
+    31→- Next: vanilla JS Color Wheel Picker component (Task 2), then platform shell + views (Tasks 3–5).
+    32→
+    33→---
+    34→Task ID: 2
+    35→Agent: full-stack-developer
+    36→Task: Build vanilla JS Color Wheel Picker component
+    37→
+    38→Work Log:
+    39→- Read worklog (Task 1 design-system foundation) and PRD §3–8 to lock the component contract before coding.
+    40→- Created `src/lib/components/color-wheel/color-utils.ts` (308 lines): pure color math — `hsvToRgb` / `rgbToHsv` / `rgbToHex` / `hexToRgb` / `hsvToHsl` / `hslToHsv`, a `parseColor` that accepts hex / `rgb()` / `hsl()` / named colors / `{r,g,b}` / `{h,s,v}` / `{h,s,l}` objects, plus `formatHex`, `toColorOutput`, `clamp`, `clampHue`. No DOM, no side effects, no dependencies.
+    41→- Created `src/lib/components/color-wheel/color-wheel-picker.ts` (1166 lines): the `ColorWheelPicker` class.
+    42→  - Single `<canvas>` renderer; scoped CSS injected once per document (`#color-wheel-picker-styles`) with `--color-picker-*` custom properties for host overrides (marker borders, focus ring, background).
+    43→  - Geometry: `innerR = size/2`, `wheelInnerR = innerR + wheelSpacing`, `wheelOuterR = wheelInnerR + wheelThickness`, `total = wheelOuterR * 2`, `cx = cy = total/2` — wheel stays centered on the inner shape.
+    44→  - Hue mapping: 0° at top, clockwise; `angle = -π/2 + hue·π/180`; inverse `theta = atan2(dx, -dy)`.
+    45→  - Hue wheel: 360 one-degree arc segments filled with `hsl(i, 100%, 50%)`. Cached as an offscreen canvas keyed by `(total, dpr)` so it only re-renders when geometry or DPR changes.
+    46→  - Triangle: equilateral HSV triangle (A=top/white, B=bottom-right/pure hue, C=bottom-left/black). Per-pixel barycentric rendering with ~1px anti-aliased coverage. `V = α+β`, `S = β/V`.
+    47→  - Square: inscribed square (`side = innerR·√2`) with 3 stacked gradients — pure hue → white-to-transparent (S) → transparent-to-black (V). Clipped to the square.
+    48→  - Disk: polar mapping `r → S`, `θ → V = (1+cos θ)/2`. Smooth, seam-free; the tracked `diskTheta` field disambiguates the two θ values that map to the same V so the inner marker stays where the user dragged it.
+    49→  - `none` mode: only the wheel + a solid filled inner circle in the current color; inner area is non-interactive.
+    50→  - Inner-shape canvas cached per `(shape, total, dpr, hue)` so SV drags only redraw the cheap markers and hue drags only re-render the inner shape (not the wheel).
+    51→  - Markers: hue marker = white-halo + dark-ring + pure-hue dot at the wheel mid-radius; inner marker = same triple-ring with the selected color in the center. Both stay perceivable against any hue/SV.
+    52→  - Pointer interaction: `pointerdown` routes by radius (wheel ring vs inner circle vs gap); `setPointerCapture` for clean dragging; `pointermove` updates hue or SV continuously; `input` fires on every move, `change` on `pointerup`/`pointercancel`. Triangle drag clamps barycentric to ≥ 0 and renormalizes; square clamps to `[0,1]`; disk clamps radius.
+    53→  - Keyboard: `ArrowLeft/Right` adjust hue by 1° (Shift = 10°); `Ctrl/Cmd+ArrowLeft/Right` adjust saturation; `ArrowUp/Down` adjust value (Shift = 10); `Home/End` wrap hue. Each key press emits `input` + `change`.
+    54→  - Public API exactly matches the PRD contract: `constructor(container, options?)`, `setColor(color)`, `getColor()`, `setShape(shape)`, `setSize(size)`, `setHue(hue)`, `on/off(event, handler)`, `destroy()`. `setColor`/`setHue` accept programmatic updates and fire `input` + `change`. `setShape`/`setSize` preserve the current color (geometry-only changes).
+    55→  - Tiny internal EventEmitter: `Map<string, Set<ColorHandler>>`. `emit` clones the handler set to a plain array so a handler unsubscribing during dispatch doesn't skip siblings; listener errors are caught and logged so a single bad handler can't crash the picker.
+    56→  - `ResizeObserver` watches the canvas and refreshes the backing store + caches on DPR changes (e.g. window moved between monitors) — disconnected in `destroy()`.
+    57→  - `destroy()` is idempotent: removes all pointer/keyboard listeners, releases pointer capture, disconnects the ResizeObserver, clears the handler map, removes the canvas from the DOM, drops the container class, clears the canvas, and nulls both offscreen caches.
+    58→- Created `src/lib/components/color-wheel/index.ts` re-exporting the class, the `Shape`/`ColorPickerOptions` types, the `RGB`/`HSV`/`HSL`/`ColorOutput`/`ColorInput` types, and the color-math utilities.
+    59→- Ran `bun run lint` — clean (0 errors, 0 warnings) after fixing two issues: replaced the `Function` type on `on`/`off` overloads with the explicit `ColorHandler = (color: ColorOutput) => void` to satisfy `@typescript-eslint/no-unsafe-function-type`, and removed an unused `eslint-disable-next-line no-console` directive. Ran `bunx tsc --noEmit` — no type errors in the new files (only unrelated pre-existing errors in `examples/` and `skills/`).
+    60→
+    61→Stage Summary:
+    62→- Vanilla TS Color Wheel Picker is complete and self-contained (no React/Next.js imports). Files produced:
+    63→  - `src/lib/components/color-wheel/color-utils.ts` — color math (HSV/RGB/HSL/HEX + parser).
+    64→  - `src/lib/components/color-wheel/color-wheel-picker.ts` — `ColorWheelPicker` class (canvas renderer, pointer + keyboard, caching, public API, scoped CSS).
+    65→  - `src/lib/components/color-wheel/index.ts` — public barrel.
+    66→- Public API surface (final):
+    67→  - `new ColorWheelPicker(container, options?: { shape?, size?, wheelThickness?, wheelSpacing?, hue?, color? })`
+    68→  - `setColor(color: string)`, `getColor(): ColorOutput`, `setShape(shape)`, `setSize(size)`, `setHue(hue)`, `on("input"|"change", handler)`, `off(event, handler)`, `destroy()`
+    69→  - `ColorOutput = { hex, rgb{r,g,b}, hsv{h,s,v}, hsl{h,s,l} }`
+    70→- Geometry notes:
+    71→  - Component total = `size + 2·(wheelSpacing + wheelThickness)`; wheel centered on inner shape; resizing via `setSize()` re-derives everything from `size`.
+    72→  - Hue 0° at top, clockwise; markers track the same angular convention.
+    73→  - Triangle uses barycentric `(α, β, γ)` with `V = α+β`, `S = β/V`; inverse `α = V(1−S)`, `β = SV`, `γ = 1−V`. Vertex order: top=white, bottom-right=pure hue, bottom-left=black.
+    74→  - Disk uses `r → S`, `θ → V = (1+cos θ)/2`; smooth, no seam, with a tracked `diskTheta` to disambiguate the two θ values that yield the same V (so the inner marker stays where the user dragged).
+    75→- Caching: wheel cached per `(total, dpr)`; inner shape cached per `(shape, total, dpr, hue)`. SV drags only redraw markers; hue drags only re-render the inner shape; size/shape changes invalidate the relevant caches.
+    76→- Ready to be wrapped by a React component (Task 4) and showcased by the platform shell (Tasks 3/5). No globals.css / layout.tsx / route changes were made.
+    77→
+    78→---
+    79→Task ID: 3
+    80→Agent: main
+    81→Task: Build Zustand navigation store + global shell (header, sidebar, footer, search palette, mobile nav)
+    82→
+    83→Work Log:
+    84→- Created src/store/navigation.ts: Zustand store with Route union type (home/components/category/component/docs/docs-*/examples/example/resources/changelog/contributing), navigate(), breadcrumbs(), routeLabel() helpers, search palette + mobile nav state.
+    85→- Created src/components/platform/brand.tsx: geometric Workshop brand mark (three offset rounded squares + center node).
+    86→- Created src/components/platform/theme-toggle.tsx: light/dark toggle using next-themes.
+    87→- Created src/components/platform/header.tsx: sticky top header with brand, primary nav (Components/Documentation/Examples/Resources), search trigger with ⌘K, theme toggle, github link, mobile menu button.
+    88→- Created src/components/platform/sidebar.tsx: collapsible library/docs/project nav groups driven by content.ts metadata, auto-opens the active group, shows planned components as disabled.
+    89→- Created src/components/platform/footer.tsx: sticky-to-bottom footer with 4 link columns + brand blurb + status note.
+    90→- Created src/components/platform/mobile-nav.tsx: slide-in drawer for narrow screens.
+    91→- Created src/components/platform/search-palette.tsx: ⌘K command palette overlay with grouped results, arrow-key navigation, Enter to open, Esc to close.
+    92→- Created src/components/platform/code-block.tsx: CodeBlock (with copy button, filename, language label, traffic-light header) + CopyableValue chip.
+    93→- Created src/components/platform/breadcrumbs.tsx: Breadcrumbs + PageOverline.
+    94→- Created src/components/platform/shell.tsx: PlatformShell (header + optional sidebar + main + footer) + PageContainer.
+    95→- Created src/components/color-wheel/color-wheel-picker-react.tsx: React wrapper around the vanilla ColorWheelPicker — owns the instance, forwards prop changes via imperative API, forwards input/change events.
+    96→- Created src/components/color-wheel/color-wheel-playground.tsx: the full component detail page — live preview (canvas), property inspector (shape segmented control, size/thickness/spacing sliders, hex input with validation), output bar + copyable values, code panel (JS/HTML/CSS/API tabs with live-synced code), and documentation section with properties/methods/events/accessibility/troubleshooting tables.
+    97→
+    98→Stage Summary:
+    99→- Platform shell is complete and renders all chrome (header/sidebar/footer/search/mobile nav).
+   100→- The Color Wheel playground is fully wired: real vanilla JS component ↔ property inspector ↔ output panel ↔ generated code, all synchronized.
+   101→- Next: launch parallel subagents for Home view, Components+Category views, Documentation views, and Examples+Changelog+Contributing views (Tasks 5-a/b/c/d). These subagents will create view components that the main page.tsx will switch between based on the navigation store's route.
+   102→- IMPORTANT for subagents: views must be default-exported React components from src/components/views/, must NOT import the platform shell (the shell is provided by page.tsx), and must use useNavigation() for any in-app navigation. They receive no props.
+   103→
+   104→---
+   105→Task ID: 5-c
+   106→Agent: full-stack-developer
+   107→Task: Build FIVE documentation view components (docs landing, installation, concepts, theming, API reference)
+   108→
+   109→Work Log:
+   110→- Read worklog (Tasks 1–3) to lock the design system, navigation model, and existing platform primitives (Breadcrumbs, PageOverline, CodeBlock, PageContainer) before writing any view code.
+   111→- Read `src/lib/platform/content.ts` to consume the single source of truth for `components`, `categories`, and `docSections`. The Color Wheel Picker exposes `methods` (8 entries), `events` (input + change), and `properties` (6 entries) — all surfaced verbatim by the API view.
+   112→- Created `src/components/views/docs-view.tsx` (DocsView, default export, no props):
+   113→  - Breadcrumbs + PageOverline "Documentation" + H1 + intro paragraph.
+   114→  - "Getting started" hero `.panel` with a lemon CTA button that navigates to `docs-installation` via `useNavigation((s) => s.navigate)`.
+   115→  - 2×2 grid of doc-section cards driven by `docSections`, each with a Lucide icon (Download/Boxes/Palette/Code), title, description, and an arrow link that navigates to the section's `route`.
+   116→  - "What you'll find here" section: a 2-column bullet list of six docs coverage areas (lifecycle, configuration, events, theming, accessibility, framework interop) each with a lemon icon.
+   117→- Created `src/components/views/docs-installation-view.tsx` (DocsInstallationView):
+   118→  - Breadcrumbs + PageOverline + H1 "Installation" + intro.
+   119→  - "Prerequisites" subsection: 3-column `.panel` listing the three prerequisites with lemon check icons.
+   120→  - "Choose a distribution method" subsection: a `role="tablist"` segmented control with two options (Package manager / Direct import) implemented as a small state-managed toggle (`useState<DistributionMethod>`). Each tab shows the appropriate `CodeBlock`(s): bash install + JS import for the package tab, single HTML `<script type="module">` for the CDN tab.
+   121→  - "Include the CSS" subsection: CodeBlock html with the `<link rel="stylesheet">` tag.
+   122→  - "Add a container" subsection: CodeBlock html with `<div id="color-picker"></div>`.
+   123→  - "Initialize the component" subsection: CodeBlock javascript with the full `new ColorWheelPicker(...)` + `picker.on("change", ...)` example exactly as specified.
+   124→  - "Verify" subsection: short paragraph + a `.panel` callout with the lemon check icon and the exact "what you should see" copy.
+   125→  - "Troubleshooting" subsection: a `<dl>` of 4 symptom/fix pairs rendered as `.panel` cards with a purple-soft alert icon on the symptom side and a left-border separator before the fix.
+   126→- Created `src/components/views/docs-concepts-view.tsx` (DocsConceptsView):
+   127→  - Breadcrumbs + PageOverline + H1 "Core concepts" + intro.
+   128→  - 2×2 grid of concept cards: "Component initialization" (Boxes), "State and updates" (SlidersHorizontal), "Events and lifecycle" (Radio), "Framework interoperability" (Layers).
+   129→  - "Component initialization" section: explanation of containers/options/defaults + a CodeBlock javascript showing construction with shape/size/wheelThickness/color overrides.
+   130→  - "State and updates" section: explanation that the component owns its DOM and state; setColor/setShape/setSize update both; getColor() reads; geometry-only setters preserve the color. CodeBlock javascript with the three setters + getColor destructure.
+   131→  - "Events and lifecycle" section: explanation of `input` (continuous) vs `change` (committed) with a bulleted list, plus on/off/destroy lifecycle notes. CodeBlock javascript with subscribe + unsubscribe + destroy.
+   132→  - "Framework interoperability" section: explanation that the component is vanilla JS and the host should NOT re-create the instance on every render. A lemon-tinted callout box emphasizes the rule, followed by a CodeBlock tsx showing a thin React wrapper using two `useEffect`s (mount-once construction with `eslint-disable-next-line react-hooks/exhaustive-deps`, then separate effects forwarding `color` and `shape` prop changes through the imperative API).
+   133→- Created `src/components/views/docs-theming-view.tsx` (DocsThemingView):
+   134→  - Breadcrumbs + PageOverline + H1 "Theming and customization" + intro.
+   135→  - "Design tokens" section: explains the platform's semantic tokens (--surface/--text-primary/--border) vs the library's prefixed --color-picker-* variables. CodeBlock css with the exact token foundation from DesignSystem.md §11 (5 variables).
+   136→  - "Supported customization points" section: a `.panel` table with three columns (Variable / Default / Purpose) listing all 5 public --color-picker-* variables.
+   137→  - "Light and dark themes" section: explanation that the canvas is transparent and adapts to its container, plus a before/after pair of `.panel` cards (dark surface with white-bordered marker, light surface with dark-bordered marker) — each with a static visual mock and a contrast note.
+   138→  - "Interaction states" section: 2-column list of Focus (lemon ring), Hover (cursor change), Disabled, Selected states with lemon icons.
+   139→  - "Before-and-after example" section: two `.panel` cards side-by-side — "Default" (white marker border) vs "Customized" (lemon marker border) — each with a static colored-circle visual mock. Followed by a CodeBlock css showing how to scope overrides per surface.
+   140→- Created `src/components/views/docs-api-view.tsx` (DocsApiView):
+   141→  - Breadcrumbs + PageOverline + H1 "API reference" + intro.
+   142→  - Search input (`<input type="search">`) with a Search icon, a clear-X button when non-empty, and a hint that filtering is local only. Filters entries by name/description/type/payload/returns/default (case-insensitive substring).
+   143→  - For each component in `components`: an `<section>` with the component name as h2, a short description, and an "Open component" button that navigates to the component's `component` route.
+   144→  - Entries are built from `meta.methods`, `meta.events`, and `meta.properties` (typed as `ApiEntry` with a `kind` discriminator), then grouped by kind (Methods / Events / Properties) with overline headers. Empty groups are skipped.
+   145→  - Each entry is a `.panel` card with: a type badge (Method → lemon border/bg/text; Event → purple-soft border/bg/text; Property → muted border/bg/text), the signature/name in lemon mono, a description, and a metadata row (Returns for methods, Payload for events, Type + Default for properties). A small "Open component" link button on the right.
+   146→  - When a search yields no matches for a component, a `.panel` empty-state card is shown instead of the groups.
+   147→- Styling discipline across all five files:
+   148→  - All five default-export a single named client component (`DocsView`, `DocsInstallationView`, `DocsConceptsView`, `DocsThemingView`, `DocsApiView`), no props, `"use client"` directive at the top.
+   149→  - Only accent color used is the brand lemon (`text-brand-lemon` / `bg-brand-lemon` / `border-brand-lemon/40`) plus the secondary purple-soft accent for the Event badge and Troubleshooting icons. No indigo/blue.
+   150→  - All code examples go through `CodeBlock` from `@/components/platform/code-block`.
+   151→  - All page chrome goes through `Breadcrumbs` + `PageOverline` from `@/components/platform/breadcrumbs` and `PageContainer` from `@/components/platform/shell`.
+   152→  - In-app navigation uses `useNavigation((s) => s.navigate)` from `@/store/navigation`; routes are typed via `Route`.
+   153→  - Typography follows the requested prose-like hierarchy: h2 `text-2xl font-semibold mt-10`, h3 `text-base font-semibold`, paragraphs `text-sm leading-relaxed text-muted-foreground` capped at `max-w-[720px]`.
+   154→  - No emojis, no test files, no shell/header/sidebar/footer duplication, no new routes, no navigation.ts modifications.
+   155→- Ran `bun run lint` — 0 errors, 0 warnings on the new files. (The single pre-existing warning is an unused `eslint-disable-next-line` in `color-wheel-picker-react.tsx`, untouched by this task.)
+   156→- Checked `dev.log` — server compiles cleanly and serves `/` 200. No new runtime errors introduced by these views.
+   157→
+   158→Stage Summary:
+   159→- Five documentation view components are complete and ready to be wired into `page.tsx` by the integration step:
+   160→  - `src/components/views/docs-view.tsx` — DocsView (documentation landing)
+   161→  - `src/components/views/docs-installation-view.tsx` — DocsInstallationView (installation guide)
+   162→  - `src/components/views/docs-concepts-view.tsx` — DocsConceptsView (core concepts)
+   163→  - `src/components/views/docs-theming-view.tsx` — DocsThemingView (theming and customization)
+   164→  - `src/components/views/docs-api-view.tsx` — DocsApiView (searchable API reference)
+   165→- All views share the same shell contract: Breadcrumbs → PageOverline → H1 → intro → page-specific sections, all wrapped in `PageContainer`. They will render correctly inside the existing `PlatformShell` once `page.tsx` switches on the `docs` / `docs-installation` / `docs-concepts` / `docs-theming` / `docs-api` route names.
+   166→- No platform primitives, navigation store, or content metadata were modified — the views are pure consumers of the existing API.
+   167→
+   168→---
+   169→Task ID: 5-b
+   170→Agent: full-stack-developer
+   171→Task: Build the Components directory view and the Category overview view
+   172→
+   173→Work Log:
+   174→- Read worklog (Tasks 1–3 and the in-flight Task 5-c docs views) to lock the design system, navigation model, content metadata, and the styling conventions other view agents are using (PageContainer width="wide", Breadcrumbs + PageOverline + H1 + intro pattern, `.panel`/`.overline`/`.bg-grid`/`bg-brand-lemon`/`bg-brand-purple-strong` tokens, lemon-only accent — no indigo/blue).
+   175→- Read `src/lib/platform/content.ts` to consume `components`, `plannedComponents`, `categories`, `getCategory`, `componentsByCategory`, and the `ComponentStatus` type as the single source of truth for the directory.
+   176→- Read `src/store/navigation.ts` to confirm the available route shapes (`{ name: "component", category, slug }`, `{ name: "category", category }`) and the `componentsQuery` / `setComponentsQuery` / `componentsCategory` / `setComponentsCategory` slice the directory needs to bind to.
+   177→- Peeked at `examples-view.tsx` to copy the static 36-segment `MiniColorWheel` SVG pattern so directory and category thumbnails stay visually consistent with the rest of the platform (no per-card canvas mount).
+   178→- Created `src/components/views/components-view.tsx` (`ComponentsView`, default export, `"use client"`, no props):
+   179→  - Breadcrumbs → PageOverline "Components" → H1 "Components" → supporting text "Browse functional UI building blocks for applications and software."
+   180→  - Search input bound to `useNavigation((s) => s.componentsQuery)` / `setComponentsQuery`, with a `Search` icon on the left and a conditional clear-`X` button on the right. Filters by name / description / category / tags (case-insensitive substring on a joined haystack).
+   181→  - Category pill row (`All`, `Color`, `Inputs`, `Layout`, `Data Display`) bound to `componentsCategory` / `setComponentsCategory`. The active pill uses `bg-brand-purple-strong` with a `bg-brand-lemon` dot indicator.
+   182→  - Status filter pills (`Stable` / `Beta` / `Experimental`) using **local** React state — the navigation store doesn't track status, so this transient filter is kept local. Multi-select toggle pills with a lemon-tinted active state.
+   183→  - A unified `ALL_ENTRIES` array merges `components` (status from `meta.status`) and `plannedComponents` (status = `"planned"`) so the same filter pipeline handles both. Filtering combines search + category + status; when no status filter is selected, planned entries still pass through so the roadmap stays visible.
+   184→  - Result count row: "{available} available · {planned} planned" with a "Reset filters" link that appears when any filter is active.
+   185→  - Grid: 1 col mobile / 2 col `sm` / 3 col `lg`. Each card:
+   186→    - Preview area (`h-[120px]`, `.bg-grid`, `border-b`): the Color Wheel card shows the `MiniColorWheel` SVG with a real inner triangle (white → #4287f5 → #0a1450 gradient + lemon marker dot); planned cards show a `Boxes` icon + a "Planned" mono label.
+   187→    - Body: name (`font-medium`), 2-line description (`line-clamp-2`), and a footer row with the category (mono, muted) + a `StatusBadge` (lemon dot + "Available" for stable, muted dot + "Planned" for planned).
+   188→    - Stable card is a `<button>` that `navigate`s to `{ name: "component", category, slug }`; hover state lifts the border to lemon with a `0_0_0_1px` lemon ring. Planned card is a non-interactive `<div>` with `opacity-60` and a "Planned — not yet available" tooltip.
+   189→  - Empty state: a dashed `.panel` with "No components match "{query}"" (or "No components match your filters" when no query) + a "Clear search" button that resets query, category, and status filters.
+   190→- Created `src/components/views/category-view.tsx` (`CategoryView`, default export, `"use client"`, no props):
+   191→  - Defensive guard: reads `useNavigation((s) => s.route)`; if `route.name !== "category"` returns `null`. Falls back to a short "Unknown category" message if `getCategory(route.category)` returns undefined.
+   192→  - Header: Breadcrumbs → PageOverline "Category" → a 48px `.panel` icon tile rendered in `text-brand-lemon` (mapped via `CATEGORY_ICONS` from `Palette` / `SlidersHorizontal` / `LayoutPanelLeft` / `Table2`) → H1 with the category name → supporting text = `category.description`.
+   193→  - Capabilities row: lemon-dot pills built from `category.capabilities`.
+   194→  - Use cases subsection: 2-column list (`grid sm:grid-cols-2`) of `category.useCases`, each with a lemon bullet dot.
+   195→  - "Components" section header with a count "{available} available · {planned} planned" and a `border-b` separator.
+   196→  - Available components: large horizontal cards (`flex-col lg:flex-row lg:items-center`) with:
+   197→    - Left: a 140×120 `.panel` `.bg-grid` thumbnail containing the `MiniColorWheel` SVG (or the category icon as a fallback).
+   198→    - Middle: name (`text-lg font-semibold`), description, and a tag row of mono badges.
+   199→    - Right: a `StatusBadge` pill + an "Explore component →" affordance with a lemon arrow that translates on hover.
+   200→    - The whole card is a `<button>` that navigates to the component detail route; hover lifts the border to lemon.
+   201→  - Planned components subsection: a separate muted "Planned" header + a 3-col grid of `.panel opacity-60` cards showing name, description, category, and a "Planned" status badge — non-interactive (no button, `title` tooltip).
+   202→  - Guidance card at the bottom: for the `color` category, a detailed "Choosing a color selector" `.panel` with a 2×2 grid of `GuidanceRow` entries explaining wheel+triangle vs wheel+square vs wheel+disk vs wheel-only (none). Other categories get a generic "Choosing a {category} component" `.panel` placeholder noting the category is on the roadmap.
+   203→- Styling discipline across both files:
+   204→  - Both default-export a single named client component, no props, `"use client"` at the top.
+   205→  - Only accent colors used are the brand lemon (`text-brand-lemon` / `bg-brand-lemon` / `border-brand-lemon/40`) plus `bg-brand-purple-strong` for active pills and the inner SVG. No indigo/blue.
+   206→  - In-app navigation uses `useNavigation((s) => s.navigate)`; routes are typed via `Route` casts.
+   207→  - All chrome comes from `Breadcrumbs` + `PageOverline` (`@/components/platform/breadcrumbs`) and `PageContainer` (`@/components/platform/shell`).
+   208→  - `cn` from `@/lib/utils` for conditional classes.
+   209→  - No emojis, no test files, no shell/header/sidebar/footer duplication, no new routes, no navigation.ts modifications.
+   210→- Ran `bun run lint` — 0 errors. Only the pre-existing `react-hooks/exhaustive-deps` warning in `color-wheel-picker-react.tsx` remains; my two view files are clean. (One initial a11y warning about `aria-disabled` on an `<li>` in the planned-components grid was resolved by removing the redundant attribute — the planned cards have no interactive child, so the disabled semantics are conveyed by the static, low-opacity presentation and the `title` tooltip.)
+   211→- Checked `dev.log` — server compiles cleanly (`✓ Compiled in 162ms` / `✓ Compiled in 187ms`) and serves `/` 200. No new runtime errors introduced.
+   212→
+   213→Stage Summary:
+   214→- Two view components are complete and ready to be wired into `page.tsx`:
+   215→  - `src/components/views/components-view.tsx` — `ComponentsView` (the `/components` directory page with search + category + status filters, a 1/2/3-column card grid, an empty state, and result counts).
+   216→  - `src/components/views/category-view.tsx` — `CategoryView` (the `/components/[category]` page with category icon, capabilities, use cases, an available-components list of large horizontal cards, a planned-components subsection, and a "Choosing a color selector" guidance card).
+   217→- The Color Wheel Picker is the only stable card; `color-field`, `palette`, and `range-control` appear as planned, muted, non-interactive cards. Search + category + status filters all combine correctly.
+   218→- No platform primitives, navigation store, or content metadata were modified — the views are pure consumers of the existing API.
+   219→
+   220→---
+   221→Task ID: 5-a
+   222→Agent: full-stack-developer
+   223→Task: Build the Home view for the Workshop component-library platform
+   224→
+   225→Work Log:
+   226→- Read the worklog (Tasks 1–3) to understand the design-system foundation, the vanilla Color Wheel Picker contract, and the platform shell. Confirmed the home route hides the left sidebar (shell.tsx shows sidebar only when route.name !== "home"), so HomeView gets the full content width.
+   227→- Inspected globals.css brand tokens (bg-brand-lemon, text-brand-lemon, bg-brand-purple-strong, text-brand-purple-soft, .overline, .panel, .panel-raised, .bg-grid, .hero-glow), the navigation store Route union + navigate(), content.ts (categories / examples / componentsByCategory / plannedComponents), the ColorWheelPickerReact wrapper (mounts the vanilla picker, forwards prop changes via imperative API, forwards input/change events), and CodeBlock (filename + language + copy button).
+   228→- Created `src/components/views/home-view.tsx` — a single default-exported client component `HomeView` (no props) rendering six sections in order, each in its own semantic <section> with aria-label and separated by border-b border-border:
+   229→  1. Hero — `.hero-glow` + `.bg-grid` background. Left column (lg:col-span-7): overline "Workshop · Vanilla JS UI", large headline "UI components for real software.", supporting copy, two CTAs ("Explore components" → navigate components, lemon primary; "Get started" → navigate docs-installation, outline), and three overline+value stat chips (FRAMEWORK/Independent, INTERACTION/Functional, CUSTOMIZATION/Composable) as small `.panel` tiles. Right column (lg:col-span-5): a workshop-style "library index" card (`.panel-raised`) with a status-dot header (lemon dot + "workshop / library" + "v0.1.0") and a divided list of the four categories with their live status labels — previews the categories section and reads like an inspector panel rather than a marketing graphic.
+   230→  2. Featured component — overline "Featured component", title "Color Wheel Picker", the required description line "Color Wheel Picker — Interactive preview · Vanilla JavaScript", a short paragraph, three lemon-dot bullets, and a "Open component" button (→ navigate component/color/color-wheel). Right side: a live, interactive `<ColorWheelPickerReact shape="triangle" size={180} color="#D9FF66" onInput={...} />` mounted inside a `.panel` with `.bg-grid`. Added a small live-hex readout (color swatch + uppercase hex + "live" tag) below the picker so the interactivity is observable — the `color` prop is a constant string so the wrapper never re-calls setColor after mount, avoiding a render feedback loop while `onInput` keeps the readout in sync.
+   231→  3. Explore categories — overline "Categories", heading "Explore categories", responsive grid (1 / sm:2 / lg:4). Each card is a button mapping the category's `icon` string field to a Lucide component via a `CATEGORY_ICONS` lookup ({Palette, SlidersHorizontal, LayoutPanelLeft, Table2}); shows icon tile, name, description (line-clamp-3), and an honest `categoryStatus()` label ("1 ready · 2 planned" / "1 ready" / "N planned" / "Coming soon") computed from componentsByCategory + plannedComponents so empty categories don't advertise a fake count. Clicking navigates to { name: "category", category: cat.slug }.
+   232→  4. Why this library — overline "Principles", heading "Why this library", three benefit cards (Boxes/"Framework independent", Wrench/"Application-focused", Layers/"Composable & themeable") each with a lemon icon tile and a concise description grounded in the PRD positioning (no React/Vue/Next.js inside components; built for editors/inspectors/dev tools, not marketing; themeable via CSS variables).
+   233→  5. Quick start — overline "Quick start", heading "Get going in seconds", short intro, two stacked CodeBlocks in a lg:2-col grid: (1) bash install `npm install @workshop/color-wheel`, (2) javascript usage importing ColorWheelPicker, constructing it with { shape: "triangle", size: 180 }, and subscribing to "change". A "Read the docs" outline button below → navigate docs-installation.
+   234→  6. Featured examples — overline "Examples", heading "Featured examples", responsive md:3-col grid of all three examples from content.ts. Each card: category badge (mono pill), title, description, and a lemon "Explore" link → navigate { name: "example", slug: ex.slug }.
+   235→- Visual style: obsidian background with deep-violet panels and lemon accents only — no indigo or blue anywhere. Hover states are subtle background/border shifts (hover:border-brand-lemon/40, hover:bg-accent/40) — no scale transforms. Generous vertical rhythm (py-16 lg:py-24 between sections; py-20 lg:py-28 on the hero). Mobile-first: single column, stacking to 2/4 columns at sm/lg breakpoints. All interactive elements are real <button>s with focus-visible rings.
+   236→- Verified: `bun run lint` — 0 errors, 0 warnings in home-view.tsx (the only lint warning is a pre-existing unused eslint-disable in color-wheel-picker-react.tsx). `bunx tsc --noEmit` — no type errors in home-view.tsx (the only TS errors are pre-existing and in unrelated files: examples/, skills/, brand.tsx). Dev server log shows clean compiles and GET / 200.
+   237→- Did NOT touch page.tsx, navigation.ts, the shell, or any other file. HomeView is a pure view component ready to be rendered by the parent page.tsx route switch (parent task).
+   238→
+   239→Stage Summary:
+   240→- Home view is complete at `src/components/views/home-view.tsx` (single default export `HomeView`, client component, no props).
+   241→- All six required sections implemented with the specified copy, CTAs, navigation targets, live interactive Color Wheel Picker, CodeBlocks, and category/example cards.
+   242→- Brand-consistent (obsidian + deep violet + lemon; no indigo/blue), responsive (1/2/4 column grids), accessible (semantic sections, aria-labels, focus rings, keyboard-accessible buttons), and workshop-toned (inspector-style hero panel, honest status counts, no marketing exaggeration).
+   243→- Ready for the parent page.tsx to import and render HomeView when route.name === "home".
+   244→
+   245→---
+   246→Task ID: 5-d
+   247→Agent: full-stack-developer
+   248→Task: Build Examples + Resources + Changelog + Contributing view components
+   249→
+   250→Work Log:
+   251→- Read worklog (Tasks 1–3 + Task 5-b sibling-agent record) and the existing `components-view.tsx` to lock visual conventions (Breadcrumbs + PageOverline + PageContainer + lemon filter pills + static `MiniColorWheel` SVG preview).
+   252→- Created `src/components/views/examples-view.tsx` — `ExamplesView`:
+   253→  - Breadcrumbs + `PageOverline "Examples"` + H1 + intro.
+   254→  - Local-state filter row: All examples / Creative tools / Developer tools / Productivity.
+   255→  - Grid: 1 col mobile / 2 col tablet / 3 col desktop. Each card is a single button that navigates to `{ name: "example", slug }`.
+   256→  - Card preview = static `MiniColorWheel` SVG on a `.bg-grid` background, with a "Live" lemon-dot badge on interactive examples.
+   257→  - Empty state with "Show all examples" reset button.
+   258→- Created `src/components/views/example-detail-view.tsx` — `ExampleDetailView`:
+   259→  - Reads slug via `useNavigation((s) => s.route)`; if not found, renders a not-found message with a "Back to examples" link.
+   260→  - Breadcrumbs (Home / Examples / Example title) + `PageOverline "Examples / {category}"` + H1 + description.
+   261→  - Three REAL interactive demos keyed by slug:
+   262→    - `creative-inspector`: mock inspector left panel ("Selected object: Shape 01", Fill color swatch + hex, stroke row) and a right panel with `<ColorWheelPickerReact shape="triangle" size={160} />` whose `onInput` updates the fill swatch + hex.
+   263→    - `settings-panel`: mock Appearance rows (Theme color / Density / Font size / Reduce motion) with a live swatch + `<ColorWheelPickerReact shape="square" size={140} />`.
+   264→    - `theme-editor`: three preview surfaces (Button / Surface / Border) driven by the accent color + `<ColorWheelPickerReact shape="disk" size={140} />`.
+   265→  - Each demo has a "Reset" button (in the panel header) that resets local state and remounts the picker via a `key` bump.
+   266→  - "Components used" section: for each slug in `example.components`, render a card linking to the component page via `navigate({ name: "component", category, slug })`.
+   267→  - "Implementation" section: a `CodeBlock` per example with a short JS snippet showing the wiring.
+   268→  - Footer: "All examples" back button + slug mono label.
+   269→- Created `src/components/views/resources-view.tsx` — `ResourcesView`:
+   270→  - Local `RESOURCES` array (6 entries: Color model primer, Keyboard accessibility for canvas components, Embedding vanilla in React, Embedding vanilla in Vue, Building a property inspector, Design tokens and CSS architecture).
+   271→  - Each entry has a type (Recipes / Accessibility / Guides / Integration), a title, description, and a destination — internal nav (`docs-concepts`, `docs-theming`, `docs-installation`, `docs-api`, `examples`) or external link with `ExternalLink` icon.
+   272→  - Filter pills (All / Recipes / Accessibility / Guides / Integration) drive the visible cards.
+   273→  - Cards: icon by type, title, 2-line description, destination link with arrow.
+   274→  - Empty state with "Show all resources" reset.
+   275→- Created `src/components/views/changelog-view.tsx` — `ChangelogView`:
+   276→  - Reverse-chronological timeline from the real `changelog` array (sorted by date desc). One release card per entry.
+   277→  - Filter pills (All / Added / Improved / Fixed / Breaking) hide entries/subsections with no matching change type.
+   278→  - Each release card: version (font-mono, large) + formatted date. Subsections grouped by change type; only non-empty ones render.
+   279→  - Each change item gets a small colored dot: Added = lemon, Improved = brand-purple-soft, Fixed = muted sky (`bg-sky-400`), Breaking = destructive. (Sky is a muted semantic blue, used sparingly per spec; lemon/purple dominate.)
+   280→  - Breaking sections render inside a destructive-tinted callout (`border-destructive/30 bg-destructive/5`).
+   281→  - Vertical timeline: `<ol>` with `border-l border-border` and a per-entry lemon dot pinned to the left border.
+   282→  - Header includes a small count summary (N releases · M changes total).
+   283→  - Empty state for filters that match nothing.
+   284→- Created `src/components/views/contributing-view.tsx` — `ContributingView`:
+   285→  - Breadcrumbs + `PageOverline "Project"` + H1 + intro.
+   286→  - Two-column layout: main content (8 sections) + sticky right-rail TOC.
+   287→  - TOC uses `IntersectionObserver` to highlight the active section as you scroll; numbered list with lemon active state.
+   288→  - Sections (each h2 with a Lucide icon chip): Contribution overview, Component design principles (8 cards), Public API conventions (with `CodeBlock` showing the constructor + options + on/off + destroy pattern), Accessibility requirements (4-item bulleted list with lemon dots), Testing expectations, Documentation requirements, Issue reporting (external GitHub link), Pull request workflow (6-step numbered list).
+   289→  - Icons next to headings: ListChecks, GitBranch, FileCode, Accessibility, Bug, GitPullRequest.
+   290→- Verified with `bun run lint` (0 errors / 0 warnings in new files; one pre-existing warning in `color-wheel-picker-react.tsx`) and `bunx tsc --noEmit` (no errors in any view file; remaining errors are pre-existing in `examples/`, `skills/`, `brand.tsx`). Dev server log shows clean compiles after edits.
+   291→
+   292→Stage Summary:
+   293→- All five view components are complete, default-exported, client components, take no props, and live in `src/components/views/`. They use the existing design system (brand tokens, `.overline`, `.panel`, `.bg-grid`, `PageContainer`, `Breadcrumbs`, `PageOverline`, `CodeBlock`) and `useNavigation` for in-app navigation. No new routes, no navigation.ts edits, no shell duplication, no indigo/blue primary, no emojis, no test files.
+   294→- File paths created:
+   295→  - `src/components/views/examples-view.tsx`
+   296→  - `src/components/views/example-detail-view.tsx`
+   297→  - `src/components/views/resources-view.tsx`
+   298→  - `src/components/views/changelog-view.tsx`
+   299→  - `src/components/views/contributing-view.tsx`
+   300→- Work record also written to `/agent-ctx/5-d-views.md`.
+   301→- Next: the main agent can wire these (plus the sibling agents' home/components/category/docs views) into `src/app/page.tsx` by switching on `route.name` and rendering the matching view inside `PlatformShell`.
+   302→
+   303→---
+   304→Task ID: 7+8
+   305→Agent: main
+   306→Task: Wire all views into main page, fix mobile overflow, Agent Browser verification
+   307→
+   308→Work Log:
+   309→- Created src/app/page.tsx: RouteSwitcher that switches on useNavigation().route.name and renders the appropriate view inside PlatformShell. Used default imports for all 13 view components. Added a NotFoundView fallback and a routeKey() so each navigation remounts the view cleanly.
+   310→- Fixed src/components/platform/brand.tsx: replaced invalid `strokeClassName` SVG attribute with an inline `style` using the CSS variable.
+   311→- Fixed mobile horizontal overflow (113px) on the home page: added `min-w-0` to the Quick Start grid children and to the CodeBlock root container so code blocks scroll internally instead of expanding the layout.
+   312→- Removed an unused eslint-disable directive in color-wheel-picker-react.tsx.
+   313→- Agent Browser verification (desktop 1440×900 + mobile 390×844):
+   314→  - Home page: renders all 6 sections (hero, featured live Color Wheel Picker, categories, why-this-library, quick start, featured examples). The live picker mounted with proper ARIA application role.
+   315→  - Navigation: Components / Documentation / Examples / Resources header links all work; sidebar expands/collapses; breadcrumbs render correctly.
+   316→  - Color Wheel playground: live canvas renders, property inspector (shape segmented control + size/thickness/spacing sliders + hex input) all functional, output panel shows correct HEX/RGB/HSV/HSL, code tabs (JS/HTML/CSS/API) render, documentation section with properties/methods/events tables renders. Switching shape preserves the selected color (per PRD §4.2).
+   317→  - Search palette (⌘K): opens, filters results live, arrow-key navigation works, Enter navigates to the selected result, Esc closes.
+   318→  - Theming docs page: renders all sections including the --color-picker-* customization points table.
+   319→  - Components directory: shows the Color Wheel card (AVAILABLE) + 3 planned cards (muted, non-interactive).
+   320→  - Mobile: hamburger menu opens a slide-in drawer; no horizontal overflow; content stacks correctly.
+   321→  - Footer: sticks to bottom on short pages, pushed down naturally on long pages.
+   322→  - No console errors on any tested route.
+   323→- `bun run lint` — 0 errors, 0 warnings.
+   324→
+   325→Stage Summary:
+   326→- The platform is complete and browser-verified. Every primary user flow works: discover (home/directory), explore (live playground with real vanilla JS Color Wheel Picker), and implement (code tabs + API docs + installation guide).
+   327→- The Color Wheel Picker is a real, framework-independent vanilla JS/TS component (canvas-based, 4 shapes, full public API, keyboard support, destroy cleanup) — not a visual imitation.
+   328→- Design system matches the spec: Obsidian #101014 + Deep Violet #211A30 + Lemon Signal #D9FF66, Inter + JetBrains Mono, Lucide icons, dark theme default with light toggle.
+   329→- Single `/` route with client-side Zustand navigation simulates all 14 routes from the Architecture spec.
+   330→

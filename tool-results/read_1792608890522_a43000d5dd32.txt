@@ -1,0 +1,845 @@
+     1→/**
+     2→ * Board — an infinite canvas component for apps like Excalidraw, node graphs,
+     3→ * and vector art (vanilla TypeScript).
+     4→ *
+     5→ * Features:
+     6→ *   - Infinite pan/zoom canvas
+     7→ *   - Grid system: dots or lines, with sub-grid divisions
+     8→ *   - Snap to grid, snap to other items
+     9→ *   - Board items: circle, rectangle, triangle shapes
+    10→ *   - Selection: single, multi (rubber-band)
+    11→ *   - Per-item local lattice (rotated bounding box) and global lattice
+    12→ *     (axis-aligned bounding box without rotation)
+    13→ *   - Commands: align (left/center/right/top/middle/bottom), distribute
+    14→ *     (horizontal/vertical), fit (to selection/all), snap to items
+    15→ *
+    16→ * Public API:
+    17→ *   new Board(container, options)
+    18→ *   // Items
+    19→ *   addItem(type, x, y, w, h, rotation?, color?): string
+    20→ *   removeItem(id): void
+    21→ *   getItems(): BoardItem[]
+    22→ *   getSelectedIds(): string[]
+    23→ *   // View
+    24→ *   setGridMode(mode): void
+    25→ *   setGridSize(n): void
+    26→ *   setSubGridDivisions(n): void
+    27→ *   setSnapToGrid(on): void
+    28→ *   setSnapToItems(on): void
+    29→ *   zoomToFit(): void
+    30→ *   zoomToFitSelection(): void
+    31→ *   // Commands
+    32→ *   align(type: AlignType): void
+    33→ *   distribute(type: DistributeType): void
+    34→ *   // Events
+    35→ *   on("selection" | "change" | "view", handler): void
+    36→ *   off(event, handler): void
+    37→ *   destroy(): void
+    38→ */
+    39→
+    40→export type ShapeType = "circle" | "rect" | "triangle";
+    41→export type GridMode = "dots" | "lines" | "none";
+    42→export type AlignType = "left" | "center-h" | "right" | "top" | "center-v" | "bottom";
+    43→export type DistributeType = "horizontal" | "vertical";
+    44→
+    45→export interface BoardItem {
+    46→  id: string;
+    47→  type: ShapeType;
+    48→  x: number;       // center X in board coordinates
+    49→  y: number;       // center Y in board coordinates
+    50→  width: number;
+    51→  height: number;
+    52→  rotation: number; // degrees
+    53→  color: string;
+    54→  selected: boolean;
+    55→}
+    56→
+    57→export interface BoardOptions {
+    58→  gridMode?: GridMode;
+    59→  gridSize?: number;          // base grid size in board units. Default 40
+    60→  subGridDivisions?: number;  // sub-divisions per grid cell. Default 4
+    61→  snapToGrid?: boolean;
+    62→  snapToItems?: boolean;
+    63→  background?: string;
+    64→}
+    65→
+    66→export interface BoardView {
+    67→  panX: number;
+    68→  panY: number;
+    69→  zoom: number;
+    70→}
+    71→
+    72→interface Lattice {
+    73→  x: number; y: number; w: number; h: number; rotation: number;
+    74→}
+    75→
+    76→const DEFAULTS: Required<BoardOptions> = {
+    77→  gridMode: "dots",
+    78→  gridSize: 40,
+    79→  subGridDivisions: 4,
+    80→  snapToGrid: false,
+    81→  snapToItems: false,
+    82→  background: "#15151a",
+    83→};
+    84→
+    85→const STYLE_ID = "board-styles";
+    86→let itemIdCounter = 1;
+    87→
+    88→function injectStyles(): void {
+    89→  if (typeof document === "undefined") return;
+    90→  if (document.getElementById(STYLE_ID)) return;
+    91→  const style = document.createElement("style");
+    92→  style.id = STYLE_ID;
+    93→  style.textContent = `
+    94→.board-root { display: block; position: relative; overflow: hidden; touch-action: none; cursor: default; }
+    95→.board-root canvas { display: block; touch-action: none; outline: none; }
+    96→.board-root canvas:focus-visible { box-shadow: inset 0 0 0 2px rgba(217,255,102,0.55); }
+    97→`;
+    98→  document.head.appendChild(style);
+    99→}
+   100→
+   101→function clamp(v: number, min: number, max: number): number {
+   102→  return v < min ? min : v > max ? max : v;
+   103→}
+   104→
+   105→type Handler = (data: any) => void;
+   106→
+   107→export class Board {
+   108→  private readonly container: HTMLElement;
+   109→  private readonly canvas: HTMLCanvasElement;
+   110→  private readonly ctx: CanvasRenderingContext2D;
+   111→
+   112→  private options: Required<BoardOptions>;
+   113→  private items: Map<string, BoardItem> = new Map();
+   114→  private selectedIds: Set<string> = new Set();
+   115→
+   116→  private view: BoardView = { panX: 0, panY: 0, zoom: 1 };
+   117→
+   118→  private pointerState: {
+   119→    mode: "pan" | "select" | "drag" | "none";
+   120→    pointerId: number;
+   121→    startX: number;
+   122→    startY: number;
+   123→    lastX: number;
+   124→    lastY: number;
+   125→    dragOffsets?: Map<string, { dx: number; dy: number }>;
+   126→    rubberBand?: { x0: number; y0: number; x1: number; y1: number };
+   127→  } | null = null;
+   128→
+   129→  private _destroyed = false;
+   130→  private _renderScheduled = false;
+   131→  private readonly listeners: Map<string, Set<Handler>> = new Map();
+   132→
+   133→  private readonly _onPointerDown: (e: PointerEvent) => void;
+   134→  private readonly _onPointerMove: (e: PointerEvent) => void;
+   135→  private readonly _onPointerUp: (e: PointerEvent) => void;
+   136→  private readonly _onWheel: (e: WheelEvent) => void;
+   137→  private readonly _onKeyDown: (e: KeyboardEvent) => void;
+   138→  private resizeObserver: ResizeObserver | null = null;
+   139→
+   140→  constructor(container: HTMLElement, options: BoardOptions = {}) {
+   141→    if (!container) throw new Error("Board: container is required");
+   142→    this.container = container;
+   143→    this.options = {
+   144→      gridMode: options.gridMode ?? DEFAULTS.gridMode,
+   145→      gridSize: Math.max(4, options.gridSize ?? DEFAULTS.gridSize),
+   146→      subGridDivisions: Math.max(1, options.subGridDivisions ?? DEFAULTS.subGridDivisions),
+   147→      snapToGrid: options.snapToGrid ?? DEFAULTS.snapToGrid,
+   148→      snapToItems: options.snapToItems ?? DEFAULTS.snapToItems,
+   149→      background: options.background ?? DEFAULTS.background,
+   150→    };
+   151→
+   152→    injectStyles();
+   153→    this.canvas = document.createElement("canvas");
+   154→    this.canvas.className = "board-canvas";
+   155→    this.canvas.setAttribute("role", "application");
+   156→    this.canvas.setAttribute("aria-label", "Board. Click to select, drag to move. Space+drag or middle-click to pan. Scroll to zoom.");
+   157→    this.canvas.tabIndex = 0;
+   158→    const ctx = this.canvas.getContext("2d");
+   159→    if (!ctx) throw new Error("Board: 2D canvas context unavailable");
+   160→    this.ctx = ctx;
+   161→    this.container.classList.add("board-root");
+   162→    this.container.appendChild(this.canvas);
+   163→
+   164→    this._onPointerDown = this.onPointerDown.bind(this);
+   165→    this._onPointerMove = this.onPointerMove.bind(this);
+   166→    this._onPointerUp = this.onPointerUp.bind(this);
+   167→    this._onWheel = this.onWheel.bind(this);
+   168→    this._onKeyDown = this.onKeyDown.bind(this);
+   169→
+   170→    this.canvas.addEventListener("pointerdown", this._onPointerDown);
+   171→    this.canvas.addEventListener("pointermove", this._onPointerMove);
+   172→    this.canvas.addEventListener("pointerup", this._onPointerUp);
+   173→    this.canvas.addEventListener("pointercancel", this._onPointerUp);
+   174→    this.canvas.addEventListener("wheel", this._onWheel, { passive: false });
+   175→    this.canvas.addEventListener("keydown", this._onKeyDown);
+   176→
+   177→    if (typeof ResizeObserver !== "undefined") {
+   178→      this.resizeObserver = new ResizeObserver(() => this.handleResize());
+   179→      this.resizeObserver.observe(this.container);
+   180→    }
+   181→
+   182→    this.updateCanvasSize();
+   183→    this.render();
+   184→  }
+   185→
+   186→  // ---- Public API: Items ----
+   187→
+   188→  addItem(type: ShapeType, x: number, y: number, w: number, h: number, rotation = 0, color = "#D9FF66"): string {
+   189→    const id = `item-${itemIdCounter++}`;
+   190→    const item: BoardItem = { id, type, x, y, width: w, height: h, rotation, color, selected: false };
+   191→    this.items.set(id, item);
+   192→    this.scheduleRender();
+   193→    this.emit("change", { type: "add", item });
+   194→    return id;
+   195→  }
+   196→
+   197→  removeItem(id: string): void {
+   198→    if (!this.items.has(id)) return;
+   199→    this.items.delete(id);
+   200→    this.selectedIds.delete(id);
+   201→    this.scheduleRender();
+   202→    this.emit("change", { type: "remove", id });
+   203→    this.emit("selection", { ids: this.getSelectedIds() });
+   204→  }
+   205→
+   206→  getItems(): BoardItem[] {
+   207→    return Array.from(this.items.values()).map((i) => ({ ...i }));
+   208→  }
+   209→
+   210→  getSelectedIds(): string[] {
+   211→    return Array.from(this.selectedIds);
+   212→  }
+   213→
+   214→  getSelectedItems(): BoardItem[] {
+   215→    return this.getSelectedIds().map((id) => this.items.get(id)!).filter(Boolean);
+   216→  }
+   217→
+   218→  selectItem(id: string, additive = false): void {
+   219→    if (!additive) this.clearSelection();
+   220→    if (this.items.has(id)) {
+   221→      this.selectedIds.add(id);
+   222→      this.items.get(id)!.selected = true;
+   223→    }
+   224→    this.scheduleRender();
+   225→    this.emit("selection", { ids: this.getSelectedIds() });
+   226→  }
+   227→
+   228→  clearSelection(): void {
+   229→    for (const id of this.selectedIds) {
+   230→      const item = this.items.get(id);
+   231→      if (item) item.selected = false;
+   232→    }
+   233→    this.selectedIds.clear();
+   234→    this.scheduleRender();
+   235→    this.emit("selection", { ids: [] });
+   236→  }
+   237→
+   238→  // ---- Public API: View ----
+   239→
+   240→  setGridMode(mode: GridMode): void {
+   241→    this.options.gridMode = mode;
+   242→    this.scheduleRender();
+   243→  }
+   244→
+   245→  setGridSize(n: number): void {
+   246→    this.options.gridSize = Math.max(4, n);
+   247→    this.scheduleRender();
+   248→  }
+   249→
+   250→  setSubGridDivisions(n: number): void {
+   251→    this.options.subGridDivisions = Math.max(1, n);
+   252→    this.scheduleRender();
+   253→  }
+   254→
+   255→  setSnapToGrid(on: boolean): void {
+   256→    this.options.snapToGrid = on;
+   257→  }
+   258→
+   259→  setSnapToItems(on: boolean): void {
+   260→    this.options.snapToItems = on;
+   261→  }
+   262→
+   263→  getView(): BoardView {
+   264→    return { ...this.view };
+   265→  }
+   266→
+   267→  setView(panX: number, panY: number, zoom: number): void {
+   268→    this.view.panX = panX;
+   269→    this.view.panY = panY;
+   270→    this.view.zoom = clamp(zoom, 0.05, 10);
+   271→    this.scheduleRender();
+   272→    this.emit("view", this.getView());
+   273→  }
+   274→
+   275→  zoomToFit(): void {
+   276→    if (this.items.size === 0) {
+   277→      this.setView(0, 0, 1);
+   278→      return;
+   279→    }
+   280→    this.fitToItems(Array.from(this.items.values()));
+   281→  }
+   282→
+   283→  zoomToFitSelection(): void {
+   284→    const selected = this.getSelectedItems();
+   285→    if (selected.length === 0) { this.zoomToFit(); return; }
+   286→    this.fitToItems(selected);
+   287→  }
+   288→
+   289→  private fitToItems(items: BoardItem[]): void {
+   290→    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+   291→    for (const item of items) {
+   292→      const latt = this.getGlobalLattice(item);
+   293→      minX = Math.min(minX, latt.x);
+   294→      minY = Math.min(minY, latt.y);
+   295→      maxX = Math.max(maxX, latt.x + latt.w);
+   296→      maxY = Math.max(maxY, latt.y + latt.h);
+   297→    }
+   298→    const padding = 60;
+   299→    const w = this.canvas.clientWidth;
+   300→    const h = this.canvas.clientHeight;
+   301→    const bw = (maxX - minX) + padding * 2;
+   302→    const bh = (maxY - minY) + padding * 2;
+   303→    const zoom = Math.min(w / bw, h / bh, 5);
+   304→    const cx = (minX + maxX) / 2;
+   305→    const cy = (minY + maxY) / 2;
+   306→    this.setView(w / 2 - cx * zoom, h / 2 - cy * zoom, zoom);
+   307→  }
+   308→
+   309→  // ---- Public API: Alignment Commands ----
+   310→
+   311→  align(type: AlignType): void {
+   312→    const selected = this.getSelectedItems();
+   313→    if (selected.length < 2) return;
+   314→    // Compute global lattices.
+   315→    const latts = selected.map((item) => ({ item, latt: this.getGlobalLattice(item) }));
+   316→    let bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+   317→    for (const { latt } of latts) {
+   318→      bounds.minX = Math.min(bounds.minX, latt.x);
+   319→      bounds.maxX = Math.max(bounds.maxX, latt.x + latt.w);
+   320→      bounds.minY = Math.min(bounds.minY, latt.y);
+   321→      bounds.maxY = Math.max(bounds.maxY, latt.y + latt.h);
+   322→    }
+   323→    for (const { item, latt } of latts) {
+   324→      const dx = latt.x - item.x + latt.w / 2;
+   325→      const dy = latt.y - item.y + latt.h / 2;
+   326→      switch (type) {
+   327→        case "left": item.x += bounds.minX - latt.x; break;
+   328→        case "center-h": item.x += (bounds.minX + bounds.maxX) / 2 - (latt.x + latt.w / 2); break;
+   329→        case "right": item.x += bounds.maxX - (latt.x + latt.w); break;
+   330→        case "top": item.y += bounds.minY - latt.y; break;
+   331→        case "center-v": item.y += (bounds.minY + bounds.maxY) / 2 - (latt.y + latt.h / 2); break;
+   332→        case "bottom": item.y += bounds.maxY - (latt.y + latt.h); break;
+   333→      }
+   334→      void dx; void dy;
+   335→    }
+   336→    this.scheduleRender();
+   337→    this.emit("change", { type: "align", alignType: type });
+   338→  }
+   339→
+   340→  distribute(type: DistributeType): void {
+   341→    const selected = this.getSelectedItems();
+   342→    if (selected.length < 3) return;
+   343→    const latts = selected.map((item) => ({ item, latt: this.getGlobalLattice(item) }));
+   344→    if (type === "horizontal") {
+   345→      latts.sort((a, b) => a.latt.x - b.latt.x);
+   346→    } else {
+   347→      latts.sort((a, b) => a.latt.y - b.latt.y);
+   348→    }
+   349→    const first = latts[0].latt;
+   350→    const last = latts[latts.length - 1].latt;
+   351→    if (type === "horizontal") {
+   352→      const totalSpan = (last.x + last.w) - first.x;
+   353→      const totalItemW = latts.reduce((s, l) => s + l.latt.w, 0);
+   354→      const gap = (totalSpan - totalItemW) / (latts.length - 1);
+   355→      let cursor = first.x;
+   356→      for (const { item, latt } of latts) {
+   357→        item.x += cursor - latt.x;
+   358→        cursor += latt.w + gap;
+   359→      }
+   360→    } else {
+   361→      const totalSpan = (last.y + last.h) - first.y;
+   362→      const totalItemH = latts.reduce((s, l) => s + l.latt.h, 0);
+   363→      const gap = (totalSpan - totalItemH) / (latts.length - 1);
+   364→      let cursor = first.y;
+   365→      for (const { item, latt } of latts) {
+   366→        item.y += cursor - latt.y;
+   367→        cursor += latt.h + gap;
+   368→      }
+   369→    }
+   370→    this.scheduleRender();
+   371→    this.emit("change", { type: "distribute", distributeType: type });
+   372→  }
+   373→
+   374→  // ---- Lattices ----
+   375→
+   376→  /**
+   377→   * Local lattice: the item's bounding box rotated with the item.
+   378→   * (x, y) = top-left of the unrotated rect, w/h = width/height, rotation = item rotation.
+   379→   */
+   380→  getLocalLattice(item: BoardItem): Lattice {
+   381→    return {
+   382→      x: item.x - item.width / 2,
+   383→      y: item.y - item.height / 2,
+   384→      w: item.width,
+   385→      h: item.height,
+   386→      rotation: item.rotation,
+   387→    };
+   388→  }
+   389→
+   390→  /**
+   391→   * Global lattice: axis-aligned bounding box (AABB) of the item, ignoring rotation.
+   392→   * For rotated items, this is the AABB of the rotated rect. For unrotated, it's the same as local.
+   393→   */
+   394→  getGlobalLattice(item: BoardItem): Lattice {
+   395→    if (item.rotation === 0) {
+   396→      return { x: item.x - item.width / 2, y: item.y - item.height / 2, w: item.width, h: item.height, rotation: 0 };
+   397→    }
+   398→    const rad = (item.rotation * Math.PI) / 180;
+   399→    const cos = Math.abs(Math.cos(rad));
+   400→    const sin = Math.abs(Math.sin(rad));
+   401→    const w = item.width * cos + item.height * sin;
+   402→    const h = item.width * sin + item.height * cos;
+   403→    return { x: item.x - w / 2, y: item.y - h / 2, w, h, rotation: 0 };
+   404→  }
+   405→
+   406→  // ---- Coordinate conversion ----
+   407→
+   408→  private screenToBoard(sx: number, sy: number): { x: number; y: number } {
+   409→    const rect = this.canvas.getBoundingClientRect();
+   410→    const cx = sx - rect.left;
+   411→    const cy = sy - rect.top;
+   412→    return {
+   413→      x: (cx - this.view.panX) / this.view.zoom,
+   414→      y: (cy - this.view.panY) / this.view.zoom,
+   415→    };
+   416→  }
+   417→
+   418→  // ---- Snapping ----
+   419→
+   420→  private snap(x: number, y: number): { x: number; y: number } {
+   421→    let sx = x, sy = y;
+   422→    if (this.options.snapToGrid) {
+   423→      const g = this.options.gridSize;
+   424→      sx = Math.round(x / g) * g;
+   425→      sy = Math.round(y / g) * g;
+   426→    }
+   427→    if (this.options.snapToItems) {
+   428→      const threshold = 8 / this.view.zoom;
+   429→      for (const item of this.items.values()) {
+   430→        if (this.selectedIds.has(item.id)) continue;
+   431→        const latt = this.getGlobalLattice(item);
+   432→        const edges = [latt.x, latt.x + latt.w, latt.y, latt.y + latt.h, item.x, item.y];
+   433→        for (const e of edges) {
+   434→          if (Math.abs(sx - e) < threshold) sx = e;
+   435→          if (Math.abs(sy - e) < threshold) sy = e;
+   436→        }
+   437→      }
+   438→    }
+   439→    return { x: sx, y: sy };
+   440→  }
+   441→
+   442→  // ---- Pointer interaction ----
+   443→
+   444→  private onPointerDown(e: PointerEvent): void {
+   445→    if (this._destroyed) return;
+   446→    this.canvas.focus();
+   447→    const bp = this.screenToBoard(e.clientX, e.clientY);
+   448→    const isPan = e.button === 1 || (e.button === 0 && this._spaceDown);
+   449→
+   450→    if (isPan) {
+   451→      this.pointerState = {
+   452→        mode: "pan", pointerId: e.pointerId,
+   453→        startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
+   454→      };
+   455→      try { this.canvas.setPointerCapture(e.pointerId); } catch {}
+   456→      this.canvas.style.cursor = "grabbing";
+   457→      e.preventDefault();
+   458→      return;
+   459→    }
+   460→
+   461→    // Hit test items (topmost first).
+   462→    const hit = this.hitTest(bp.x, bp.y);
+   463→    if (hit) {
+   464→      if (!this.selectedIds.has(hit.id)) {
+   465→        this.selectItem(hit.id, e.shiftKey);
+   466→      } else if (e.shiftKey) {
+   467→        this.selectedIds.delete(hit.id);
+   468→        this.items.get(hit.id)!.selected = false;
+   469→        this.emit("selection", { ids: this.getSelectedIds() });
+   470→      }
+   471→      // Start dragging selected items.
+   472→      const dragOffsets = new Map<string, { dx: number; dy: number }>();
+   473→      for (const id of this.selectedIds) {
+   474→        const item = this.items.get(id);
+   475→        if (item) dragOffsets.set(id, { dx: bp.x - item.x, dy: bp.y - item.y });
+   476→      }
+   477→      this.pointerState = {
+   478→        mode: "drag", pointerId: e.pointerId,
+   479→        startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
+   480→        dragOffsets,
+   481→      };
+   482→      try { this.canvas.setPointerCapture(e.pointerId); } catch {}
+   483→    } else {
+   484→      // Empty space → rubber-band select.
+   485→      if (!e.shiftKey) this.clearSelection();
+   486→      this.pointerState = {
+   487→        mode: "select", pointerId: e.pointerId,
+   488→        startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
+   489→        rubberBand: { x0: bp.x, y0: bp.y, x1: bp.x, y1: bp.y },
+   490→      };
+   491→      try { this.canvas.setPointerCapture(e.pointerId); } catch {}
+   492→    }
+   493→    this.scheduleRender();
+   494→    e.preventDefault();
+   495→  }
+   496→
+   497→  private onPointerMove(e: PointerEvent): void {
+   498→    if (!this.pointerState) return;
+   499→    const ps = this.pointerState;
+   500→    if (ps.mode === "pan") {
+   501→      const dx = e.clientX - ps.lastX;
+   502→      const dy = e.clientY - ps.lastY;
+   503→      this.view.panX += dx;
+   504→      this.view.panY += dy;
+   505→      ps.lastX = e.clientX;
+   506→      ps.lastY = e.clientY;
+   507→      this.scheduleRender();
+   508→      this.emit("view", this.getView());
+   509→    } else if (ps.mode === "drag" && ps.dragOffsets) {
+   510→      let bp = this.screenToBoard(e.clientX, e.clientY);
+   511→      for (const [id, offset] of ps.dragOffsets) {
+   512→        const item = this.items.get(id);
+   513→        if (!item) continue;
+   514→        let nx = bp.x - offset.dx;
+   515→        let ny = bp.y - offset.dy;
+   516→        if (this.options.snapToGrid || this.options.snapToItems) {
+   517→          const snapped = this.snap(nx, ny);
+   518→          nx = snapped.x;
+   519→          ny = snapped.y;
+   520→        }
+   521→        item.x = nx;
+   522→        item.y = ny;
+   523→      }
+   524→      this.scheduleRender();
+   525→      this.emit("change", { type: "move" });
+   526→    } else if (ps.mode === "select" && ps.rubberBand) {
+   527→      const bp = this.screenToBoard(e.clientX, e.clientY);
+   528→      ps.rubberBand.x1 = bp.x;
+   529→      ps.rubberBand.y1 = bp.y;
+   530→      // Select items intersecting the rubber band.
+   531→      const rb = ps.rubberBand;
+   532→      const minX = Math.min(rb.x0, rb.x1), maxX = Math.max(rb.x0, rb.x1);
+   533→      const minY = Math.min(rb.y0, rb.y1), maxY = Math.max(rb.y0, rb.y1);
+   534→      for (const item of this.items.values()) {
+   535→        const latt = this.getGlobalLattice(item);
+   536→        const intersects = latt.x < maxX && latt.x + latt.w > minX && latt.y < maxY && latt.y + latt.h > minY;
+   537→        if (intersects && !this.selectedIds.has(item.id)) {
+   538→          this.selectedIds.add(item.id);
+   539→          item.selected = true;
+   540→        } else if (!intersects && this.selectedIds.has(item.id) && !e.shiftKey) {
+   541→          this.selectedIds.delete(item.id);
+   542→          item.selected = false;
+   543→        }
+   544→      }
+   545→      this.scheduleRender();
+   546→      this.emit("selection", { ids: this.getSelectedIds() });
+   547→    }
+   548→    e.preventDefault();
+   549→  }
+   550→
+   551→  private onPointerUp(e: PointerEvent): void {
+   552→    if (!this.pointerState) return;
+   553→    try { this.canvas.releasePointerCapture(this.pointerState.pointerId); } catch {}
+   554→    this.canvas.style.cursor = "";
+   555→    if (this.pointerState.mode === "drag") {
+   556→      this.emit("change", { type: "move-end" });
+   557→    }
+   558→    this.pointerState = null;
+   559→    this.scheduleRender();
+   560→  }
+   561→
+   562→  private _spaceDown = false;
+   563→  private onKeyDown(e: KeyboardEvent): void {
+   564→    if (e.key === " ") { this._spaceDown = true; this.canvas.style.cursor = "grab"; e.preventDefault(); }
+   565→    if (e.key === "Delete" || e.key === "Backspace") {
+   566→      for (const id of this.selectedIds) this.removeItem(id);
+   567→      e.preventDefault();
+   568→    }
+   569→    if (e.key === "Escape") { this.clearSelection(); }
+   570→    // Arrow keys nudge selected items.
+   571→    const step = e.shiftKey ? 10 : 1;
+   572→    let dx = 0, dy = 0;
+   573→    if (e.key === "ArrowLeft") dx = -step;
+   574→    if (e.key === "ArrowRight") dx = step;
+   575→    if (e.key === "ArrowUp") dy = -step;
+   576→    if (e.key === "ArrowDown") dy = step;
+   577→    if (dx !== 0 || dy !== 0) {
+   578→      for (const id of this.selectedIds) {
+   579→        const item = this.items.get(id);
+   580→        if (item) { item.x += dx; item.y += dy; }
+   581→      }
+   582→      this.scheduleRender();
+   583→      this.emit("change", { type: "nudge" });
+   584→      e.preventDefault();
+   585→    }
+   586→  }
+   587→
+   588→  private onWheel(e: WheelEvent): void {
+   589→    e.preventDefault();
+   590→    if (e.ctrlKey || e.metaKey) {
+   591→      // Zoom.
+   592→      const rect = this.canvas.getBoundingClientRect();
+   593→      const mx = e.clientX - rect.left;
+   594→      const my = e.clientY - rect.top;
+   595→      const oldZoom = this.view.zoom;
+   596→      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+   597→      const newZoom = clamp(oldZoom * delta, 0.05, 10);
+   598→      // Zoom toward cursor.
+   599→      this.view.panX = mx - (mx - this.view.panX) * (newZoom / oldZoom);
+   600→      this.view.panY = my - (my - this.view.panY) * (newZoom / oldZoom);
+   601→      this.view.zoom = newZoom;
+   602→      this.emit("view", this.getView());
+   603→    } else {
+   604→      // Pan.
+   605→      this.view.panX -= e.deltaX;
+   606→      this.view.panY -= e.deltaY;
+   607→      this.emit("view", this.getView());
+   608→    }
+   609→    this.scheduleRender();
+   610→  }
+   611→
+   612→  /** Hit test: find the topmost item at a board coordinate. */
+   613→  private hitTest(bx: number, by: number): BoardItem | null {
+   614→    const items = Array.from(this.items.values()).reverse();
+   615→    for (const item of items) {
+   616→      const latt = this.getGlobalLattice(item);
+   617→      if (bx >= latt.x && bx <= latt.x + latt.w && by >= latt.y && by <= latt.y + latt.h) {
+   618→        return item;
+   619→      }
+   620→    }
+   621→    return null;
+   622→  }
+   623→
+   624→  // ---- Rendering ----
+   625→
+   626→  private updateCanvasSize(): void {
+   627→    const w = this.container.clientWidth;
+   628→    const h = this.container.clientHeight;
+   629→    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   630→    this.canvas.style.width = `${w}px`;
+   631→    this.canvas.style.height = `${h}px`;
+   632→    this.canvas.width = Math.round(w * dpr);
+   633→    this.canvas.height = Math.round(h * dpr);
+   634→    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   635→  }
+   636→
+   637→  private handleResize(): void {
+   638→    this.updateCanvasSize();
+   639→    this.scheduleRender();
+   640→  }
+   641→
+   642→  private scheduleRender(): void {
+   643→    if (this._destroyed || this._renderScheduled) return;
+   644→    this._renderScheduled = true;
+   645→    requestAnimationFrame(() => {
+   646→      this._renderScheduled = false;
+   647→      if (!this._destroyed) this.render();
+   648→    });
+   649→  }
+   650→
+   651→  private render(): void {
+   652→    const w = this.container.clientWidth;
+   653→    const h = this.container.clientHeight;
+   654→    const ctx = this.ctx;
+   655→    ctx.clearRect(0, 0, w, h);
+   656→    // Background.
+   657→    ctx.fillStyle = this.options.background;
+   658→    ctx.fillRect(0, 0, w, h);
+   659→    // Grid.
+   660→    if (this.options.gridMode !== "none") this.renderGrid(w, h);
+   661→    // Items.
+   662→    ctx.save();
+   663→    ctx.translate(this.view.panX, this.view.panY);
+   664→    ctx.scale(this.view.zoom, this.view.zoom);
+   665→    for (const item of this.items.values()) {
+   666→      this.renderItem(item);
+   667→    }
+   668→    // Selection lattices.
+   669→    for (const item of this.getSelectedItems()) {
+   670→      this.renderLattices(item);
+   671→    }
+   672→    ctx.restore();
+   673→    // Rubber band (screen space).
+   674→    if (this.pointerState?.mode === "select" && this.pointerState.rubberBand) {
+   675→      const rb = this.pointerState.rubberBand;
+   676→      const x0 = rb.x0 * this.view.zoom + this.view.panX;
+   677→      const y0 = rb.y0 * this.view.zoom + this.view.panY;
+   678→      const x1 = rb.x1 * this.view.zoom + this.view.panX;
+   679→      const y1 = rb.y1 * this.view.zoom + this.view.panY;
+   680→      ctx.fillStyle = "rgba(217,255,102,0.1)";
+   681→      ctx.strokeStyle = "rgba(217,255,102,0.6)";
+   682→      ctx.lineWidth = 1;
+   683→      ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+   684→      ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+   685→    }
+   686→  }
+   687→
+   688→  private renderGrid(w: number, h: number): void {
+   689→    const ctx = this.ctx;
+   690→    const { gridSize, subGridDivisions, gridMode, zoom, panX, panY } = {
+   691→      ...this.options, ...this.view,
+   692→    };
+   693→    const subSize = gridSize / subGridDivisions;
+   694→    // Visible board coordinate range.
+   695→    const startX = -panX / zoom;
+   696→    const startY = -panY / zoom;
+   697→    const endX = startX + w / zoom;
+   698→    const endY = startY + h / zoom;
+   699→    // Sub-grid.
+   700→    const subStartCol = Math.floor(startX / subSize);
+   701→    const subEndCol = Math.ceil(endX / subSize);
+   702→    const subStartRow = Math.floor(startY / subSize);
+   703→    const subEndRow = Math.ceil(endY / subSize);
+   704→
+   705→    if (gridMode === "dots") {
+   706→      ctx.fillStyle = "rgba(255,255,255,0.15)";
+   707→      const dotR = 1;
+   708→      for (let col = subStartCol; col <= subEndCol; col++) {
+   709→        for (let row = subStartRow; row <= subEndRow; row++) {
+   710→          const isMain = col % subGridDivisions === 0 && row % subGridDivisions === 0;
+   711→          const x = col * subSize * zoom + panX;
+   712→          const y = row * subSize * zoom + panY;
+   713→          ctx.beginPath();
+   714→          ctx.arc(x, y, isMain ? dotR + 0.5 : dotR, 0, Math.PI * 2);
+   715→          ctx.fillStyle = isMain ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.12)";
+   716→          ctx.fill();
+   717→        }
+   718→      }
+   719→    } else if (gridMode === "lines") {
+   720→      // Sub-grid lines.
+   721→      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+   722→      ctx.lineWidth = 1;
+   723→      ctx.beginPath();
+   724→      for (let col = subStartCol; col <= subEndCol; col++) {
+   725→        if (col % subGridDivisions === 0) continue;
+   726→        const x = col * subSize * zoom + panX;
+   727→        ctx.moveTo(x, 0); ctx.lineTo(x, h);
+   728→      }
+   729→      for (let row = subStartRow; row <= subEndRow; row++) {
+   730→        if (row % subGridDivisions === 0) continue;
+   731→        const y = row * subSize * zoom + panY;
+   732→        ctx.moveTo(0, y); ctx.lineTo(w, y);
+   733→      }
+   734→      ctx.stroke();
+   735→      // Main grid lines.
+   736→      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+   737→      ctx.lineWidth = 1;
+   738→      ctx.beginPath();
+   739→      const mainStartCol = Math.floor(startX / gridSize);
+   740→      const mainEndCol = Math.ceil(endX / gridSize);
+   741→      const mainStartRow = Math.floor(startY / gridSize);
+   742→      const mainEndRow = Math.ceil(endY / gridSize);
+   743→      for (let col = mainStartCol; col <= mainEndCol; col++) {
+   744→        const x = col * gridSize * zoom + panX;
+   745→        ctx.moveTo(x, 0); ctx.lineTo(x, h);
+   746→      }
+   747→      for (let row = mainStartRow; row <= mainEndRow; row++) {
+   748→        const y = row * gridSize * zoom + panY;
+   749→        ctx.moveTo(0, y); ctx.lineTo(w, y);
+   750→      }
+   751→      ctx.stroke();
+   752→    }
+   753→  }
+   754→
+   755→  private renderItem(item: BoardItem): void {
+   756→    const ctx = this.ctx;
+   757→    ctx.save();
+   758→    ctx.translate(item.x, item.y);
+   759→    ctx.rotate((item.rotation * Math.PI) / 180);
+   760→    ctx.fillStyle = item.color;
+   761→    ctx.strokeStyle = item.selected ? "#D9FF66" : "rgba(0,0,0,0.4)";
+   762→    ctx.lineWidth = item.selected ? 2 / this.view.zoom : 1 / this.view.zoom;
+   763→    const w = item.width, h = item.height;
+   764→    if (item.type === "circle") {
+   765→      ctx.beginPath();
+   766→      ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+   767→      ctx.fill();
+   768→      ctx.stroke();
+   769→    } else if (item.type === "rect") {
+   770→      ctx.fillRect(-w / 2, -h / 2, w, h);
+   771→      ctx.strokeRect(-w / 2, -h / 2, w, h);
+   772→    } else if (item.type === "triangle") {
+   773→      ctx.beginPath();
+   774→      ctx.moveTo(0, -h / 2);
+   775→      ctx.lineTo(w / 2, h / 2);
+   776→      ctx.lineTo(-w / 2, h / 2);
+   777→      ctx.closePath();
+   778→      ctx.fill();
+   779→      ctx.stroke();
+   780→    }
+   781→    ctx.restore();
+   782→  }
+   783→
+   784→  /**
+   785→   * Render the local lattice (rotated bounding box, dashed lemon) and
+   786→   * global lattice (axis-aligned bounding box, dashed purple) for a selected item.
+   787→   */
+   788→  private renderLattices(item: BoardItem): void {
+   789→    const ctx = this.ctx;
+   790→    const lw = 1 / this.view.zoom;
+   791→    // Local lattice (rotated rect).
+   792→    ctx.save();
+   793→    ctx.translate(item.x, item.y);
+   794→    ctx.rotate((item.rotation * Math.PI) / 180);
+   795→    ctx.strokeStyle = "rgba(217,255,102,0.7)";
+   796→    ctx.lineWidth = lw;
+   797→    ctx.setLineDash([4 / this.view.zoom, 3 / this.view.zoom]);
+   798→    ctx.strokeRect(-item.width / 2, -item.height / 2, item.width, item.height);
+   799→    ctx.restore();
+   800→    // Global lattice (AABB).
+   801→    const glatt = this.getGlobalLattice(item);
+   802→    ctx.strokeStyle = "rgba(185,160,255,0.6)";
+   803→    ctx.lineWidth = lw;
+   804→    ctx.setLineDash([2 / this.view.zoom, 2 / this.view.zoom]);
+   805→    ctx.strokeRect(glatt.x, glatt.y, glatt.w, glatt.h);
+   806→    ctx.setLineDash([]);
+   807→  }
+   808→
+   809→  // ---- Events ----
+   810→
+   811→  on(event: "selection" | "change" | "view", handler: Handler): void;
+   812→  on(event: string, handler: Handler): void {
+   813→    let set = this.listeners.get(event);
+   814→    if (!set) { set = new Set<Handler>(); this.listeners.set(event, set); }
+   815→    set.add(handler);
+   816→  }
+   817→  off(event: string, handler: Handler): void {
+   818→    this.listeners.get(event)?.delete(handler);
+   819→  }
+   820→  destroy(): void {
+   821→    if (this._destroyed) return;
+   822→    this._destroyed = true;
+   823→    this.canvas.removeEventListener("pointerdown", this._onPointerDown);
+   824→    this.canvas.removeEventListener("pointermove", this._onPointerMove);
+   825→    this.canvas.removeEventListener("pointerup", this._onPointerUp);
+   826→    this.canvas.removeEventListener("pointercancel", this._onPointerUp);
+   827→    this.canvas.removeEventListener("wheel", this._onWheel);
+   828→    this.canvas.removeEventListener("keydown", this._onKeyDown);
+   829→    if (this.resizeObserver) { this.resizeObserver.disconnect(); this.resizeObserver = null; }
+   830→    this.listeners.clear();
+   831→    this.items.clear();
+   832→    this.selectedIds.clear();
+   833→    if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
+   834→    this.container.classList.remove("board-root");
+   835→  }
+   836→
+   837→  private emit(event: string, data: any): void {
+   838→    const set = this.listeners.get(event);
+   839→    if (!set) return;
+   840→    for (const h of Array.from(set)) {
+   841→      try { h(data); } catch (err) { console.error("Board listener error:", err); }
+   842→    }
+   843→  }
+   844→}
+   845→

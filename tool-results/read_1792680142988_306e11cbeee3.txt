@@ -1,0 +1,1026 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  RotateCcw,
+     6→  ArrowLeftRight,
+     7→  ArrowUpDown,
+     8→  Plus,
+     9→  Trash2,
+    10→  GripVertical,
+    11→  Check,
+    12→  ChevronDown,
+    13→  ChevronUp,
+    14→  MousePointerClick,
+    15→} from "lucide-react";
+    16→import { useNavigation } from "@/store/navigation";
+    17→import { getComponent } from "@/lib/platform/content";
+    18→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+    19→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+    20→import { AgentSkillTabs, CollapsibleSection } from "@/components/platform/agent-skill-tabs";
+    21→import {
+    22→  ToggleGroupReact,
+    23→  type ToggleGroupOrientation,
+    24→  type ToggleGroupVariant,
+    25→  type ToggleGroupSize,
+    26→  type ToggleButtonItem,
+    27→  type ToggleGroupChangePayload,
+    28→} from "./toggle-group-react";
+    29→import type { ToggleGroup } from "@/lib/components/toggle-group";
+    30→import { cn } from "@/lib/utils";
+    31→import { toast } from "sonner";
+    32→
+    33→interface PlaygroundState {
+    34→  multiselect: boolean;
+    35→  closable: boolean;
+    36→  reorderable: boolean;
+    37→  orientation: ToggleGroupOrientation;
+    38→  variant: ToggleGroupVariant;
+    39→  size: ToggleGroupSize;
+    40→}
+    41→
+    42→const DEFAULTS: PlaygroundState = {
+    43→  multiselect: false,
+    44→  closable: false,
+    45→  reorderable: false,
+    46→  orientation: "horizontal",
+    47→  variant: "outline",
+    48→  size: "md",
+    49→};
+    50→
+    51→const DEFAULT_ITEMS: ToggleButtonItem[] = [
+    52→  { id: "tg-bold", label: "Bold", icon: "bold", selected: true },
+    53→  { id: "tg-italic", label: "Italic", icon: "italic" },
+    54→  { id: "tg-underline", label: "Underline", icon: "underline" },
+    55→];
+    56→
+    57→const ICON_OPTIONS: string[] = [
+    58→  "(none)",
+    59→  "bold",
+    60→  "italic",
+    61→  "underline",
+    62→  "check",
+    63→  "x",
+    64→  "plus",
+    65→  "star",
+    66→  "circle",
+    67→  "square",
+    68→  "heart",
+    69→  "bolt",
+    70→  "dot",
+    71→  "arrow-right",
+    72→  "settings",
+    73→  "folder",
+    74→  "file",
+    75→  "user",
+    76→  "tag",
+    77→  "eye",
+    78→  "bell",
+    79→  "search",
+    80→  "home",
+    81→];
+    82→
+    83→export function ToggleGroupPlayground() {
+    84→  const meta = getComponent("toggle-group")!;
+    85→  const [state, setState] = React.useState<PlaygroundState>(DEFAULTS);
+    86→  const [items, setItems] = React.useState<ToggleButtonItem[]>(DEFAULT_ITEMS);
+    87→  const [selected, setSelected] = React.useState<string[]>(["tg-bold"]);
+    88→  const [activeTab, setActiveTab] = React.useState<
+    89→    "javascript" | "html" | "css" | "api"
+    90→  >("javascript");
+    91→  const instanceRef = React.useRef<ToggleGroup | null>(null);
+    92→
+    93→  const onChange = React.useCallback((data: ToggleGroupChangePayload) => {
+    94→    setItems(data.items);
+    95→    setSelected(data.selected);
+    96→  }, []);
+    97→
+    98→  const update = React.useCallback(
+    99→    <K extends keyof PlaygroundState>(key: K, value: PlaygroundState[K]) => {
+   100→      setState((s) => ({ ...s, [key]: value }));
+   101→    },
+   102→    [],
+   103→  );
+   104→
+   105→  const reset = React.useCallback(() => {
+   106→    setState(DEFAULTS);
+   107→    instanceRef.current?.setItems(DEFAULT_ITEMS);
+   108→    toast.success("Reset to defaults");
+   109→  }, []);
+   110→
+   111→  // ---- Inspector: item edits ----
+   112→
+   113→  const updateItem = React.useCallback(
+   114→    (id: string, patch: Partial<ToggleButtonItem>) => {
+   115→      const inst = instanceRef.current;
+   116→      if (!inst) return;
+   117→      const newItems = inst.getItems().map((it) =>
+   118→        it.id === id ? { ...it, ...patch } : it,
+   119→      );
+   120→      inst.setItems(newItems);
+   121→    },
+   122→    [],
+   123→  );
+   124→
+   125→  const toggleItemSelected = React.useCallback(
+   126→    (id: string) => {
+   127→      const inst = instanceRef.current;
+   128→      if (!inst) return;
+   129→      if (state.multiselect) {
+   130→        const cur = inst.getSelected();
+   131→        const next = cur.includes(id)
+   132→          ? cur.filter((s) => s !== id)
+   133→          : [...cur, id];
+   134→        inst.setSelected(next);
+   135→      } else {
+   136→        // Single-select: clicking the selected one deselects (allows empty).
+   137→        const cur = inst.getSelected();
+   138→        if (cur.includes(id)) inst.setSelected([]);
+   139→        else inst.setSelected([id]);
+   140→      }
+   141→    },
+   142→    [state.multiselect],
+   143→  );
+   144→
+   145→  const removeItem = React.useCallback((id: string) => {
+   146→    instanceRef.current?.removeItem(id);
+   147→  }, []);
+   148→
+   149→  const addItem = React.useCallback(() => {
+   150→    const id = `tg-${Date.now().toString(36)}`;
+   151→    instanceRef.current?.addItem({ id, label: "New button", icon: "dot" });
+   152→  }, []);
+   153→
+   154→  const moveItem = React.useCallback((id: string, delta: -1 | 1) => {
+   155→    const inst = instanceRef.current;
+   156→    if (!inst) return;
+   157→    const cur = inst.getItems();
+   158→    const idx = cur.findIndex((i) => i.id === id);
+   159→    if (idx === -1) return;
+   160→    const newIdx = idx + delta;
+   161→    if (newIdx < 0 || newIdx >= cur.length) return;
+   162→    const next = cur.slice();
+   163→    const [moved] = next.splice(idx, 1);
+   164→    next.splice(newIdx, 0, moved);
+   165→    inst.setItems(next);
+   166→  }, []);
+   167→
+   168→  // ---- Code generation ----
+   169→
+   170→  const jsCode = React.useMemo(() => generateJsCode(state, items), [state, items]);
+   171→  const htmlCode = React.useMemo(() => generateHtmlCode(), []);
+   172→  const cssCode = React.useMemo(() => generateCssCode(), []);
+   173→  const apiCode = React.useMemo(() => generateApiCode(), []);
+   174→
+   175→  const selectedLabel = selected.length > 0
+   176→    ? items.filter((i) => selected.includes(i.id)).map((i) => i.label).join(", ")
+   177→    : "(none)";
+   178→
+   179→  return (
+   180→    <div>
+   181→      {/* Page header */}
+   182→      <div className="border-b border-border bg-background">
+   183→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   184→          <Breadcrumbs />
+   185→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   186→            <div>
+   187→              <PageOverline>Components / Inputs</PageOverline>
+   188→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+   189→                {meta.name}
+   190→              </h1>
+   191→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">
+   192→                {meta.longDescription}
+   193→              </p>
+   194→            </div>
+   195→            <div className="flex flex-wrap items-center gap-2">
+   196→              {meta.tags.map((tag) => (
+   197→                <span
+   198→                  key={tag}
+   199→                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground"
+   200→                >
+   201→                  {tag}
+   202→                </span>
+   203→              ))}
+   204→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   205→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />
+   206→                {meta.status}
+   207→              </span>
+   208→            </div>
+   209→          </div>
+   210→        </div>
+   211→      </div>
+   212→
+   213→      {/* Playground workspace */}
+   214→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   215→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px] lg:items-start">
+   216→          {/* Live preview */}
+   217→          <section
+   218→            aria-label="Live preview"
+   219→            className="panel relative flex h-[600px] flex-col overflow-hidden"
+   220→          >
+   221→            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+   222→              <div className="flex items-center gap-2">
+   223→                <span className="h-2 w-2 rounded-full bg-brand-lemon animate-pulse" />
+   224→                <span className="eyebrow">Live preview</span>
+   225→              </div>
+   226→              <div className="flex items-center gap-1">
+   227→                <button
+   228→                  type="button"
+   229→                  onClick={reset}
+   230→                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   231→                >
+   232→                  <RotateCcw className="h-3 w-3" />
+   233→                  Reset
+   234→                </button>
+   235→              </div>
+   236→            </div>
+   237→            <div className="flex flex-1 min-h-0 items-center justify-center overflow-hidden bg-grid p-8">
+   238→              <ToggleGroupReact
+   239→                items={items}
+   240→                multiselect={state.multiselect}
+   241→                closable={state.closable}
+   242→                reorderable={state.reorderable}
+   243→                orientation={state.orientation}
+   244→                variant={state.variant}
+   245→                size={state.size}
+   246→                onChange={onChange}
+   247→                instanceRef={instanceRef}
+   248→              />
+   249→            </div>
+   250→            {/* Output section — selected IDs */}
+   251→            <div className="border-t border-border p-4">
+   252→              <div className="mb-3 flex items-center justify-between">
+   253→                <span className="eyebrow">Output</span>
+   254→                <span className="font-mono text-[11px] text-muted-foreground">
+   255→                  {selected.length} selected
+   256→                </span>
+   257→              </div>
+   258→              <div className="flex flex-col gap-2">
+   259→                <div className="flex flex-wrap items-center gap-2">
+   260→                  <CopyableValue
+   261→                    label="selected"
+   262→                    value={selected.length > 0 ? JSON.stringify(selected) : "[]"}
+   263→                  />
+   264→                  <CopyableValue label="labels" value={selectedLabel} />
+   265→                </div>
+   266→                <p className="text-[11px] text-muted-foreground/70">
+   267→                  Click a button to toggle its selection. {state.closable ? "Click the X to remove a button." : ""}{" "}
+   268→                  {state.reorderable ? "Drag a button to reorder." : ""}
+   269→                </p>
+   270→              </div>
+   271→            </div>
+   272→          </section>
+   273→
+   274→          {/* Property inspector */}
+   275→          <AgentSkillTabs
+   276→            agentPath="/docs/components/toggle-group-AGENT.md"
+   277→            skillPath="/docs/components/toggle-group-SKILL.md"
+   278→          >
+   279→              {/* Group properties section */}
+   280→              <section>
+   281→                <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   282→                  Group
+   283→                </h3>
+   284→                <div className="flex flex-col gap-4">
+   285→                  {/* Behavior toggles */}
+   286→                  <PropertyField label="Multiselect" hint="Allow multiple selections">
+   287→                    <Switch
+   288→                      checked={state.multiselect}
+   289→                      onChange={(v) => update("multiselect", v)}
+   290→                    />
+   291→                  </PropertyField>
+   292→                  <PropertyField label="Closable" hint="Show X button on each toggle">
+   293→                    <Switch
+   294→                      checked={state.closable}
+   295→                      onChange={(v) => update("closable", v)}
+   296→                    />
+   297→                  </PropertyField>
+   298→                  <PropertyField label="Reorderable" hint="Drag-to-reorder (or Arrow keys)">
+   299→                    <Switch
+   300→                      checked={state.reorderable}
+   301→                      onChange={(v) => update("reorderable", v)}
+   302→                    />
+   303→                  </PropertyField>
+   304→
+   305→                  {/* Orientation */}
+   306→                  <PropertyField label="Orientation" hint="Layout direction">
+   307→                    <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   308→                      {([
+   309→                        { value: "horizontal", label: "Horizontal", icon: ArrowLeftRight },
+   310→                        { value: "vertical", label: "Vertical", icon: ArrowUpDown },
+   311→                      ] as const).map((o) => {
+   312→                        const Icon = o.icon;
+   313→                        const active = state.orientation === o.value;
+   314→                        return (
+   315→                          <button
+   316→                            key={o.value}
+   317→                            type="button"
+   318→                            onClick={() => update("orientation", o.value)}
+   319→                            aria-pressed={active}
+   320→                            className={cn(
+   321→                              "flex items-center justify-center gap-2 rounded px-2 py-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   322→                              active
+   323→                                ? "bg-brand-purple-strong text-foreground"
+   324→                                : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   325→                            )}
+   326→                          >
+   327→                            <Icon className="h-3.5 w-3.5" />
+   328→                            {o.label}
+   329→                          </button>
+   330→                        );
+   331→                      })}
+   332→                    </div>
+   333→                  </PropertyField>
+   334→
+   335→                  {/* Variant */}
+   336→                  <PropertyField label="Variant" hint="Button visual style">
+   337→                    <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   338→                      {(["outline", "primary", "secondary"] as const).map((v) => {
+   339→                        const active = state.variant === v;
+   340→                        return (
+   341→                          <button
+   342→                            key={v}
+   343→                            type="button"
+   344→                            onClick={() => update("variant", v)}
+   345→                            aria-pressed={active}
+   346→                            className={cn(
+   347→                              "flex items-center justify-center rounded px-2 py-2 text-[11px] font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   348→                              active
+   349→                                ? "bg-brand-purple-strong text-foreground"
+   350→                                : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   351→                            )}
+   352→                          >
+   353→                            {v}
+   354→                          </button>
+   355→                        );
+   356→                      })}
+   357→                    </div>
+   358→                  </PropertyField>
+   359→
+   360→                  {/* Size */}
+   361→                  <PropertyField label="Size" hint="Button height">
+   362→                    <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   363→                      {(["sm", "md", "lg"] as const).map((s) => {
+   364→                        const active = state.size === s;
+   365→                        return (
+   366→                          <button
+   367→                            key={s}
+   368→                            type="button"
+   369→                            onClick={() => update("size", s)}
+   370→                            aria-pressed={active}
+   371→                            className={cn(
+   372→                              "flex items-center justify-center rounded px-2 py-2 text-[11px] font-medium uppercase transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   373→                              active
+   374→                                ? "bg-brand-purple-strong text-foreground"
+   375→                                : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   376→                            )}
+   377→                          >
+   378→                            {s}
+   379→                          </button>
+   380→                        );
+   381→                      })}
+   382→                    </div>
+   383→                  </PropertyField>
+   384→                </div>
+   385→              </section>
+   386→
+   387→              <div className="h-px bg-border" />
+   388→
+   389→              {/* Nested component properties — Buttons section (Figma/Godot style) */}
+   390→              <section>
+   391→                <div className="mb-3 flex items-center justify-between">
+   392→                  <h3 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   393→                    Buttons ({items.length})
+   394→                  </h3>
+   395→                  <button
+   396→                    type="button"
+   397→                    onClick={addItem}
+   398→                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-brand-lemon/40 bg-brand-lemon/10 px-2.5 text-[12px] font-medium text-brand-lemon transition-colors hover:bg-brand-lemon/20"
+   399→                  >
+   400→                    <Plus className="h-3 w-3" />
+   401→                    Add button
+   402→                  </button>
+   403→                </div>
+   404→
+   405→                <div className="flex flex-col gap-2">
+   406→                  {items.length === 0 && (
+   407→                    <div className="rounded-md border border-dashed border-border p-6 text-center">
+   408→                      <p className="text-[12px] text-muted-foreground">
+   409→                        No buttons. Click &quot;Add button&quot; to create one.
+   410→                      </p>
+   411→                    </div>
+   412→                  )}
+   413→                  {items.map((it, idx) => (
+   414→                    <ButtonItemEditor
+   415→                      key={it.id}
+   416→                      item={it}
+   417→                      index={idx}
+   418→                      total={items.length}
+   419→                      multiselect={state.multiselect}
+   420→                      iconOptions={ICON_OPTIONS}
+   421→                      onLabelChange={(label) => updateItem(it.id, { label })}
+   422→                      onIconChange={(icon) =>
+   423→                        updateItem(it.id, { icon: icon === "(none)" ? undefined : icon })
+   424→                      }
+   425→                      onSelectedToggle={() => toggleItemSelected(it.id)}
+   426→                      onMoveUp={() => moveItem(it.id, -1)}
+   427→                      onMoveDown={() => moveItem(it.id, 1)}
+   428→                      onRemove={() => removeItem(it.id)}
+   429→                    />
+   430→                  ))}
+   431→                </div>
+   432→              </section>
+   433→
+   434→              {/* Nested component: Button Style (CustomButton) */}
+   435→              <CollapsibleSection title="Button Style" icon={MousePointerClick}>
+   436→                <PropertyField label="Button variant" hint="Visual style of toggle buttons">
+   437→                  <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   438→                    {([
+   439→                      { value: "outline", label: "Outline" },
+   440→                      { value: "primary", label: "Primary" },
+   441→                      { value: "secondary", label: "Secondary" },
+   442→                    ] as const).map((v) => {
+   443→                      const active = state.variant === v.value;
+   444→                      return (
+   445→                        <button
+   446→                          key={v.value}
+   447→                          type="button"
+   448→                          onClick={() => update("variant", v.value)}
+   449→                          aria-pressed={active}
+   450→                          className={cn(
+   451→                            "rounded px-2 py-2 text-[11px] font-medium transition-colors",
+   452→                            active
+   453→                              ? "bg-brand-purple-strong text-foreground"
+   454→                              : "text-muted-foreground hover:text-foreground hover:bg-accent"
+   455→                          )}
+   456→                        >
+   457→                          {v.label}
+   458→                        </button>
+   459→                      );
+   460→                    })}
+   461→                  </div>
+   462→                </PropertyField>
+   463→                <PropertyField label="Button size" hint="Size of toggle buttons">
+   464→                  <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   465→                    {([
+   466→                      { value: "sm", label: "SM" },
+   467→                      { value: "md", label: "MD" },
+   468→                      { value: "lg", label: "LG" },
+   469→                    ] as const).map((v) => {
+   470→                      const active = state.size === v.value;
+   471→                      return (
+   472→                        <button
+   473→                          key={v.value}
+   474→                          type="button"
+   475→                          onClick={() => update("size", v.value)}
+   476→                          aria-pressed={active}
+   477→                          className={cn(
+   478→                            "rounded px-2 py-2 text-[11px] font-medium transition-colors",
+   479→                            active
+   480→                              ? "bg-brand-purple-strong text-foreground"
+   481→                              : "text-muted-foreground hover:text-foreground hover:bg-accent"
+   482→                          )}
+   483→                        >
+   484→                          {v.label}
+   485→                        </button>
+   486→                      );
+   487→                    })}
+   488→                  </div>
+   489→                </PropertyField>
+   490→              </CollapsibleSection>
+   491→          </AgentSkillTabs>
+   492→        </div>
+   493→
+   494→        {/* Code panel */}
+   495→        <section className="panel mt-6 overflow-hidden">
+   496→          <div className="flex items-center justify-between border-b border-border px-2">
+   497→            <div className="flex">
+   498→              {([["javascript","JavaScript"],["html","HTML"],["css","CSS"],["api","API"]] as const).map(([key, label]) => (
+   499→                <button
+   500→                  key={key}
+   501→                  type="button"
+   502→                  onClick={() => setActiveTab(key)}
+   503→                  className={cn(
+   504→                    "relative h-9 px-3 text-[12px] font-medium transition-colors focus-visible:outline-none",
+   505→                    activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+   506→                  )}
+   507→                >
+   508→                  {label}
+   509→                  {activeTab === key && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   510→                </button>
+   511→              ))}
+   512→            </div>
+   513→            <span className="pr-2 text-[11px] font-mono text-muted-foreground/70">
+   514→              Synchronized with live configuration
+   515→            </span>
+   516→          </div>
+   517→          <div className="p-4">
+   518→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   519→            {activeTab === "html" && <CodeBlock code={htmlCode} language="html" filename="index.html" />}
+   520→            {activeTab === "css" && <CodeBlock code={cssCode} language="css" filename="styles.css" />}
+   521→            {activeTab === "api" && <CodeBlock code={apiCode} language="typescript" filename="api.ts" />}
+   522→          </div>
+   523→        </section>
+   524→
+   525→        {/* Documentation */}
+   526→        <ComponentDocumentation />
+   527→      </div>
+   528→    </div>
+   529→  );
+   530→}
+   531→
+   532→// ---- Inspector primitives ----
+   533→
+   534→function PropertyField({
+   535→  label,
+   536→  hint,
+   537→  children,
+   538→}: {
+   539→  label: string;
+   540→  hint?: string;
+   541→  children: React.ReactNode;
+   542→}) {
+   543→  return (
+   544→    <div>
+   545→      <div className="mb-1.5 flex items-center justify-between">
+   546→        <label className="text-[12px] font-medium text-foreground">{label}</label>
+   547→      </div>
+   548→      {children}
+   549→      {hint && <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p>}
+   550→    </div>
+   551→  );
+   552→}
+   553→
+   554→function Switch({
+   555→  checked,
+   556→  onChange,
+   557→}: {
+   558→  checked: boolean;
+   559→  onChange: (v: boolean) => void;
+   560→}) {
+   561→  return (
+   562→    <button
+   563→      type="button"
+   564→      role="switch"
+   565→      aria-checked={checked}
+   566→      onClick={() => onChange(!checked)}
+   567→      className={cn(
+   568→        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   569→        checked
+   570→          ? "border-brand-lemon bg-brand-lemon"
+   571→          : "border-border bg-muted",
+   572→      )}
+   573→    >
+   574→      <span
+   575→        className={cn(
+   576→          "inline-block h-3.5 w-3.5 transform rounded-full bg-foreground transition-transform",
+   577→          checked ? "translate-x-[18px] bg-[#17151D]" : "translate-x-[2px]",
+   578→        )}
+   579→      />
+   580→    </button>
+   581→  );
+   582→}
+   583→
+   584→// ---- Nested component editor (Figma/Godot style) ----
+   585→
+   586→function ButtonItemEditor({
+   587→  item,
+   588→  index,
+   589→  total,
+   590→  multiselect,
+   591→  iconOptions,
+   592→  onLabelChange,
+   593→  onIconChange,
+   594→  onSelectedToggle,
+   595→  onMoveUp,
+   596→  onMoveDown,
+   597→  onRemove,
+   598→}: {
+   599→  item: ToggleButtonItem;
+   600→  index: number;
+   601→  total: number;
+   602→  multiselect: boolean;
+   603→  iconOptions: string[];
+   604→  onLabelChange: (label: string) => void;
+   605→  onIconChange: (icon: string) => void;
+   606→  onSelectedToggle: () => void;
+   607→  onMoveUp: () => void;
+   608→  onMoveDown: () => void;
+   609→  onRemove: () => void;
+   610→}) {
+   611→  const [expanded, setExpanded] = React.useState(true);
+   612→  const isSelected = !!item.selected;
+   613→
+   614→  return (
+   615→    <div className="rounded-md border border-border bg-muted/20">
+   616→      {/* Row 1: summary + collapse */}
+   617→      <div className="flex items-center gap-2 px-2 py-1.5">
+   618→        <button
+   619→          type="button"
+   620→          onClick={() => setExpanded((e) => !e)}
+   621→          className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   622→          aria-label={expanded ? "Collapse" : "Expand"}
+   623→        >
+   624→          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+   625→        </button>
+   626→        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-background font-mono text-[10px] text-muted-foreground">
+   627→          {index + 1}
+   628→        </span>
+   629→        <span className="flex-1 truncate font-mono text-[12px] text-foreground">
+   630→          {item.label || "(empty)"}
+   631→        </span>
+   632→        {isSelected && (
+   633→          <span className="inline-flex items-center gap-1 rounded border border-brand-lemon/40 bg-brand-lemon/10 px-1.5 py-0.5 text-[10px] font-mono text-brand-lemon">
+   634→            <Check className="h-2.5 w-2.5" />
+   635→            on
+   636→          </span>
+   637→        )}
+   638→        <button
+   639→          type="button"
+   640→          onClick={onRemove}
+   641→          title="Remove button"
+   642→          className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+   643→        >
+   644→          <Trash2 className="h-3.5 w-3.5" />
+   645→        </button>
+   646→      </div>
+   647→
+   648→      {/* Row 2: nested properties */}
+   649→      {expanded && (
+   650→        <div className="flex flex-col gap-2.5 border-t border-border/60 px-2 py-2.5">
+   651→          {/* Label */}
+   652→          <div>
+   653→            <label className="mb-1 block text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70">
+   654→              Label
+   655→            </label>
+   656→            <input
+   657→              type="text"
+   658→              value={item.label}
+   659→              onChange={(e) => onLabelChange(e.target.value)}
+   660→              placeholder="Button label"
+   661→              className="h-7 w-full rounded-md border border-border bg-background px-2 text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   662→            />
+   663→          </div>
+   664→
+   665→          {/* Icon */}
+   666→          <div>
+   667→            <label className="mb-1 block text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70">
+   668→              Icon
+   669→            </label>
+   670→            <select
+   671→              value={item.icon ?? "(none)"}
+   672→              onChange={(e) => onIconChange(e.target.value)}
+   673→              className="h-7 w-full rounded-md border border-border bg-background px-2 text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   674→            >
+   675→              {iconOptions.map((ic) => (
+   676→                <option key={ic} value={ic}>
+   677→                  {ic}
+   678→                </option>
+   679→              ))}
+   680→            </select>
+   681→          </div>
+   682→
+   683→          {/* Selected + reorder */}
+   684→          <div className="flex items-center justify-between gap-2">
+   685→            <label className="flex items-center gap-2 text-[12px] text-foreground">
+   686→              <input
+   687→                type="checkbox"
+   688→                checked={isSelected}
+   689→                onChange={onSelectedToggle}
+   690→                className="h-3.5 w-3.5 accent-brand-lemon"
+   691→              />
+   692→              Selected
+   693→            </label>
+   694→            <div className="flex items-center gap-1">
+   695→              <span className="mr-1 flex items-center text-[10px] font-mono text-muted-foreground/70">
+   696→                <GripVertical className="h-3 w-3" />
+   697→                order
+   698→              </span>
+   699→              <button
+   700→                type="button"
+   701→                onClick={onMoveUp}
+   702→                disabled={index === 0}
+   703→                title="Move up"
+   704→                className="inline-flex h-6 w-6 items-center justify-center rounded border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+   705→              >
+   706→                <ChevronUp className="h-3 w-3" />
+   707→              </button>
+   708→              <button
+   709→                type="button"
+   710→                onClick={onMoveDown}
+   711→                disabled={index === total - 1}
+   712→                title="Move down"
+   713→                className="inline-flex h-6 w-6 items-center justify-center rounded border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+   714→              >
+   715→                <ChevronDown className="h-3 w-3" />
+   716→              </button>
+   717→            </div>
+   718→          </div>
+   719→
+   720→          {/* ID (read-only) */}
+   721→          <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+   722→            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70">
+   723→              id
+   724→            </span>
+   725→            <code className="font-mono text-[10px] text-muted-foreground">{item.id}</code>
+   726→          </div>
+   727→          {!multiselect && isSelected && (
+   728→            <p className="text-[10px] text-muted-foreground/70">
+   729→              In single-select mode, only one button can be selected at a time.
+   730→            </p>
+   731→          )}
+   732→        </div>
+   733→      )}
+   734→    </div>
+   735→  );
+   736→}
+   737→
+   738→// ---- Code generators ----
+   739→
+   740→function generateJsCode(state: PlaygroundState, items: ToggleButtonItem[]): string {
+   741→  const itemsStr = items.length > 0
+   742→    ? items.map((i) => {
+   743→        const parts = [`id: "${i.id}"`, `label: "${i.label}"`];
+   744→        if (i.icon) parts.push(`icon: "${i.icon}"`);
+   745→        if (i.selected) parts.push(`selected: true`);
+   746→        return `  { ${parts.join(", ")} }`;
+   747→      }).join(",\n")
+   748→    : "  { id: \"a\", label: \"Bold\", icon: \"bold\", selected: true },\n  { id: \"b\", label: \"Italic\", icon: \"italic\" }";
+   749→  return `import { ToggleGroup } from "@workshop/toggle-group";
+   750→
+   751→const container = document.querySelector("#toggle-group");
+   752→
+   753→const group = new ToggleGroup(container, {
+   754→  items: [
+   755→${itemsStr}
+   756→  ],
+   757→  multiselect: ${state.multiselect},
+   758→  closable: ${state.closable},
+   759→  reorderable: ${state.reorderable},
+   760→  orientation: "${state.orientation}",
+   761→  variant: "${state.variant}",
+   762→  size: "${state.size}",
+   763→});
+   764→
+   765→group.on("change", ({ items, selected }) => {
+   766→  // Fires when selection, order, or item set changes
+   767→  console.log("selected:", selected);
+   768→});
+   769→
+   770→group.on("select", ({ selected, item }) => {
+   771→  // Fires when the user clicks a toggle
+   772→});
+   773→
+   774→group.on("reorder", ({ items }) => {
+   775→  // Fires after a drag-to-reorder
+   776→});
+   777→
+   778→group.on("close", ({ id, items }) => {
+   779→  // Fires when a button's X is clicked
+   780→});
+   781→
+   782→// Programmatic control
+   783→// group.addItem({ id: "new", label: "New", icon: "plus" });
+   784→// group.removeItem("a");
+   785→// group.setSelected(["b"]);
+   786→// group.setVariant("primary");
+   787→// group.destroy();`;
+   788→}
+   789→
+   790→function generateHtmlCode(): string {
+   791→  return `<!DOCTYPE html>
+   792→<html>
+   793→  <head><link rel="stylesheet" href="toggle-group.css" /></head>
+   794→  <body>
+   795→    <div id="toggle-group"></div>
+   796→    <script type="module" src="init.js"></script>
+   797→  </body>
+   798→</html>`;
+   799→}
+   800→
+   801→function generateCssCode(): string {
+   802→  return `/* The component ships its own scoped styles (.toggle-group-* prefix).
+   803→   Override the visual tokens below to customize appearance. */
+   804→
+   805→:root {
+   806→  /* Brand tokens used by the component */
+   807→  --brand-lemon: #D9FF66;
+   808→  --brand-lemon-hover: #C8F34F;
+   809→  --brand-purple-strong: #342348;
+   810→  --border: #383343;
+   811→  --accent: #342348;
+   812→  --foreground: #F4F1FF;
+   813→  --muted-foreground: #B8B2CA;
+   814→}
+   815→
+   816→/* Example: customize the focus ring color */
+   817→.toggle-group {
+   818→  --tg-focus-ring: rgba(217, 255, 102, 0.55);
+   819→}
+   820→
+   821→/* Example: override a specific variant's selected state */
+   822→.toggle-group__item--selected.toggle-group__item--outline {
+   823→  background: rgba(217, 255, 102, 0.14);
+   824→  border-color: var(--brand-lemon);
+   825→  color: var(--brand-lemon);
+   826→}`;
+   827→}
+   828→
+   829→function generateApiCode(): string {
+   830→  return `type ToggleGroupOrientation = "horizontal" | "vertical";
+   831→type ToggleGroupVariant = "primary" | "secondary" | "outline";
+   832→type ToggleGroupSize = "sm" | "md" | "lg";
+   833→
+   834→interface ToggleButtonItem {
+   835→  id: string;
+   836→  label: string;
+   837→  icon?: string;          // built-in name | data URI | raw SVG
+   838→  selected?: boolean;     // default false
+   839→}
+   840→
+   841→interface ToggleGroupOptions {
+   842→  items?: ToggleButtonItem[];
+   843→  multiselect?: boolean;          // default false
+   844→  closable?: boolean;             // default false
+   845→  reorderable?: boolean;          // default false
+   846→  orientation?: ToggleGroupOrientation; // default "horizontal"
+   847→  variant?: ToggleGroupVariant;   // default "outline"
+   848→  size?: ToggleGroupSize;         // default "md"
+   849→}
+   850→
+   851→class ToggleGroup {
+   852→  constructor(container: HTMLElement, options?: ToggleGroupOptions);
+   853→  getItems(): ToggleButtonItem[];
+   854→  setItems(items: ToggleButtonItem[]): void;
+   855→  addItem(item: ToggleButtonItem): void;
+   856→  removeItem(id: string): void;
+   857→  getSelected(): string[];
+   858→  setSelected(ids: string[]): void;
+   859→  setMultiselect(on: boolean): void;
+   860→  setClosable(on: boolean): void;
+   861→  setReorderable(on: boolean): void;
+   862→  setOrientation(orientation: ToggleGroupOrientation): void;
+   863→  setVariant(variant: ToggleGroupVariant): void;
+   864→  setSize(size: ToggleGroupSize): void;
+   865→  on(event: "change" | "reorder" | "close" | "select",
+   866→     handler: (data: any) => void): void;
+   867→  off(event: string, handler: Function): void;
+   868→  destroy(): void;
+   869→}
+   870→
+   871→// Events
+   872→//   "change"  — fires on selection, reorder, add, remove, or setItems
+   873→//   "select"  — fires when the user clicks a toggle (single or multi)
+   874→//   "reorder" — fires after a drag-to-reorder completes
+   875→//   "close"   — fires when a button's X is clicked (item is removed)
+   876→
+   877→// Interaction
+   878→//   - Click a button to toggle its selection
+   879→//   - Single-select: clicking selects and deselects others
+   880→//   - Multiselect: each button toggles independently
+   881→//   - Closable: click the X on a button to remove it
+   882→//   - Reorderable: drag a button to swap positions; Arrow keys also work
+   883→//   - Keyboard: Enter/Space toggles; Delete/Backspace closes (if closable)`;
+   884→}
+   885→
+   886→// ---- Documentation ----
+   887→
+   888→function ComponentDocumentation() {
+   889→  const meta = getComponent("toggle-group")!;
+   890→  return (
+   891→    <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_200px]">
+   892→      <div className="min-w-0 max-w-[760px]">
+   893→        <h2 className="text-2xl font-semibold tracking-tight">Documentation</h2>
+   894→        <p className="mt-2 text-sm text-muted-foreground">
+   895→          The Toggle Group is a framework-independent vanilla JavaScript component — no React or Next.js required.
+   896→        </p>
+   897→
+   898→        <section className="mt-8">
+   899→          <h3 className="text-lg font-semibold">Overview</h3>
+   900→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   901→            {meta.longDescription} Click a button to toggle its selection. Enable closable to show an embedded X button on each toggle. Enable reorderable to drag buttons to new positions, or use Arrow keys when focused.
+   902→          </p>
+   903→        </section>
+   904→
+   905→        <section className="mt-8">
+   906→          <h3 className="text-lg font-semibold">When to use it</h3>
+   907→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   908→            {meta.whenToUse.map((item) => (
+   909→              <li key={item} className="flex gap-2">
+   910→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   911→                {item}
+   912→              </li>
+   913→            ))}
+   914→          </ul>
+   915→        </section>
+   916→
+   917→        <section className="mt-8">
+   918→          <h3 className="text-lg font-semibold">When not to use it</h3>
+   919→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   920→            {meta.whenNotToUse.map((item) => (
+   921→              <li key={item} className="flex gap-2">
+   922→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
+   923→                {item}
+   924→              </li>
+   925→            ))}
+   926→          </ul>
+   927→        </section>
+   928→
+   929→        <section className="mt-8">
+   930→          <h3 className="text-lg font-semibold">Properties and defaults</h3>
+   931→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   932→            <table className="w-full text-left text-[13px]">
+   933→              <thead className="bg-muted/30">
+   934→                <tr>
+   935→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Property</th>
+   936→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Type</th>
+   937→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Default</th>
+   938→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Description</th>
+   939→                </tr>
+   940→              </thead>
+   941→              <tbody className="divide-y divide-border">
+   942→                {meta.properties.map((p) => (
+   943→                  <tr key={p.name}>
+   944→                    <td className="px-3 py-2 font-mono text-brand-lemon">{p.name}</td>
+   945→                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.type}</td>
+   946→                    <td className="px-3 py-2 font-mono text-foreground">{p.default}</td>
+   947→                    <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
+   948→                  </tr>
+   949→                ))}
+   950→              </tbody>
+   951→            </table>
+   952→          </div>
+   953→        </section>
+   954→
+   955→        <section className="mt-8">
+   956→          <h3 className="text-lg font-semibold">Methods</h3>
+   957→          <div className="mt-3 space-y-2">
+   958→            {meta.methods.map((m) => (
+   959→              <div key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   960→                <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   961→                <p className="mt-1 text-[13px] text-muted-foreground">{m.description}</p>
+   962→                {m.returns && (
+   963→                  <p className="mt-0.5 text-[11px] font-mono text-muted-foreground/70">
+   964→                    returns: {m.returns}
+   965→                  </p>
+   966→                )}
+   967→              </div>
+   968→            ))}
+   969→          </div>
+   970→        </section>
+   971→
+   972→        <section className="mt-8">
+   973→          <h3 className="text-lg font-semibold">Events</h3>
+   974→          <div className="mt-3 space-y-2">
+   975→            {meta.events.map((e) => (
+   976→              <div key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   977→                <div className="flex items-center gap-3">
+   978→                  <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   979→                  <code className="font-mono text-[11px] text-muted-foreground">{e.payload}</code>
+   980→                </div>
+   981→                <p className="mt-1 text-[13px] text-muted-foreground">{e.description}</p>
+   982→              </div>
+   983→            ))}
+   984→          </div>
+   985→        </section>
+   986→
+   987→        <section className="mt-8">
+   988→          <h3 className="text-lg font-semibold">Accessibility</h3>
+   989→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   990→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Each toggle is a focusable element with role=&quot;button&quot; and aria-pressed reflecting its selected state.</li>
+   991→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Enter and Space toggle the focused button.</li>
+   992→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />When reorderable, Arrow Left/Up and Arrow Right/Down move the focused button within the group.</li>
+   993→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />When closable, Delete and Backspace remove the focused button.</li>
+   994→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Close buttons are excluded from the tab order (tabindex=-1) to keep keyboard navigation on the toggles themselves.</li>
+   995→          </ul>
+   996→        </section>
+   997→
+   998→        <section className="mt-8">
+   999→          <h3 className="text-lg font-semibold">Icons</h3>
+  1000→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+  1001→            The <code className="font-mono text-brand-lemon">icon</code> field accepts a built-in icon name, a <code className="font-mono text-brand-lemon">data:</code> URI, or a raw SVG string. Built-in names include: bold, italic, underline, check, x, plus, star, circle, square, heart, bolt, dot, arrow-right, settings, folder, file, user, tag, eye, bell, search, home.
+  1002→          </p>
+  1003→        </section>
+  1004→      </div>
+  1005→
+  1006→      <aside className="hidden lg:block">
+  1007→        <div className="sticky top-20">
+  1008→          <span className="eyebrow mb-2 block">On this page</span>
+  1009→          <nav className="space-y-1 text-[12px]">
+  1010→            {["Overview", "When to use it", "When not to use it", "Properties and defaults", "Methods", "Events", "Accessibility", "Icons"].map((s) => (
+  1011→              <a
+  1012→                key={s}
+  1013→                href="#"
+  1014→                onClick={(e) => e.preventDefault()}
+  1015→                className="block rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+  1016→              >
+  1017→                {s}
+  1018→              </a>
+  1019→            ))}
+  1020→          </nav>
+  1021→        </div>
+  1022→      </aside>
+  1023→    </div>
+  1024→  );
+  1025→}
+  1026→

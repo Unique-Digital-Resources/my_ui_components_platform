@@ -1,0 +1,1483 @@
+     1→     1→/**
+     2→     2→ * AnimationTrackEditor — a timeline-based animation track editor (vanilla TS).
+     3→     3→ *
+     4→     4→ * Inspired by Godot's animation timeline + DCC tools. Supports two track types:
+     5→     5→ *   - **Keyframe tracks**: discrete keyframes with values and transition paths.
+     6→     6→ *   - **Clip tracks**: resizable boxes (for audio, image, video clips).
+     7→     7→ *
+     8→     8→ * Features:
+     9→     9→ *   - Ruler with tick marks + time labels (seconds)
+    10→    10→ *   - Playhead with scrubbing (click/drag ruler)
+    11→    11→ *   - Playback: play, pause, reverse, loop, speed control
+    12→    12→ *   - Zoom (pixels per second) + horizontal pan
+    13→    13→ *   - Keyframe drag (with snapping), selection, add/remove
+    14→    14→ *   - Clip drag + resize (both edges), selection, add/remove
+    15→    15→ *   - Track management: add/remove, visibility, lock, reorder
+    16→    16→ *   - Grouped tracks (by owner)
+    17→    17→ *   - Keyboard: Space (play/pause), Left/Right (step), Home/End
+    18→    18→ *   - Events for all changes
+    19→    19→ */
+    20→    20→
+    21→    21→// ---- Public types ----
+    22→    22→
+    23→    23→export type TrackType = "keyframe" | "clip";
+    24→    24→
+    25→    25→export interface Keyframe {
+    26→    26→  id: string;
+    27→    27→  time: number; // seconds
+    28→    28→  value: number;
+    29→    29→  /** Transition curve to the NEXT keyframe. */
+    30→    30→  transition?: "linear" | "ease" | "ease-in" | "ease-out" | "step" | "hold";
+    31→    31→  selected?: boolean;
+    32→    32→}
+    33→    33→
+    34→    34→export interface Clip {
+    35→    35→  id: string;
+    36→    36→  start: number; // seconds
+    37→    37→  end: number;   // seconds
+    38→    38→  label?: string;
+    39→    39→  color?: string;
+    40→    40→  selected?: boolean;
+    41→    41→}
+    42→    42→
+    43→    43→export interface Track {
+    44→    44→  id: string;
+    45→    45→  name: string;
+    46→    46→  type: TrackType;
+    47→    47→  owner?: string;
+    48→    48→  keyframes?: Keyframe[];
+    49→    49→  clips?: Clip[];
+    50→    50→  visible?: boolean;
+    51→    51→  locked?: boolean;
+    52→    52→  color?: string;
+    53→    53→}
+    54→    54→
+    55→    55→export interface AnimationTrackEditorOptions {
+    56→    56→  tracks?: Track[];
+    57→    57→  duration?: number;     // total timeline duration in seconds
+    58→    58→  pixelsPerSecond?: number; // zoom (px/s)
+    59→    59→  playhead?: number;     // current playhead position (seconds)
+    60→    60→  playing?: boolean;
+    61→    61→  loop?: boolean;
+    62→    62→  speed?: number;        // playback speed multiplier
+    63→    63→  rowHeight?: number;
+    64→    64→  snapInterval?: number; // seconds; 0 = no snap
+    65→    65→  showRuler?: boolean;
+    66→    66→  showToolbar?: boolean;
+    67→    67→  readOnly?: boolean;
+    68→    68→}
+    69→    69→
+    70→    70→export interface AnimationTrackEditorEventPayload {
+    71→    71→  type?: string;
+    72→    72→  trackId?: string;
+    73→    73→  keyframeId?: string;
+    74→    74→  clipId?: string;
+    75→    75→  time?: number;
+    76→    76→  oldTime?: number;
+    77→    77→  value?: number;
+    78→    78→  oldValue?: number;
+    79→    79→  playhead?: number;
+    80→    80→  playing?: boolean;
+    81→    81→  pixelsPerSecond?: number;
+    82→    82→  source?: "pointer" | "keyboard" | "programmatic" | "playback";
+    83→    83→  reason?: string;
+    84→    84→}
+    85→    85→
+    86→    86→export type AnimationTrackEditorHandler = (payload: AnimationTrackEditorEventPayload) => void;
+    87→    87→
+    88→    88→// ---- Constants ----
+    89→    89→
+    90→    90→const STYLE_ID = "animation-track-editor-styles";
+    91→    91→const DEFAULT_PPS = 100; // pixels per second
+    92→    92→const DEFAULT_DURATION = 10; // seconds
+    93→    93→const DEFAULT_ROW_HEIGHT = 36;
+    94→    94→
+    95→    95→// ---- Style injection ----
+    96→    96→
+    97→    97→function injectStyles(): void {
+    98→    98→  if (typeof document === "undefined") return;
+    99→    99→  if (document.getElementById(STYLE_ID)) return;
+   100→   100→  const el = document.createElement("style");
+   101→   101→  el.id = STYLE_ID;
+   102→   102→  el.textContent = `
+   103→   103→.ate-root {
+   104→   104→  --ate-bg: #151519;
+   105→   105→  --ate-surface: #1E1E24;
+   106→   106→  --ate-surface-2: #28282E;
+   107→   107→  --ate-surface-3: #34343C;
+   108→   108→  --ate-border: #3A3A42;
+   109→   109→  --ate-text: #F4F1FF;
+   110→   110→  --ate-muted: #888894;
+   111→   111→  --ate-accent: #D9FF66;
+   112→   112→  --ate-accent-dim: rgba(217,255,102,0.12);
+   113→   113→  --ate-danger: #FF5C5C;
+   114→   114→  --ate-warn: #FFD36B;
+   115→   115→  --ate-ok: #8FE3A5;
+   116→   116→  --ate-info: #7DB8E8;
+   117→   117→  --ate-kf: #FFD36B;
+   118→   118→  --ate-kf-selected: #D9FF66;
+   119→   119→  --ate-playhead: #FF5C5C;
+   120→   120→  --ate-radius: 6px;
+   121→   121→  font-family: inherit;
+   122→   122→  color: var(--ate-text);
+   123→   123→  background: var(--ate-bg);
+   124→   124→  border: 1px solid var(--ate-border);
+   125→   125→  border-radius: var(--ate-radius);
+   126→   126→  display: flex;
+   127→   127→  flex-direction: column;
+   128→   128→  height: 100%;
+   129→   129→  width: 100%;
+   130→   130→  overflow: hidden;
+   131→   131→}
+   132→   132→.ate-root * { box-sizing: border-box; }
+   133→   133→
+   134→   134→.ate-toolbar {
+   135→   135→  flex: 0 0 auto;
+   136→   136→  display: flex;
+   137→   137→  align-items: center;
+   138→   138→  gap: 6px;
+   139→   139→  padding: 6px 8px;
+   140→   140→  border-bottom: 1px solid var(--ate-border);
+   141→   141→  background: var(--ate-surface);
+   142→   142→  flex-wrap: wrap;
+   143→   143→}
+   144→   144→.ate-btn {
+   145→   145→  display: inline-flex;
+   146→   146→  align-items: center;
+   147→   147→  justify-content: center;
+   148→   148→  gap: 4px;
+   149→   149→  height: 24px;
+   150→   150→  padding: 0 6px;
+   151→   151→  border: 1px solid var(--ate-border);
+   152→   152→  border-radius: 4px;
+   153→   153→  background: var(--ate-surface-2);
+   154→   154→  color: var(--ate-muted);
+   155→   155→  font-size: 10px;
+   156→   156→  font-weight: 600;
+   157→   157→  cursor: pointer;
+   158→   158→  outline: none;
+   159→   159→  transition: color .12s, border-color .12s, background .12s;
+   160→   160→  white-space: nowrap;
+   161→   161→}
+   162→   162→.ate-btn:hover { color: var(--ate-text); border-color: var(--ate-accent); }
+   163→   163→.ate-btn:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ate-accent) 40%, transparent); }
+   164→   164→.ate-btn svg { width: 12px; height: 12px; }
+   165→   165→.ate-btn.ate-active { color: var(--ate-accent); border-color: var(--ate-accent); background: var(--ate-accent-dim); }
+   166→   166→.ate-btn.ate-play { color: var(--ate-ok); }
+   167→   167→.ate-sep { width: 1px; height: 20px; background: var(--ate-border); margin: 0 2px; }
+   168→   168→.ate-input {
+   169→   169→  height: 24px;
+   170→   170→  width: 50px;
+   171→   171→  padding: 0 4px;
+   172→   172→  border: 1px solid var(--ate-border);
+   173→   173→  border-radius: 4px;
+   174→   174→  background: var(--ate-surface-2);
+   175→   175→  color: var(--ate-text);
+   176→   176→  font-family: var(--font-mono, ui-monospace, monospace);
+   177→   177→  font-size: 10px;
+   178→   178→  text-align: center;
+   179→   179→  outline: none;
+   180→   180→}
+   181→   181→.ate-input:focus { border-color: var(--ate-accent); }
+   182→   182→.ate-label { font-size: 10px; color: var(--ate-muted); white-space: nowrap; }
+   183→   183→.ate-spacer { flex: 1 1 auto; }
+   184→   184→
+   185→   185→.ate-body {
+   186→   186→  flex: 1 1 auto;
+   187→   187→  min-height: 0;
+   188→   188→  display: flex;
+   189→   189→  overflow: hidden;
+   190→   190→}
+   191→   191→
+   192→   192→.ate-left {
+   193→   193→  flex: 0 0 auto;
+   194→   194→  width: 200px;
+   195→   195→  display: flex;
+   196→   196→  flex-direction: column;
+   197→   197→  border-right: 2px solid var(--ate-border);
+   198→   198→  background: var(--ate-surface);
+   199→   199→  overflow: hidden;
+   200→   200→}
+   201→   201→.ate-left-header {
+   202→   202→  flex: 0 0 auto;
+   203→   203→  height: 32px;
+   204→   204→  display: flex;
+   205→   205→  align-items: center;
+   206→   206→  padding: 0 8px;
+   207→   207→  border-bottom: 1px solid var(--ate-border);
+   208→   208→  font-size: 10px;
+   209→   209→  font-weight: 700;
+   210→   210→  text-transform: uppercase;
+   211→   211→  letter-spacing: 0.04em;
+   212→   212→  color: var(--ate-muted);
+   213→   213→}
+   214→   214→.ate-left-scroll {
+   215→   215→  flex: 1 1 auto;
+   216→   216→  overflow-y: auto;
+   217→   217→  overflow-x: hidden;
+   218→   218→  scrollbar-width: none;
+   219→   219→}
+   220→   220→.ate-left-scroll::-webkit-scrollbar { display: none; }
+   221→   221→.ate-track-label {
+   222→   222→  display: flex;
+   223→   223→  align-items: center;
+   224→   224→  gap: 4px;
+   225→   225→  padding: 0 6px;
+   226→   226→  border-bottom: 1px solid var(--ate-border);
+   227→   227→  font-size: 11px;
+   228→   228→  white-space: nowrap;
+   229→   229→  overflow: hidden;
+   230→   230→  transition: background .12s;
+   231→   231→}
+   232→   232→.ate-track-label:hover { background: var(--ate-surface-2); }
+   233→   233→.ate-track-label.ate-hidden { opacity: 0.4; }
+   234→   234→.ate-track-owner {
+   235→   235→  font-size: 9px;
+   236→   236→  color: var(--ate-muted);
+   237→   237→  font-weight: 600;
+   238→   238→  text-transform: uppercase;
+   239→   239→}
+   240→   240→.ate-track-name {
+   241→   241→  flex: 1 1 auto;
+   242→   242→  overflow: hidden;
+   243→   243→  text-overflow: ellipsis;
+   244→   244→  color: var(--ate-text);
+   245→   245→}
+   246→   246→.ate-track-btn {
+   247→   247→  display: inline-flex;
+   248→   248→  align-items: center;
+   249→   249→  justify-content: center;
+   250→   250→  width: 16px;
+   251→   251→  height: 16px;
+   252→   252→  border: none;
+   253→   253→  background: transparent;
+   254→   254→  color: var(--ate-muted);
+   255→   255→  cursor: pointer;
+   256→   256→  border-radius: 3px;
+   257→   257→  outline: none;
+   258→   258→  flex: 0 0 auto;
+   259→   259→  font-size: 9px;
+   260→   260→}
+   261→   261→.ate-track-btn:hover { color: var(--ate-text); background: var(--ate-surface-3); }
+   262→   262→.ate-track-btn.ate-on { color: var(--ate-ok); }
+   263→   263→.ate-track-btn.ate-lock-on { color: var(--ate-danger); }
+   264→   264→
+   265→   265→.ate-right {
+   266→   266→  flex: 1 1 auto;
+   267→   267→  min-width: 0;
+   268→   268→  display: flex;
+   269→   269→  flex-direction: column;
+   270→   270→  position: relative;
+   271→   271→  overflow: hidden;
+   272→   272→}
+   273→   273→.ate-ruler {
+   274→   274→  flex: 0 0 auto;
+   275→   275→  height: 32px;
+   276→   276→  position: relative;
+   277→   277→  background: var(--ate-surface-2);
+   278→   278→  border-bottom: 1px solid var(--ate-border);
+   279→   279→  cursor: pointer;
+   280→   280→  overflow: hidden;
+   281→   281→}
+   282→   282→.ate-ruler canvas {
+   283→   283→  display: block;
+   284→   284→  width: 100%;
+   285→   285→  height: 100%;
+   286→   286→}
+   287→   287→.ate-right-scroll {
+   288→   288→  flex: 1 1 auto;
+   289→   289→  overflow-y: auto;
+   290→   290→  overflow-x: hidden;
+   291→   291→  position: relative;
+   292→   292→  scrollbar-width: thin;
+   293→   293→}
+   294→   294→.ate-right-scroll::-webkit-scrollbar { width: 8px; }
+   295→   295→.ate-right-scroll::-webkit-scrollbar-track { background: transparent; }
+   296→   296→.ate-right-scroll::-webkit-scrollbar-thumb { background: var(--ate-border); border-radius: 999px; }
+   297→   297→
+   298→   298→.ate-track-area {
+   299→   299→  position: relative;
+   300→   300→  width: 100%;
+   301→   301→}
+   302→   302→.ate-track-row {
+   303→   303→  position: relative;
+   304→   304→  border-bottom: 1px solid var(--ate-border);
+   305→   305→  overflow: hidden;
+   306→   306→}
+   307→   307→.ate-track-row.ate-hidden { opacity: 0.3; }
+   308→   308→.ate-grid-line {
+   309→   309→  position: absolute;
+   310→   310→  top: 0;
+   311→   311→  bottom: 0;
+   312→   312→  width: 1px;
+   313→   313→  background: var(--ate-border);
+   314→   314→  opacity: 0.3;
+   315→   315→  pointer-events: none;
+   316→   316→}
+   317→   317→
+   318→   318→.ate-keyframe {
+   319→   319→  position: absolute;
+   320→   320→  top: 50%;
+   321→   321→  width: 12px;
+   322→   322→  height: 12px;
+   323→   323→  transform: translate(-50%, -50%) rotate(45deg);
+   324→   324→  background: var(--ate-kf);
+   325→   325→  border: 1px solid rgba(0,0,0,0.4);
+   326→   326→  cursor: grab;
+   327→   327→  z-index: 2;
+   328→   328→  transition: background .1s;
+   329→   329→}
+   330→   330→.ate-keyframe:hover { background: var(--ate-accent); }
+   331→   331→.ate-keyframe.ate-selected { background: var(--ate-kf-selected); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ate-accent) 40%, transparent); }
+   332→   332→.ate-keyframe.ate-dragging { cursor: grabbing; z-index: 10; }
+   333→   333→.ate-keyframe.ate-locked { cursor: not-allowed; opacity: 0.5; }
+   334→   334→
+   335→   335→.ate-clip {
+   336→   336→  position: absolute;
+   337→   337→  top: 4px;
+   338→   338→  bottom: 4px;
+   339→   339→  border-radius: 4px;
+   340→   340→  background: color-mix(in srgb, var(--ate-info) 30%, var(--ate-surface-3));
+   341→   341→  border: 1px solid var(--ate-info);
+   342→   342→  cursor: grab;
+   343→   343→  z-index: 2;
+   344→   344→  display: flex;
+   345→   345→  align-items: center;
+   346→   346→  padding: 0 6px;
+   347→   347→  font-size: 10px;
+   348→   348→  font-weight: 600;
+   349→   349→  color: var(--ate-text);
+   350→   350→  white-space: nowrap;
+   351→   351→  overflow: hidden;
+   352→   352→  text-overflow: ellipsis;
+   353→   353→  user-select: none;
+   354→   354→  transition: border-color .1s, box-shadow .1s;
+   355→   355→}
+   356→   356→.ate-clip:hover { border-color: var(--ate-accent); }
+   357→   357→.ate-clip.ate-selected { border-color: var(--ate-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ate-accent) 40%, transparent); }
+   358→   358→.ate-clip.ate-dragging { cursor: grabbing; z-index: 10; }
+   359→   359→.ate-clip.ate-locked { cursor: not-allowed; opacity: 0.5; }
+   360→   360→.ate-clip-resize {
+   361→   361→  position: absolute;
+   362→   362→  top: 0;
+   363→   363→  bottom: 0;
+   364→   364→  width: 6px;
+   365→   365→  cursor: ew-resize;
+   366→   366→  z-index: 3;
+   367→   367→}
+   368→   368→.ate-clip-resize-left { left: 0; }
+   369→   369→.ate-clip-resize-right { right: 0; }
+   370→   370→.ate-clip-resize:hover { background: var(--ate-accent); }
+   371→   371→
+   372→   372→.ate-playhead {
+   373→   373→  position: absolute;
+   374→   374→  top: 0;
+   375→   375→  bottom: 0;
+   376→   376→  width: 2px;
+   377→   377→  background: var(--ate-playhead);
+   378→   378→  z-index: 20;
+   379→   379→  pointer-events: none;
+   380→   380→}
+   381→   381→.ate-playhead-head {
+   382→   382→  position: absolute;
+   383→   383→  top: 0;
+   384→   384→  left: 50%;
+   385→   385→  transform: translateX(-50%);
+   386→   386→  height: 18px;
+   387→   387→  min-width: 40px;
+   388→   388→  padding: 0 4px;
+   389→   389→  background: var(--ate-playhead);
+   390→   390→  border-radius: 3px;
+   391→   391→  display: flex;
+   392→   392→  align-items: center;
+   393→   393→  justify-content: center;
+   394→   394→  font-family: var(--font-mono, ui-monospace, monospace);
+   395→   395→  font-size: 9px;
+   396→   396→  font-weight: 700;
+   397→   397→  color: #fff;
+   398→   398→  white-space: nowrap;
+   399→   399→}
+   400→   400→
+   401→   401→.ate-playhead-overlay {
+   402→   402→  position: absolute;
+   403→   403→  top: 0;
+   404→   404→  bottom: 0;
+   405→   405→  width: 2px;
+   406→   406→  background: var(--ate-playhead);
+   407→   407→  z-index: 20;
+   408→   408→  pointer-events: none;
+   409→   409→}
+   410→   410→
+   411→   411→.ate-empty {
+   412→   412→  display: flex;
+   413→   413→  align-items: center;
+   414→   414→  justify-content: center;
+   415→   415→  height: 100%;
+   416→   416→  min-height: 80px;
+   417→   417→  color: var(--ate-muted);
+   418→   418→  font-size: 12px;
+   419→   419→  font-style: italic;
+   420→   420→}
+   421→   421→
+   422→   422→@media (prefers-reduced-motion: reduce) {
+   423→   423→  .ate-keyframe, .ate-clip { transition: none; }
+   424→   424→}
+   425→   425→`;
+   426→   426→  document.head.appendChild(el);
+   427→   427→}
+   428→   428→
+   429→   429→// ---- Icons ----
+   430→   430→
+   431→   431→const ICON_PLAY = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 3l9 5-9 5z"/></svg>`;
+   432→   432→const ICON_PAUSE = `<svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="3" width="3" height="10"/><rect x="9" y="3" width="3" height="10"/></svg>`;
+   433→   433→const ICON_STOP = `<svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="4" width="8" height="8"/></svg>`;
+   434→   434→const ICON_PREV = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M11 3L5 8l6 5z"/><rect x="3" y="3" width="1.5" height="10"/></svg>`;
+   435→   435→const ICON_NEXT = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l6 5-6 5z"/><rect x="11.5" y="3" width="1.5" height="10"/></svg>`;
+   436→   436→const ICON_REWIND = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M11 4L6 8l5 4M7 4L2 8l5 4"/></svg>`;
+   437→   437→const ICON_FORWARD = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 4l5 4-5 4M9 4l5 4-5 4"/></svg>`;
+   438→   438→const ICON_LOOP = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h8a2 2 0 0 1 2 2v1M3 6l2-2M3 6l2 2M13 10H5a2 2 0 0 1-2-2V7M13 10l-2-2M13 10l-2 2"/></svg>`;
+   439→   439→const ICON_PLUS = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>`;
+   440→   440→const ICON_TRASH = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h10M6.5 4V2.5h3V4M5 4l.7 9h4.6L11 4"/></svg>`;
+   441→   441→const ICON_EYE = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/></svg>`;
+   442→   442→const ICON_LOCK = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="7" width="10" height="7" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>`;
+   443→   443→const ICON_KF = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 2L14 8l-6 6-6-6z"/></svg>`;
+   444→   444→const ICON_CLIP = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="4" width="12" height="8" rx="1"/><path d="M6 4v8M10 4v8"/></svg>`;
+   445→   445→
+   446→   446→// ---- Utilities ----
+   447→   447→
+   448→   448→function uid(prefix: string): string {
+   449→   449→  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+   450→   450→}
+   451→   451→
+   452→   452→function clamp(n: number, min: number, max: number): number {
+   453→   453→  return Math.max(min, Math.min(max, n));
+   454→   454→}
+   455→   455→
+   456→   456→function snapTime(t: number, snap: number): number {
+   457→   457→  if (!snap || snap <= 0) return t;
+   458→   458→  return Math.round(t / snap) * snap;
+   459→   459→}
+   460→   460→
+   461→   461→// ---- Component ----
+   462→   462→
+   463→   463→export class AnimationTrackEditor {
+   464→   464→  private container: HTMLElement;
+   465→   465→  private root!: HTMLDivElement;
+   466→   466→  private rulerCanvas!: HTMLCanvasElement;
+   467→   467→  private rightScroll!: HTMLDivElement;
+   468→   468→  private leftScroll!: HTMLDivElement;
+   469→   469→  private trackArea!: HTMLDivElement;
+   470→   470→  private playheadEl!: HTMLDivElement;
+   471→   471→  private playheadOverlay!: HTMLDivElement;
+   472→   472→  private opts: Required<AnimationTrackEditorOptions>;
+   473→   473→  private tracks: Track[];
+   474→   474→  private listeners = new Map<string, Set<AnimationTrackEditorHandler>>();
+   475→   475→  private _destroyed = false;
+   476→   476→  private trackRowEls = new Map<string, HTMLElement>();
+   477→   477→  private resizeObserver: ResizeObserver | null = null;
+   478→   478→  private playbackRAF: number | null = null;
+   479→   479→  private lastFrameTime = 0;
+   480→   480→
+   481→   481→  // Drag state
+   482→   482→  private dragMode: "none" | "keyframe" | "clip-move" | "clip-resize-left" | "clip-resize-right" | "scrub" = "none";
+   483→   483→  private dragTrackId: string | null = null;
+   484→   484→  private dragItemId: string | null = null;
+   485→   485→  private dragStartX = 0;
+   486→   486→  private dragOrigTime = 0;
+   487→   487→  private dragOrigStart = 0;
+   488→   488→  private dragOrigEnd = 0;
+   489→   489→
+   490→   490→  constructor(container: HTMLElement, options: AnimationTrackEditorOptions = {}) {
+   491→   491→    this.container = container;
+   492→   492→    injectStyles();
+   493→   493→    this.opts = {
+   494→   494→      tracks: options.tracks ?? [],
+   495→   495→      duration: options.duration ?? DEFAULT_DURATION,
+   496→   496→      pixelsPerSecond: options.pixelsPerSecond ?? DEFAULT_PPS,
+   497→   497→      playhead: options.playhead ?? 0,
+   498→   498→      playing: options.playing ?? false,
+   499→   499→      loop: options.loop ?? false,
+   500→   500→      speed: options.speed ?? 1,
+   501→   501→      rowHeight: options.rowHeight ?? DEFAULT_ROW_HEIGHT,
+   502→   502→      snapInterval: options.snapInterval ?? 0,
+   503→   503→      showRuler: options.showRuler ?? true,
+   504→   504→      showToolbar: options.showToolbar ?? true,
+   505→   505→      readOnly: options.readOnly ?? false,
+   506→   506→    };
+   507→   507→    this.tracks = (this.opts.tracks as Track[]).map(t => ({ ...t }));
+   508→   508→    this.render();
+   509→   509→
+   510→   510→    // Sync scrolls
+   511→   511→    this.rightScroll.addEventListener("scroll", () => {
+   512→   512→      this.leftScroll.scrollTop = this.rightScroll.scrollTop;
+   513→   513→    });
+   514→   514→
+   515→   515→    // Resize observer
+   516→   516→    this.resizeObserver = new ResizeObserver(() => this.drawRuler());
+   517→   517→    this.resizeObserver.observe(this.root);
+   518→   518→
+   519→   519→    // Start playback if needed
+   520→   520→    if (this.opts.playing) this.startPlayback();
+   521→   521→  }
+   522→   522→
+   523→   523→  // ---- Rendering ----
+   524→   524→
+   525→   525→  private render(): void {
+   526→   526→    if (this._destroyed) return;
+   527→   527→    this.trackRowEls.clear();
+   528→   528→
+   529→   529→    const root = document.createElement("div");
+   530→   530→    root.className = "ate-root";
+   531→   531→    root.tabIndex = 0;
+   532→   532→
+   533→   533→    if (this.opts.showToolbar) root.appendChild(this.renderToolbar());
+   534→   534→
+   535→   535→    const body = document.createElement("div");
+   536→   536→    body.className = "ate-body";
+   537→   537→
+   538→   538→    // Left panel
+   539→   539→    const left = document.createElement("div");
+   540→   540→    left.className = "ate-left";
+   541→   541→    const leftHeader = document.createElement("div");
+   542→   542→    leftHeader.className = "ate-left-header";
+   543→   543→    leftHeader.textContent = "Tracks";
+   544→   544→    left.appendChild(leftHeader);
+   545→   545→
+   546→   546→    const leftScroll = document.createElement("div");
+   547→   547→    leftScroll.className = "ate-left-scroll";
+   548→   548→    for (const track of this.tracks) {
+   549→   549→      leftScroll.appendChild(this.renderTrackLabel(track));
+   550→   550→    }
+   551→   551→    left.appendChild(leftScroll);
+   552→   552→    this.leftScroll = leftScroll;
+   553→   553→
+   554→   554→    // Right panel
+   555→   555→    const right = document.createElement("div");
+   556→   556→    right.className = "ate-right";
+   557→   557→
+   558→   558→    // Ruler
+   559→   559→    if (this.opts.showRuler) {
+   560→   560→      const ruler = document.createElement("div");
+   561→   561→      ruler.className = "ate-ruler";
+   562→   562→      const canvas = document.createElement("canvas");
+   563→   563→      ruler.appendChild(canvas);
+   564→   564→      ruler.addEventListener("pointerdown", (e) => this.onRulerPointerDown(e));
+   565→   565→      this.rulerCanvas = canvas;
+   566→   566→      right.appendChild(ruler);
+   567→   567→    }
+   568→   568→
+   569→   569→    // Scroll area for tracks
+   570→   570→    const rightScroll = document.createElement("div");
+   571→   571→    rightScroll.className = "ate-right-scroll";
+   572→   572→    const trackArea = document.createElement("div");
+   573→   573→    trackArea.className = "ate-track-area";
+   574→   574→
+   575→   575→    for (const track of this.tracks) {
+   576→   576→      trackArea.appendChild(this.renderTrackRow(track));
+   577→   577→    }
+   578→   578→    rightScroll.appendChild(trackArea);
+   579→   579→    this.rightScroll = rightScroll;
+   580→   580→    this.trackArea = trackArea;
+   581→   581→    right.appendChild(rightScroll);
+   582→   582→
+   583→   583→    // Playhead overlay (spans ruler + tracks)
+   584→   584→    const playheadOverlay = document.createElement("div");
+   585→   585→    playheadOverlay.className = "ate-playhead-overlay";
+   586→   586→    playheadOverlay.style.display = "none"; // shown after layout
+   587→   587→    right.appendChild(playheadOverlay);
+   588→   588→    this.playheadOverlay = playheadOverlay;
+   589→   589→
+   590→   590→    body.appendChild(left);
+   591→   591→    body.appendChild(right);
+   592→   592→    root.appendChild(body);
+   593→   593→    this.container.innerHTML = "";
+   594→   594→    this.container.appendChild(root);
+   595→   595→    this.root = root;
+   596→   596→
+   597→   597→    // Draw ruler + position playhead
+   598→   598→    requestAnimationFrame(() => {
+   599→   599→      if (!this._destroyed) {
+   600→   600→        this.drawRuler();
+   601→   601→        this.drawGridLines();
+   602→   602→        this.updatePlayhead();
+   603→   603→      }
+   604→   604→    });
+   605→   605→
+   606→   606→    // Keyboard
+   607→   607→    root.addEventListener("keydown", (e) => this.onKeyDown(e));
+   608→   608→  }
+   609→   609→
+   610→   610→  private renderToolbar(): HTMLElement {
+   611→   611→    const tb = document.createElement("div");
+   612→   612→    tb.className = "ate-toolbar";
+   613→   613→
+   614→   614→    // Transport
+   615→   615→    const stopBtn = this.toolBtn(ICON_STOP, "Stop", () => this.stop());
+   616→   616→    tb.appendChild(stopBtn);
+   617→   617→    const prevBtn = this.toolBtn(ICON_PREV, "Prev key", () => this.prevKey());
+   618→   618→    tb.appendChild(prevBtn);
+   619→   619→    const playBtn = this.toolBtn(this.opts.playing ? ICON_PAUSE : ICON_PLAY, "Play/Pause", () => this.togglePlay());
+   620→   620→    playBtn.classList.add("ate-play");
+   621→   621→    if (this.opts.playing) playBtn.classList.add("ate-active");
+   622→   622→    playBtn.setAttribute("data-play-btn", "true");
+   623→   623→    tb.appendChild(playBtn);
+   624→   624→    const nextBtn = this.toolBtn(ICON_NEXT, "Next key", () => this.nextKey());
+   625→   625→    tb.appendChild(nextBtn);
+   626→   626→
+   627→   627→    tb.appendChild(this.sep());
+   628→   628→
+   629→   629→    // Loop
+   630→   630→    const loopBtn = this.toolBtn(ICON_LOOP, "Loop", () => this.toggleLoop());
+   631→   631→    if (this.opts.loop) loopBtn.classList.add("ate-active");
+   632→   632→    loopBtn.setAttribute("data-loop-btn", "true");
+   633→   633→    tb.appendChild(loopBtn);
+   634→   634→
+   635→   635→    // Speed
+   636→   636→    const speedLabel = document.createElement("span");
+   637→   637→    speedLabel.className = "ate-label";
+   638→   638→    speedLabel.textContent = "Speed:";
+   639→   639→    tb.appendChild(speedLabel);
+   640→   640→    const speedInput = document.createElement("input");
+   641→   641→    speedInput.type = "number";
+   642→   642→    speedInput.className = "ate-input";
+   643→   643→    speedInput.value = String(this.opts.speed);
+   644→   644→    speedInput.step = "0.1";
+   645→   645→    speedInput.min = "0.1";
+   646→   646→    speedInput.max = "10";
+   647→   647→    speedInput.style.width = "40px";
+   648→   648→    speedInput.addEventListener("change", () => {
+   649→   649→      this.opts.speed = clamp(Number(speedInput.value) || 1, 0.1, 10);
+   650→   650→      speedInput.value = String(this.opts.speed);
+   651→   651→    });
+   652→   652→    tb.appendChild(speedInput);
+   653→   653→
+   654→   654→    tb.appendChild(this.sep());
+   655→   655→
+   656→   656→    // Duration
+   657→   657→    const durLabel = document.createElement("span");
+   658→   658→    durLabel.className = "ate-label";
+   659→   659→    durLabel.textContent = "End:";
+   660→   660→    tb.appendChild(durLabel);
+   661→   661→    const durInput = document.createElement("input");
+   662→   662→    durInput.type = "number";
+   663→   663→    durInput.className = "ate-input";
+   664→   664→    durInput.value = String(this.opts.duration);
+   665→   665→    durInput.step = "0.5";
+   666→   666→    durInput.min = "1";
+   667→   667→    durInput.style.width = "50px";
+   668→   668→    durInput.addEventListener("change", () => {
+   669→   669→      this.opts.duration = Math.max(1, Number(durInput.value) || DEFAULT_DURATION);
+   670→   670→      durInput.value = String(this.opts.duration);
+   671→   671→      this.drawRuler();
+   672→   672→      this.drawGridLines();
+   673→   673→      this.updatePlayhead();
+   674→   674→    });
+   675→   675→    tb.appendChild(durInput);
+   676→   676→
+   677→   677→    tb.appendChild(this.sep());
+   678→   678→
+   679→   679→    // Zoom
+   680→   680→    const zoomLabel = document.createElement("span");
+   681→   681→    zoomLabel.className = "ate-label";
+   682→   682→    zoomLabel.textContent = "Zoom:";
+   683→   683→    tb.appendChild(zoomLabel);
+   684→   684→    const zoomSlider = document.createElement("input");
+   685→   685→    zoomSlider.type = "range";
+   686→   686→    zoomSlider.min = "20";
+   687→   687→    zoomSlider.max = "400";
+   688→   688→    zoomSlider.step = "10";
+   689→   689→    zoomSlider.value = String(this.opts.pixelsPerSecond);
+   690→   690→    zoomSlider.style.width = "80px";
+   691→   691→    zoomSlider.style.height = "20px";
+   692→   692→    zoomSlider.style.accentColor = "var(--ate-accent)";
+   693→   693→    zoomSlider.addEventListener("input", () => {
+   694→   694→      this.setZoom(Number(zoomSlider.value), "pointer");
+   695→   695→    });
+   696→   696→    tb.appendChild(zoomSlider);
+   697→   697→
+   698→   698→    tb.appendChild(this.spacer());
+   699→   699→
+   700→   700→    // Add track buttons
+   701→   701→    const addKfBtn = this.toolBtn(ICON_KF, "Add keyframe track", () => this.addTrack("keyframe"));
+   702→   702→    tb.appendChild(addKfBtn);
+   703→   703→    const addClipBtn = this.toolBtn(ICON_CLIP, "Add clip track", () => this.addTrack("clip"));
+   704→   704→    tb.appendChild(addClipBtn);
+   705→   705→
+   706→   706→    // Info
+   707→   707→    const info = document.createElement("span");
+   708→   708→    info.className = "ate-label";
+   709→   709→    info.style.fontFamily = "var(--font-mono, ui-monospace, monospace)";
+   710→   710→    info.textContent = `${this.opts.playhead.toFixed(2)}s / ${this.opts.duration.toFixed(1)}s`;
+   711→   711→    info.setAttribute("data-time-info", "true");
+   712→   712→    tb.appendChild(info);
+   713→   713→
+   714→   714→    return tb;
+   715→   715→  }
+   716→   716→
+   717→   717→  private toolBtn(icon: string, label: string, onClick: () => void): HTMLButtonElement {
+   718→   718→    const btn = document.createElement("button");
+   719→   719→    btn.type = "button";
+   720→   720→    btn.className = "ate-btn";
+   721→   721→    btn.innerHTML = icon;
+   722→   722→    btn.setAttribute("aria-label", label);
+   723→   723→    btn.setAttribute("title", label);
+   724→   724→    btn.addEventListener("click", onClick);
+   725→   725→    return btn;
+   726→   726→  }
+   727→   727→  private sep(): HTMLElement {
+   728→   728→    const s = document.createElement("div"); s.className = "ate-sep"; return s;
+   729→   729→  }
+   730→   730→  private spacer(): HTMLElement {
+   731→   731→    const s = document.createElement("div"); s.className = "ate-spacer"; return s;
+   732→   732→  }
+   733→   733→
+   734→   734→  private renderTrackLabel(track: Track): HTMLElement {
+   735→   735→    const el = document.createElement("div");
+   736→   736→    el.className = "ate-track-label";
+   737→   737→    el.style.height = `${this.opts.rowHeight}px`;
+   738→   738→    if (track.visible === false) el.classList.add("ate-hidden");
+   739→   739→    el.setAttribute("data-track-id", track.id);
+   740→   740→
+   741→   741→    if (track.owner) {
+   742→   742→      const owner = document.createElement("span");
+   743→   743→      owner.className = "ate-track-owner";
+   744→   744→      owner.textContent = track.owner;
+   745→   745→      el.appendChild(owner);
+   746→   746→    }
+   747→   747→
+   748→   748→    const name = document.createElement("span");
+   749→   749→    name.className = "ate-track-name";
+   750→   750→    name.textContent = track.name;
+   751→   751→    if (track.color) name.style.color = track.color;
+   752→   752→    el.appendChild(name);
+   753→   753→
+   754→   754→    // Visibility toggle
+   755→   755→    const visBtn = document.createElement("button");
+   756→   756→    visBtn.type = "button";
+   757→   757→    visBtn.className = "ate-track-btn";
+   758→   758→    visBtn.innerHTML = ICON_EYE;
+   759→   759→    visBtn.setAttribute("aria-label", "Toggle visibility");
+   760→   760→    if (track.visible !== false) visBtn.classList.add("ate-on");
+   761→   761→    visBtn.addEventListener("click", () => this.toggleTrackVisible(track.id));
+   762→   762→    el.appendChild(visBtn);
+   763→   763→
+   764→   764→    // Lock toggle
+   765→   765→    const lockBtn = document.createElement("button");
+   766→   766→    lockBtn.type = "button";
+   767→   767→    lockBtn.className = "ate-track-btn";
+   768→   768→    lockBtn.innerHTML = ICON_LOCK;
+   769→   769→    lockBtn.setAttribute("aria-label", "Toggle lock");
+   770→   770→    if (track.locked) lockBtn.classList.add("ate-lock-on");
+   771→   771→    lockBtn.addEventListener("click", () => this.toggleTrackLock(track.id));
+   772→   772→    el.appendChild(lockBtn);
+   773→   773→
+   774→   774→    // Remove
+   775→   775→    const rmBtn = document.createElement("button");
+   776→   776→    rmBtn.type = "button";
+   777→   777→    rmBtn.className = "ate-track-btn";
+   778→   778→    rmBtn.innerHTML = ICON_TRASH;
+   779→   779→    rmBtn.setAttribute("aria-label", "Remove track");
+   780→   780→    rmBtn.addEventListener("click", () => this.removeTrack(track.id));
+   781→   781→    el.appendChild(rmBtn);
+   782→   782→
+   783→   783→    return el;
+   784→   784→  }
+   785→   785→
+   786→   786→  private renderTrackRow(track: Track): HTMLElement {
+   787→   787→    const el = document.createElement("div");
+   788→   788→    el.className = "ate-track-row";
+   789→   789→    el.style.height = `${this.opts.rowHeight}px`;
+   790→   790→    if (track.visible === false) el.classList.add("ate-hidden");
+   791→   791→    el.setAttribute("data-track-id", track.id);
+   792→   792→
+   793→   793→    // Keyframes
+   794→   794→    if (track.type === "keyframe" && track.keyframes) {
+   795→   795→      for (const kf of track.keyframes) {
+   796→   796→        el.appendChild(this.renderKeyframe(track, kf));
+   797→   797→      }
+   798→   798→    }
+   799→   799→
+   800→   800→    // Clips
+   801→   801→    if (track.type === "clip" && track.clips) {
+   802→   802→      for (const clip of track.clips) {
+   803→   803→        el.appendChild(this.renderClip(track, clip));
+   804→   804→      }
+   805→   805→    }
+   806→   806→
+   807→   807→    this.trackRowEls.set(track.id, el);
+   808→   808→    return el;
+   809→   809→  }
+   810→   810→
+   811→   811→  private renderKeyframe(track: Track, kf: Keyframe): HTMLElement {
+   812→   812→    const el = document.createElement("div");
+   813→   813→    el.className = "ate-keyframe";
+   814→   814→    if (kf.selected) el.classList.add("ate-selected");
+   815→   815→    if (track.locked) el.classList.add("ate-locked");
+   816→   816→    el.setAttribute("data-kf-id", kf.id);
+   817→   817→    el.setAttribute("data-track-id", track.id);
+   818→   818→    el.style.left = `${kf.time * this.opts.pixelsPerSecond}px`;
+   819→   819→
+   820→   820→    if (!track.locked && !this.opts.readOnly) {
+   821→   821→      el.addEventListener("pointerdown", (e) => this.onKeyframePointerDown(e, track.id, kf.id));
+   822→   822→      el.addEventListener("click", (e) => {
+   823→   823→        e.stopPropagation();
+   824→   824→        this.selectKeyframe(track.id, kf.id, e.shiftKey);
+   825→   825→      });
+   826→   826→    }
+   827→   827→    return el;
+   828→   828→  }
+   829→   829→
+   830→   830→  private renderClip(track: Track, clip: Clip): HTMLElement {
+   831→   831→    const el = document.createElement("div");
+   832→   832→    el.className = "ate-clip";
+   833→   833→    if (clip.selected) el.classList.add("ate-selected");
+   834→   834→    if (track.locked) el.classList.add("ate-locked");
+   835→   835→    el.setAttribute("data-clip-id", clip.id);
+   836→   836→    el.setAttribute("data-track-id", track.id);
+   837→   837→    el.style.left = `${clip.start * this.opts.pixelsPerSecond}px`;
+   838→   838→    el.style.width = `${(clip.end - clip.start) * this.opts.pixelsPerSecond}px`;
+   839→   839→    if (clip.color) { el.style.background = `color-mix(in srgb, ${clip.color} 30%, var(--ate-surface-3))`; el.style.borderColor = clip.color; }
+   840→   840→    if (clip.label) el.textContent = clip.label;
+   841→   841→
+   842→   842→    if (!track.locked && !this.opts.readOnly) {
+   843→   843→      el.addEventListener("pointerdown", (e) => this.onClipPointerDown(e, track.id, clip.id, "move"));
+   844→   844→      el.addEventListener("click", (e) => {
+   845→   845→        e.stopPropagation();
+   846→   846→        this.selectClip(track.id, clip.id, e.shiftKey);
+   847→   847→      });
+   848→   848→
+   849→   849→      // Resize handles
+   850→   850→      const leftHandle = document.createElement("div");
+   851→   851→      leftHandle.className = "ate-clip-resize ate-clip-resize-left";
+   852→   852→      leftHandle.addEventListener("pointerdown", (e) => { e.stopPropagation(); this.onClipPointerDown(e, track.id, clip.id, "resize-left"); });
+   853→   853→      el.appendChild(leftHandle);
+   854→   854→
+   855→   855→      const rightHandle = document.createElement("div");
+   856→   856→      rightHandle.className = "ate-clip-resize ate-clip-resize-right";
+   857→   857→      rightHandle.addEventListener("pointerdown", (e) => { e.stopPropagation(); this.onClipPointerDown(e, track.id, clip.id, "resize-right"); });
+   858→   858→      el.appendChild(rightHandle);
+   859→   859→    }
+   860→   860→    return el;
+   861→   861→  }
+   862→   862→
+   863→   863→  // ---- Ruler drawing ----
+   864→   864→
+   865→   865→  private drawRuler(): void {
+   866→   866→    if (!this.rulerCanvas) return;
+   867→   867→    const canvas = this.rulerCanvas;
+   868→   868→    const rect = canvas.getBoundingClientRect();
+   869→   869→    const dpr = window.devicePixelRatio || 1;
+   870→   870→    canvas.width = rect.width * dpr;
+   871→   871→    canvas.height = rect.height * dpr;
+   872→   872→    const ctx = canvas.getContext("2d")!;
+   873→   873→    ctx.scale(dpr, dpr);
+   874→   874→
+   875→   875→    const w = rect.width;
+   876→   876→    const h = rect.height;
+   877→   877→    const pps = this.opts.pixelsPerSecond;
+   878→   878→    const duration = this.opts.duration;
+   879→   879→
+   880→   880→    // Background
+   881→   881→    ctx.fillStyle = "#28282E";
+   882→   882→    ctx.fillRect(0, 0, w, h);
+   883→   883→
+   884→   884→    // Determine tick interval (aim for ~60px between ticks)
+   885→   885→    const targetSpacing = 60;
+   886→   886→    const rawInterval = targetSpacing / pps;
+   887→   887→    // Round to nice numbers: 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60
+   888→   888→    const niceIntervals = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60];
+   889→   889→    let interval = niceIntervals[0];
+   890→   890→    for (const ni of niceIntervals) {
+   891→   891→      if (ni >= rawInterval) { interval = ni; break; }
+   892→   892→      interval = ni;
+   893→   893→    }
+   894→   894→
+   895→   895→    // Draw ticks + labels
+   896→   896→    ctx.strokeStyle = "#555560";
+   897→   897→    ctx.fillStyle = "#888894";
+   898→   898→    ctx.font = "9px ui-monospace, monospace";
+   899→   899→    ctx.textAlign = "center";
+   900→   900→    ctx.textBaseline = "middle";
+   901→   901→
+   902→   902→    for (let t = 0; t <= duration; t += interval) {
+   903→   903→      const x = t * pps;
+   904→   904→      if (x > w + 10) break;
+   905→   905→      // Major tick
+   906→   906→      ctx.beginPath();
+   907→   907→      ctx.moveTo(x, h - 8);
+   908→   908→      ctx.lineTo(x, h);
+   909→   909→      ctx.lineWidth = 1;
+   910→   910→      ctx.stroke();
+   911→   911→      // Label
+   912→   912→      ctx.fillText(this.formatTime(t), x, h / 2);
+   913→   913→      // Minor ticks
+   914→   914→      const minorStep = interval / 5;
+   915→   915→      for (let i = 1; i < 5; i++) {
+   916→   916→        const mx = (t + minorStep * i) * pps;
+   917→   917→        if (mx > w) break;
+   918→   918→        ctx.beginPath();
+   919→   919→        ctx.moveTo(mx, h - 4);
+   920→   920→        ctx.lineTo(mx, h);
+   921→   921→        ctx.lineWidth = 0.5;
+   922→   922→        ctx.stroke();
+   923→   923→      }
+   924→   924→    }
+   925→   925→  }
+   926→   926→
+   927→   927→  private drawGridLines(): void {
+   928→   928→    if (!this.trackArea) return;
+   929→   929→    // Remove old grid lines
+   930→   930→    this.trackArea.querySelectorAll(".ate-grid-line").forEach(el => el.remove());
+   931→   931→    const pps = this.opts.pixelsPerSecond;
+   932→   932→    const duration = this.opts.duration;
+   933→   933→    const targetSpacing = 60;
+   934→   934→    const rawInterval = targetSpacing / pps;
+   935→   935→    const niceIntervals = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60];
+   936→   936→    let interval = niceIntervals[0];
+   937→   937→    for (const ni of niceIntervals) {
+   938→   938→      if (ni >= rawInterval) { interval = ni; break; }
+   939→   939→      interval = ni;
+   940→   940→    }
+   941→   941→    const w = this.trackArea.clientWidth;
+   942→   942→    for (let t = 0; t <= duration; t += interval) {
+   943→   943→      const x = t * pps;
+   944→   944→      if (x > w + 10) break;
+   945→   945→      const line = document.createElement("div");
+   946→   946→      line.className = "ate-grid-line";
+   947→   947→      line.style.left = `${x}px`;
+   948→   948→      this.trackArea.appendChild(line);
+   949→   949→    }
+   950→   950→  }
+   951→   951→
+   952→   952→  private formatTime(t: number): string {
+   953→   953→    if (t < 1) return `${(t * 1000).toFixed(0)}ms`;
+   954→   954→    return `${t.toFixed(t < 10 ? 1 : 0)}s`;
+   955→   955→  }
+   956→   956→
+   957→   957→  // ---- Playhead ----
+   958→   958→
+   959→   959→  private updatePlayhead(): void {
+   960→   960→    const x = this.opts.playhead * this.opts.pixelsPerSecond;
+   961→   961→    this.playheadOverlay.style.left = `${x}px`;
+   962→   962→    this.playheadOverlay.style.display = "block";
+   963→   963→
+   964→   964→    // Update time info in toolbar
+   965→   965→    const info = this.root.querySelector("[data-time-info]") as HTMLElement;
+   966→   966→    if (info) info.textContent = `${this.opts.playhead.toFixed(2)}s / ${this.opts.duration.toFixed(1)}s`;
+   967→   967→
+   968→   968→    // Update play button icon
+   969→   969→    const playBtn = this.root.querySelector("[data-play-btn]") as HTMLElement;
+   970→   970→    if (playBtn) {
+   971→   971→      playBtn.innerHTML = this.opts.playing ? ICON_PAUSE : ICON_PLAY;
+   972→   972→      playBtn.classList.toggle("ate-active", this.opts.playing);
+   973→   973→    }
+   974→   974→
+   975→   975→    // Update loop button
+   976→   976→    const loopBtn = this.root.querySelector("[data-loop-btn]") as HTMLElement;
+   977→   977→    if (loopBtn) loopBtn.classList.toggle("ate-active", this.opts.loop);
+   978→   978→  }
+   979→   979→
+   980→   980→  setPlayhead(time: number, source: "pointer" | "keyboard" | "programmatic" | "playback" = "programmatic"): void {
+   981→   981→    if (this._destroyed) return;
+   982→   982→    const old = this.opts.playhead;
+   983→   983→    this.opts.playhead = clamp(time, 0, this.opts.duration);
+   984→   984→    this.updatePlayhead();
+   985→   985→    if (old !== this.opts.playhead) {
+   986→   986→      this.emit("playhead_change", { playhead: this.opts.playhead, source });
+   987→   987→    }
+   988→   988→  }
+   989→   989→
+   990→   990→  getPlayhead(): number { return this.opts.playhead; }
+   991→   991→
+   992→   992→  // ---- Playback ----
+   993→   993→
+   994→   994→  togglePlay(): void {
+   995→   995→    if (this.opts.playing) this.pause();
+   996→   996→    else this.play();
+   997→   997→  }
+   998→   998→
+   999→   999→  play(): void {
+  1000→  1000→    if (this._destroyed || this.opts.playing) return;
+  1001→  1001→    this.opts.playing = true;
+  1002→  1002→    this.lastFrameTime = performance.now();
+  1003→  1003→    this.startPlayback();
+  1004→  1004→    this.updatePlayhead();
+  1005→  1005→    this.emit("playback_change", { playing: true, source: "programmatic" });
+  1006→  1006→  }
+  1007→  1007→
+  1008→  1008→  pause(): void {
+  1009→  1009→    if (this._destroyed || !this.opts.playing) return;
+  1010→  1010→    this.opts.playing = false;
+  1011→  1011→    this.stopPlayback();
+  1012→  1012→    this.updatePlayhead();
+  1013→  1013→    this.emit("playback_change", { playing: false, source: "programmatic" });
+  1014→  1014→  }
+  1015→  1015→
+  1016→  1016→  stop(): void {
+  1017→  1017→    this.pause();
+  1018→  1018→    this.setPlayhead(0, "programmatic");
+  1019→  1019→  }
+  1020→  1020→
+  1021→  1021→  private startPlayback(): void {
+  1022→  1022→    if (this.playbackRAF !== null) return;
+  1023→  1023→    const tick = (now: number) => {
+  1024→  1024→      if (!this.opts.playing || this._destroyed) { this.playbackRAF = null; return; }
+  1025→  1025→      const dt = (now - this.lastFrameTime) / 1000;
+  1026→  1026→      this.lastFrameTime = now;
+  1027→  1027→      let newTime = this.opts.playhead + dt * this.opts.speed;
+  1028→  1028→      if (newTime >= this.opts.duration) {
+  1029→  1029→        if (this.opts.loop) newTime = 0;
+  1030→  1030→        else { newTime = this.opts.duration; this.pause(); }
+  1031→  1031→      }
+  1032→  1032→      this.opts.playhead = newTime;
+  1033→  1033→      this.updatePlayhead();
+  1034→  1034→      this.emit("playback_tick", { playhead: newTime, source: "playback" });
+  1035→  1035→      this.playbackRAF = requestAnimationFrame(tick);
+  1036→  1036→    };
+  1037→  1037→    this.playbackRAF = requestAnimationFrame(tick);
+  1038→  1038→  }
+  1039→  1039→
+  1040→  1040→  private stopPlayback(): void {
+  1041→  1041→    if (this.playbackRAF !== null) {
+  1042→  1042→      cancelAnimationFrame(this.playbackRAF);
+  1043→  1043→      this.playbackRAF = null;
+  1044→  1044→    }
+  1045→  1045→  }
+  1046→  1046→
+  1047→  1047→  toggleLoop(): void {
+  1048→  1048→    this.opts.loop = !this.opts.loop;
+  1049→  1049→    this.updatePlayhead();
+  1050→  1050→    this.emit("loop_change", { source: "programmatic" });
+  1051→  1051→  }
+  1052→  1052→
+  1053→  1053→  // ---- Navigation ----
+  1054→  1054→
+  1055→  1055→  nextKey(): void {
+  1056→  1056→    let next = this.opts.duration;
+  1057→  1057→    for (const track of this.tracks) {
+  1058→  1058→      if (track.type === "keyframe" && track.keyframes) {
+  1059→  1059→        for (const kf of track.keyframes) {
+  1060→  1060→          if (kf.time > this.opts.playhead + 0.001 && kf.time < next) next = kf.time;
+  1061→  1061→        }
+  1062→  1062→      }
+  1063→  1063→    }
+  1064→  1064→    if (next < this.opts.duration || next === this.opts.duration) {
+  1065→  1065→      // If there's no key after playhead, jump to end
+  1066→  1066→      this.setPlayhead(next, "keyboard");
+  1067→  1067→    }
+  1068→  1068→  }
+  1069→  1069→
+  1070→  1070→  prevKey(): void {
+  1071→  1071→    let prev = -1;
+  1072→  1072→    for (const track of this.tracks) {
+  1073→  1073→      if (track.type === "keyframe" && track.keyframes) {
+  1074→  1074→        for (const kf of track.keyframes) {
+  1075→  1075→          if (kf.time < this.opts.playhead - 0.001 && kf.time > prev) prev = kf.time;
+  1076→  1076→        }
+  1077→  1077→      }
+  1078→  1078→    }
+  1079→  1079→    if (prev >= 0) this.setPlayhead(prev, "keyboard");
+  1080→  1080→    else this.setPlayhead(0, "keyboard");
+  1081→  1081→  }
+  1082→  1082→
+  1083→  1083→  // ---- Zoom ----
+  1084→  1084→
+  1085→  1085→  setZoom(pps: number, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+  1086→  1086→    if (this._destroyed) return;
+  1087→  1087→    this.opts.pixelsPerSecond = Math.max(10, pps);
+  1088→  1088→    this.drawRuler();
+  1089→  1089→    this.drawGridLines();
+  1090→  1090→    // Re-position keyframes + clips
+  1091→  1091→    for (const track of this.tracks) {
+  1092→  1092→      const rowEl = this.trackRowEls.get(track.id);
+  1093→  1093→      if (!rowEl) continue;
+  1094→  1094→      if (track.type === "keyframe" && track.keyframes) {
+  1095→  1095→        for (const kf of track.keyframes) {
+  1096→  1096→          const kfEl = rowEl.querySelector(`[data-kf-id="${kf.id}"]`) as HTMLElement;
+  1097→  1097→          if (kfEl) kfEl.style.left = `${kf.time * this.opts.pixelsPerSecond}px`;
+  1098→  1098→        }
+  1099→  1099→      }
+  1100→  1100→      if (track.type === "clip" && track.clips) {
+  1101→  1101→        for (const clip of track.clips) {
+  1102→  1102→          const clipEl = rowEl.querySelector(`[data-clip-id="${clip.id}"]`) as HTMLElement;
+  1103→  1103→          if (clipEl) {
+  1104→  1104→            clipEl.style.left = `${clip.start * this.opts.pixelsPerSecond}px`;
+  1105→  1105→            clipEl.style.width = `${(clip.end - clip.start) * this.opts.pixelsPerSecond}px`;
+  1106→  1106→          }
+  1107→  1107→        }
+  1108→  1108→      }
+  1109→  1109→    }
+  1110→  1110→    this.updatePlayhead();
+  1111→  1111→    this.emit("zoom_change", { pixelsPerSecond: this.opts.pixelsPerSecond, source });
+  1112→  1112→  }
+  1113→  1113→
+  1114→  1114→  getZoom(): number { return this.opts.pixelsPerSecond; }
+  1115→  1115→
+  1116→  1116→  // ---- Scrubbing (ruler drag) ----
+  1117→  1117→
+  1118→  1118→  private onRulerPointerDown(e: PointerEvent): void {
+  1119→  1119→    if (this.opts.readOnly) return;
+  1120→  1120→    e.preventDefault();
+  1121→  1121→    this.dragMode = "scrub";
+  1122→  1122→    const rect = this.rulerCanvas.getBoundingClientRect();
+  1123→  1123→    const setFromX = (clientX: number) => {
+  1124→  1124→      const x = clientX - rect.left;
+  1125→  1125→      const t = x / this.opts.pixelsPerSecond;
+  1126→  1126→      this.setPlayhead(t, "pointer");
+  1127→  1127→    };
+  1128→  1128→    setFromX(e.clientX);
+  1129→  1129→    const onMove = (ev: PointerEvent) => setFromX(ev.clientX);
+  1130→  1130→    const onUp = () => {
+  1131→  1131→      window.removeEventListener("pointermove", onMove);
+  1132→  1132→      window.removeEventListener("pointerup", onUp);
+  1133→  1133→      this.dragMode = "none";
+  1134→  1134→    };
+  1135→  1135→    window.addEventListener("pointermove", onMove);
+  1136→  1136→    window.addEventListener("pointerup", onUp);
+  1137→  1137→  }
+  1138→  1138→
+  1139→  1139→  // ---- Keyframe drag ----
+  1140→  1140→
+  1141→  1141→  private onKeyframePointerDown(e: PointerEvent, trackId: string, kfId: string): void {
+  1142→  1142→    if (this.opts.readOnly) return;
+  1143→  1143→    const track = this.tracks.find(t => t.id === trackId);
+  1144→  1144→    if (!track || track.locked) return;
+  1145→  1145→    e.preventDefault();
+  1146→  1146→    e.stopPropagation();
+  1147→  1147→    this.dragMode = "keyframe";
+  1148→  1148→    this.dragTrackId = trackId;
+  1149→  1149→    this.dragItemId = kfId;
+  1150→  1150→    this.dragStartX = e.clientX;
+  1151→  1151→    const kf = track.keyframes?.find(k => k.id === kfId);
+  1152→  1152→    this.dragOrigTime = kf?.time ?? 0;
+  1153→  1153→    (e.target as HTMLElement).classList.add("ate-dragging");
+  1154→  1154→
+  1155→  1155→    const onMove = (ev: PointerEvent) => {
+  1156→  1156→      const dx = (ev.clientX - this.dragStartX) / this.opts.pixelsPerSecond;
+  1157→  1157→      let newTime = snapTime(this.dragOrigTime + dx, this.opts.snapInterval);
+  1158→  1158→      newTime = clamp(newTime, 0, this.opts.duration);
+  1159→  1159→      if (kf) { kf.time = newTime; (e.target as HTMLElement).style.left = `${newTime * this.opts.pixelsPerSecond}px`; }
+  1160→  1160→      this.emit("keyframe_drag", { trackId, keyframeId: kfId, time: newTime, source: "pointer" });
+  1161→  1161→    };
+  1162→  1162→    const onUp = () => {
+  1163→  1163→      window.removeEventListener("pointermove", onMove);
+  1164→  1164→      window.removeEventListener("pointerup", onUp);
+  1165→  1165→      (e.target as HTMLElement).classList.remove("ate-dragging");
+  1166→  1166→      if (kf) this.emit("keyframe_change", { trackId, keyframeId: kfId, time: kf.time, oldTime: this.dragOrigTime, source: "pointer" });
+  1167→  1167→      this.dragMode = "none";
+  1168→  1168→      this.dragTrackId = null;
+  1169→  1169→      this.dragItemId = null;
+  1170→  1170→    };
+  1171→  1171→    window.addEventListener("pointermove", onMove);
+  1172→  1172→    window.addEventListener("pointerup", onUp);
+  1173→  1173→  }
+  1174→  1174→
+  1175→  1175→  // ---- Clip drag + resize ----
+  1176→  1176→
+  1177→  1177→  private onClipPointerDown(e: PointerEvent, trackId: string, clipId: string, mode: "move" | "resize-left" | "resize-right"): void {
+  1178→  1178→    if (this.opts.readOnly) return;
+  1179→  1179→    const track = this.tracks.find(t => t.id === trackId);
+  1180→  1180→    if (!track || track.locked) return;
+  1181→  1181→    e.preventDefault();
+  1182→  1182→    e.stopPropagation();
+  1183→  1183→    this.dragMode = mode === "move" ? "clip-move" : mode === "resize-left" ? "clip-resize-left" : "clip-resize-right";
+  1184→  1184→    this.dragTrackId = trackId;
+  1185→  1185→    this.dragItemId = clipId;
+  1186→  1186→    this.dragStartX = e.clientX;
+  1187→  1187→    const clip = track.clips?.find(c => c.id === clipId);
+  1188→  1188→    this.dragOrigStart = clip?.start ?? 0;
+  1189→  1189→    this.dragOrigEnd = clip?.end ?? 0;
+  1190→  1190→    (e.target as HTMLElement).closest(".ate-clip")?.classList.add("ate-dragging");
+  1191→  1191→
+  1192→  1192→    const onMove = (ev: PointerEvent) => {
+  1193→  1193→      const dx = (ev.clientX - this.dragStartX) / this.opts.pixelsPerSecond;
+  1194→  1194→      if (!clip) return;
+  1195→  1195→      const clipEl = this.trackRowEls.get(trackId)?.querySelector(`[data-clip-id="${clipId}"]`) as HTMLElement;
+  1196→  1196→      if (this.dragMode === "clip-move") {
+  1197→  1197→        let newStart = snapTime(this.dragOrigStart + dx, this.opts.snapInterval);
+  1198→  1198→        const dur = this.dragOrigEnd - this.dragOrigStart;
+  1199→  1199→        newStart = clamp(newStart, 0, this.opts.duration - dur);
+  1200→  1200→        clip.start = newStart;
+  1201→  1201→        clip.end = newStart + dur;
+  1202→  1202→      } else if (this.dragMode === "clip-resize-left") {
+  1203→  1203→        let newStart = snapTime(this.dragOrigStart + dx, this.opts.snapInterval);
+  1204→  1204→        newStart = clamp(newStart, 0, this.dragOrigEnd - 0.05);
+  1205→  1205→        clip.start = newStart;
+  1206→  1206→      } else if (this.dragMode === "clip-resize-right") {
+  1207→  1207→        let newEnd = snapTime(this.dragOrigEnd + dx, this.opts.snapInterval);
+  1208→  1208→        newEnd = clamp(newEnd, this.dragOrigStart + 0.05, this.opts.duration);
+  1209→  1209→        clip.end = newEnd;
+  1210→  1210→      }
+  1211→  1211→      if (clipEl) {
+  1212→  1212→        clipEl.style.left = `${clip.start * this.opts.pixelsPerSecond}px`;
+  1213→  1213→        clipEl.style.width = `${(clip.end - clip.start) * this.opts.pixelsPerSecond}px`;
+  1214→  1214→      }
+  1215→  1215→      this.emit("clip_drag", { trackId, clipId, time: clip.start, source: "pointer" });
+  1216→  1216→    };
+  1217→  1217→    const onUp = () => {
+  1218→  1218→      window.removeEventListener("pointermove", onMove);
+  1219→  1219→      window.removeEventListener("pointerup", onUp);
+  1220→  1220→      (e.target as HTMLElement).closest(".ate-clip")?.classList.remove("ate-dragging");
+  1221→  1221→      if (clip) this.emit("clip_change", { trackId, clipId, time: clip.start, oldTime: this.dragOrigStart, source: "pointer" });
+  1222→  1222→      this.dragMode = "none";
+  1223→  1223→      this.dragTrackId = null;
+  1224→  1224→      this.dragItemId = null;
+  1225→  1225→    };
+  1226→  1226→    window.addEventListener("pointermove", onMove);
+  1227→  1227→    window.addEventListener("pointerup", onUp);
+  1228→  1228→  }
+  1229→  1229→
+  1230→  1230→  // ---- Selection ----
+  1231→  1231→
+  1232→  1232→  selectKeyframe(trackId: string, kfId: string, additive: boolean): void {
+  1233→  1233→    // Clear others unless additive
+  1234→  1234→    if (!additive) {
+  1235→  1235→      for (const t of this.tracks) {
+  1236→  1236→        if (t.keyframes) for (const k of t.keyframes) k.selected = false;
+  1237→  1237→      }
+  1238→  1238→    }
+  1239→  1239→    const track = this.tracks.find(t => t.id === trackId);
+  1240→  1240→    const kf = track?.keyframes?.find(k => k.id === kfId);
+  1241→  1241→    if (kf) kf.selected = !kf.selected;
+  1242→  1242→    this.updateSelectionDom();
+  1243→  1243→    this.emit("selection_change", { trackId, keyframeId: kfId, source: "pointer" });
+  1244→  1244→  }
+  1245→  1245→
+  1246→  1246→  selectClip(trackId: string, clipId: string, additive: boolean): void {
+  1247→  1247→    if (!additive) {
+  1248→  1248→      for (const t of this.tracks) {
+  1249→  1249→        if (t.clips) for (const c of t.clips) c.selected = false;
+  1250→  1250→      }
+  1251→  1251→    }
+  1252→  1252→    const track = this.tracks.find(t => t.id === trackId);
+  1253→  1253→    const clip = track?.clips?.find(c => c.id === clipId);
+  1254→  1254→    if (clip) clip.selected = !clip.selected;
+  1255→  1255→    this.updateSelectionDom();
+  1256→  1256→    this.emit("selection_change", { trackId, clipId, source: "pointer" });
+  1257→  1257→  }
+  1258→  1258→
+  1259→  1259→  clearSelection(): void {
+  1260→  1260→    for (const t of this.tracks) {
+  1261→  1261→      if (t.keyframes) for (const k of t.keyframes) k.selected = false;
+  1262→  1262→      if (t.clips) for (const c of t.clips) c.selected = false;
+  1263→  1263→    }
+  1264→  1264→    this.updateSelectionDom();
+  1265→  1265→    this.emit("selection_change", { source: "programmatic" });
+  1266→  1266→  }
+  1267→  1267→
+  1268→  1268→  private updateSelectionDom(): void {
+  1269→  1269→    for (const track of this.tracks) {
+  1270→  1270→      const rowEl = this.trackRowEls.get(track.id);
+  1271→  1271→      if (!rowEl) continue;
+  1272→  1272→      if (track.keyframes) {
+  1273→  1273→        for (const kf of track.keyframes) {
+  1274→  1274→          const el = rowEl.querySelector(`[data-kf-id="${kf.id}"]`);
+  1275→  1275→          el?.classList.toggle("ate-selected", !!kf.selected);
+  1276→  1276→        }
+  1277→  1277→      }
+  1278→  1278→      if (track.clips) {
+  1279→  1279→        for (const clip of track.clips) {
+  1280→  1280→          const el = rowEl.querySelector(`[data-clip-id="${clip.id}"]`);
+  1281→  1281→          el?.classList.toggle("ate-selected", !!clip.selected);
+  1282→  1282→        }
+  1283→  1283→      }
+  1284→  1284→    }
+  1285→  1285→  }
+  1286→  1286→
+  1287→  1287→  // ---- Track management ----
+  1288→  1288→
+  1289→  1289→  addTrack(type: TrackType, partial?: Partial<Track>): string {
+  1290→  1290→    const id = partial?.id ?? uid("track");
+  1291→  1291→    const track: Track = {
+  1292→  1292→      id,
+  1293→  1293→      name: partial?.name ?? (type === "keyframe" ? `Property ${this.tracks.length + 1}` : `Clip ${this.tracks.length + 1}`),
+  1294→  1294→      type,
+  1295→  1295→      owner: partial?.owner,
+  1296→  1296→      keyframes: type === "keyframe" ? (partial?.keyframes ?? []) : undefined,
+  1297→  1297→      clips: type === "clip" ? (partial?.clips ?? []) : undefined,
+  1298→  1298→      visible: partial?.visible ?? true,
+  1299→  1299→      locked: partial?.locked ?? false,
+  1300→  1300→      color: partial?.color,
+  1301→  1301→    };
+  1302→  1302→    this.tracks.push(track);
+  1303→  1303→    this.render();
+  1304→  1304→    this.emit("track_added", { trackId: id, source: "programmatic" });
+  1305→  1305→    return id;
+  1306→  1306→  }
+  1307→  1307→
+  1308→  1308→  removeTrack(trackId: string): void {
+  1309→  1309→    if (this._destroyed) return;
+  1310→  1310→    const idx = this.tracks.findIndex(t => t.id === trackId);
+  1311→  1311→    if (idx < 0) return;
+  1312→  1312→    this.tracks.splice(idx, 1);
+  1313→  1313→    this.render();
+  1314→  1314→    this.emit("track_removed", { trackId, source: "programmatic" });
+  1315→  1315→  }
+  1316→  1316→
+  1317→  1317→  toggleTrackVisible(trackId: string): void {
+  1318→  1318→    const track = this.tracks.find(t => t.id === trackId);
+  1319→  1319→    if (!track) return;
+  1320→  1320→    track.visible = track.visible === false ? true : false;
+  1321→  1321→    this.render();
+  1322→  1322→    this.emit("track_change", { trackId, source: "programmatic" });
+  1323→  1323→  }
+  1324→  1324→
+  1325→  1325→  toggleTrackLock(trackId: string): void {
+  1326→  1326→    const track = this.tracks.find(t => t.id === trackId);
+  1327→  1327→    if (!track) return;
+  1328→  1328→    track.locked = !track.locked;
+  1329→  1329→    this.render();
+  1330→  1330→    this.emit("track_change", { trackId, source: "programmatic" });
+  1331→  1331→  }
+  1332→  1332→
+  1333→  1333→  addKeyframe(trackId: string, time?: number, value?: number): string {
+  1334→  1334→    const track = this.tracks.find(t => t.id === trackId);
+  1335→  1335→    if (!track || track.type !== "keyframe") return "";
+  1336→  1336→    const id = uid("kf");
+  1337→  1337→    const kf: Keyframe = { id, time: time ?? this.opts.playhead, value: value ?? 0, transition: "linear" };
+  1338→  1338→    if (!track.keyframes) track.keyframes = [];
+  1339→  1339→    track.keyframes.push(kf);
+  1340→  1340→    track.keyframes.sort((a, b) => a.time - b.time);
+  1341→  1341→    this.render();
+  1342→  1342→    this.emit("keyframe_added", { trackId, keyframeId: id, time: kf.time, source: "programmatic" });
+  1343→  1343→    return id;
+  1344→  1344→  }
+  1345→  1345→
+  1346→  1346→  removeKeyframe(trackId: string, kfId: string): void {
+  1347→  1347→    const track = this.tracks.find(t => t.id === trackId);
+  1348→  1348→    if (!track?.keyframes) return;
+  1349→  1349→    const idx = track.keyframes.findIndex(k => k.id === kfId);
+  1350→  1350→    if (idx < 0) return;
+  1351→  1351→    track.keyframes.splice(idx, 1);
+  1352→  1352→    this.render();
+  1353→  1353→    this.emit("keyframe_removed", { trackId, keyframeId: kfId, source: "programmatic" });
+  1354→  1354→  }
+  1355→  1355→
+  1356→  1356→  addClip(trackId: string, start?: number, end?: number): string {
+  1357→  1357→    const track = this.tracks.find(t => t.id === trackId);
+  1358→  1358→    if (!track || track.type !== "clip") return "";
+  1359→  1359→    const id = uid("clip");
+  1360→  1360→    const s = start ?? this.opts.playhead;
+  1361→  1361→    const e = end ?? s + 1;
+  1362→  1362→    const clip: Clip = { id, start: s, end: e, label: "Clip" };
+  1363→  1363→    if (!track.clips) track.clips = [];
+  1364→  1364→    track.clips.push(clip);
+  1365→  1365→    this.render();
+  1366→  1366→    this.emit("clip_added", { trackId, clipId: id, time: s, source: "programmatic" });
+  1367→  1367→    return id;
+  1368→  1368→  }
+  1369→  1369→
+  1370→  1370→  removeClip(trackId: string, clipId: string): void {
+  1371→  1371→    const track = this.tracks.find(t => t.id === trackId);
+  1372→  1372→    if (!track?.clips) return;
+  1373→  1373→    const idx = track.clips.findIndex(c => c.id === clipId);
+  1374→  1374→    if (idx < 0) return;
+  1375→  1375→    track.clips.splice(idx, 1);
+  1376→  1376→    this.render();
+  1377→  1377→    this.emit("clip_removed", { trackId, clipId, source: "programmatic" });
+  1378→  1378→  }
+  1379→  1379→
+  1380→  1380→  // ---- Keyboard ----
+  1381→  1381→
+  1382→  1382→  private onKeyDown(e: KeyboardEvent): void {
+  1383→  1383→    if (this.opts.readOnly) return;
+  1384→  1384→    let handled = true;
+  1385→  1385→    switch (e.key) {
+  1386→  1386→      case " ":
+  1387→  1387→        e.preventDefault();
+  1388→  1388→        this.togglePlay();
+  1389→  1389→        break;
+  1390→  1390→      case "ArrowLeft":
+  1391→  1391→        this.setPlayhead(this.opts.playhead - (e.shiftKey ? 1 : 0.1), "keyboard");
+  1392→  1392→        break;
+  1393→  1393→      case "ArrowRight":
+  1394→  1394→        this.setPlayhead(this.opts.playhead + (e.shiftKey ? 1 : 0.1), "keyboard");
+  1395→  1395→        break;
+  1396→  1396→      case "Home":
+  1397→  1397→        this.setPlayhead(0, "keyboard");
+  1398→  1398→        break;
+  1399→  1399→      case "End":
+  1400→  1400→        this.setPlayhead(this.opts.duration, "keyboard");
+  1401→  1401→        break;
+  1402→  1402→      case "Delete":
+  1403→  1403→      case "Backspace":
+  1404→  1404→        // Remove selected keyframes + clips
+  1405→  1405→        for (const track of this.tracks) {
+  1406→  1406→          if (track.keyframes) {
+  1407→  1407→            const toRemove = track.keyframes.filter(k => k.selected).map(k => k.id);
+  1408→  1408→            for (const id of toRemove) this.removeKeyframe(track.id, id);
+  1409→  1409→          }
+  1410→  1410→          if (track.clips) {
+  1411→  1411→            const toRemove = track.clips.filter(c => c.selected).map(c => c.id);
+  1412→  1412→            for (const id of toRemove) this.removeClip(track.id, id);
+  1413→  1413→          }
+  1414→  1414→        }
+  1415→  1415→        break;
+  1416→  1416→      case "Escape":
+  1417→  1417→        this.clearSelection();
+  1418→  1418→        break;
+  1419→  1419→      default:
+  1420→  1420→        handled = false;
+  1421→  1421→    }
+  1422→  1422→    if (handled) e.preventDefault();
+  1423→  1423→  }
+  1424→  1424→
+  1425→  1425→  // ---- Data accessors ----
+  1426→  1426→
+  1427→  1427→  getTracks(): Track[] { return this.tracks.map(t => ({ ...t, keyframes: t.keyframes?.map(k => ({ ...k })), clips: t.clips?.map(c => ({ ...c })) })); }
+  1428→  1428→  getDuration(): number { return this.opts.duration; }
+  1429→  1429→  isPlaying(): boolean { return this.opts.playing; }
+  1430→  1430→
+  1431→  1431→  setTracks(tracks: Track[]): void {
+  1432→  1432→    if (this._destroyed) return;
+  1433→  1433→    this.tracks = tracks.map(t => ({ ...t }));
+  1434→  1434→    this.render();
+  1435→  1435→  }
+  1436→  1436→
+  1437→  1437→  setProperty(name: string, value: unknown): void {
+  1438→  1438→    if (this._destroyed) return;
+  1439→  1439→    switch (name) {
+  1440→  1440→      case "duration":
+  1441→  1441→        this.opts.duration = Math.max(1, Number(value));
+  1442→  1442→        this.drawRuler(); this.drawGridLines(); this.updatePlayhead();
+  1443→  1443→        break;
+  1444→  1444→      case "pixelsPerSecond": this.setZoom(Number(value)); break;
+  1445→  1445→      case "playhead": this.setPlayhead(Number(value)); break;
+  1446→  1446→      case "playing": if (value) this.play(); else this.pause(); break;
+  1447→  1447→      case "loop": this.opts.loop = !!value; this.updatePlayhead(); break;
+  1448→  1448→      case "speed": this.opts.speed = clamp(Number(value), 0.1, 10); break;
+  1449→  1449→      case "snapInterval": this.opts.snapInterval = Number(value); break;
+  1450→  1450→      case "readOnly": this.opts.readOnly = !!value; this.render(); break;
+  1451→  1451→      case "tracks": this.setTracks(value as Track[]); break;
+  1452→  1452→      default: return;
+  1453→  1453→    }
+  1454→  1454→  }
+  1455→  1455→
+  1456→  1456→  // ---- Events ----
+  1457→  1457→
+  1458→  1458→  on(event: string, handler: AnimationTrackEditorHandler): void {
+  1459→  1459→    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+  1460→  1460→    this.listeners.get(event)!.add(handler);
+  1461→  1461→  }
+  1462→  1462→  off(event: string, handler: AnimationTrackEditorHandler): void {
+  1463→  1463→    this.listeners.get(event)?.delete(handler);
+  1464→  1464→  }
+  1465→  1465→  private emit(event: string, payload: AnimationTrackEditorEventPayload): void {
+  1466→  1466→    const set = this.listeners.get(event);
+  1467→  1467→    if (!set) return;
+  1468→  1468→    const p = { ...payload, type: event };
+  1469→  1469→    for (const h of set) { try { h(p); } catch (e) { console.error(e); } }
+  1470→  1470→  }
+  1471→  1471→
+  1472→  1472→  // ---- Destroy ----
+  1473→  1473→
+  1474→  1474→  destroy(): void {
+  1475→  1475→    if (this._destroyed) return;
+  1476→  1476→    this._destroyed = true;
+  1477→  1477→    this.stopPlayback();
+  1478→  1478→    this.resizeObserver?.disconnect();
+  1479→  1479→    this.listeners.clear();
+  1480→  1480→    this.container.innerHTML = "";
+  1481→  1481→  }
+  1482→  1482→}
+  1483→  1483→

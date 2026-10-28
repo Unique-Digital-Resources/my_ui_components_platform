@@ -1,0 +1,734 @@
+     1→     1→# Design System PRD — Vanilla JavaScript UI Component Platform
+     2→     2→
+     3→     3→Version 1.0 · Brand identity, visual language, UI foundations, iconography, and interaction standards
+     4→     4→
+     5→     5→The design direction should feel like a professional software workshop with a distinctive, slightly experimental identity: nearly black surfaces, deep purple structure, and a sharp light-lemon-green accent.
+     6→     6→
+     7→     7→It should communicate precision, flexibility, and technical independence—not look like a generic SaaS dashboard or a conventional UI component gallery.
+     8→     8→
+     9→     9→The same design system must serve two different purposes:
+    10→    10→
+    11→    11→- The platform website: a polished developer workspace for discovering, testing, and understanding components.
+    12→    12→- The component library: reusable, framework-independent vanilla JavaScript components whose visual styling can be customized independently of the documentation website.
+    13→    13→
+    14→    14→## 1. Brand identity and visual direction
+    15→    15→
+    16→    16→# [Brand Name]
+    17→    17→
+    18→    18→UI components for real software.
+    19→    19→
+    20→    20→# Build interfaces.
+    21→    21→
+    22→    22→&#x20;Not dependencies.
+    23→    23→
+    24→    24→A flexible toolkit for the interfaces behind creative tools, editors, and applications.
+    25→    25→
+    26→    26→Explore components ↗
+    27→    27→
+    28→    28→Read the docs
+    29→    29→
+    30→    30→FRAMEWORK
+    31→    31→
+    32→    32→Independent
+    33→    33→
+    34→    34→INTERACTION
+    35→    35→
+    36→    36→Functional
+    37→    37→
+    38→    38→CUSTOMIZATION
+    39→    39→
+    40→    40→Composable
+    41→    41→
+    42→    42→Visual direction study. The brand name and final logo remain undecided; the logo shown is a conceptual mark.
+    43→    43→
+    44→    44→### Brand personality
+    45→    45→
+    46→    46→| Attribute    | Direction                                                    |
+    47→    47→| ------------ | ------------------------------------------------------------ |
+    48→    48→| Technical    | Precise, structured, implementation-oriented                 |
+    49→    49→| Experimental | Unusual but purposeful details and geometry                  |
+    50→    50→| Professional | Calm layouts, readable documentation, reliable states        |
+    51→    51→| Independent  | Minimal framework assumptions and portable components        |
+    52→    52→| Expressive   | Lemon accent, deep-purple layers, occasional bold typography |
+    53→    53→
+    54→    54→### The visual signature
+    55→    55→
+    56→    56→The brand should be recognizable through the combination of:
+    57→    57→
+    58→    58→1. Near-black backgrounds and dark-purple structural surfaces.
+    59→    59→2. Light lemon green for active states, primary actions, and key indicators.
+    60→    60→3. Fine borders and carefully layered surfaces instead of excessive shadows.
+    61→    61→4. Compact developer-tool layouts with generous spacing around important content.
+    62→    62→5. Geometric iconography and restrained abstract branching or connected-node motifs.
+    63→    63→
+    64→    64→Design rule: Purple establishes the environment; lemon green identifies the action. Green should not cover every surface or turn the interface into a neon theme.
+    65→    65→
+    66→    66→## 2. Color system
+    67→    67→
+    68→    68→The palette is built around three primary families: black, dark purple, and light lemon green. Neutral grays and a softer lavender support readable content and secondary states.
+    69→    69→
+    70→    70→## Primary brand palette
+    71→    71→
+    72→    72→Obsidian
+    73→    73→
+    74→    74→\#101014
+    75→    75→
+    76→    76→Main dark background
+    77→    77→
+    78→    78→Deep Violet
+    79→    79→
+    80→    80→\#211A30
+    81→    81→
+    82→    82→Elevated surfaces
+    83→    83→
+    84→    84→Lemon Signal
+    85→    85→
+    86→    86→\#D9FF66
+    87→    87→
+    88→    88→Primary accent
+    89→    89→
+    90→    90→Soft Lavender
+    91→    91→
+    92→    92→\#B9A0FF
+    93→    93→
+    94→    94→Secondary accent
+    95→    95→
+    96→    96→### 2.1 Complete token palette
+    97→    97→
+    98→    98→| Token                 | Hex       | Intended use                          |
+    99→    99→| --------------------- | --------- | ------------------------------------- |
+   100→   100→| `brand-black`         | `#101014` | Primary dark canvas                   |
+   101→   101→| `brand-purple`        | `#211A30` | Panels and elevated surfaces          |
+   102→   102→| `brand-purple-strong` | `#342348` | Selected navigation and emphasis      |
+   103→   103→| `brand-purple-soft`   | `#B9A0FF` | Secondary highlights and links        |
+   104→   104→| `brand-lemon`         | `#D9FF66` | Primary actions and active indicators |
+   105→   105→| `brand-lemon-hover`   | `#C8F34F` | Hovered primary action                |
+   106→   106→| `neutral-950`         | `#15151A` | Deep surface                          |
+   107→   107→| `neutral-900`         | `#202027` | Raised panel                          |
+   108→   108→| `neutral-800`         | `#303039` | Borders and dividers                  |
+   109→   109→| `neutral-600`         | `#777783` | Muted text                            |
+   110→   110→| `neutral-400`         | `#AAAAB5` | Secondary text on dark surfaces       |
+   111→   111→| `neutral-200`         | `#DCDCE4` | Light-theme borders                   |
+   112→   112→| `neutral-100`         | `#F0F0F4` | Light-theme secondary surface         |
+   113→   113→| `neutral-50`          | `#FAFAFC` | Light-theme canvas                    |
+   114→   114→| `white`               | `#FFFFFF` | Light surface and dark-theme text     |
+   115→   115→
+   116→   116→These are proposed design tokens. Before implementation, validate text contrast and refine individual shades if necessary.
+   117→   117→
+   118→   118→### 2.2 Semantic colors
+   119→   119→
+   120→   120→Semantic colors must communicate meaning rather than branding.
+   121→   121→
+   122→   122→| Semantic role | Dark theme | Light theme |
+   123→   123→| ------------- | ---------- | ----------- |
+   124→   124→| Success       | `#8FE3A5`  | `#207A3B`   |
+   125→   125→| Warning       | `#FFD36B`  | `#8A5A00`   |
+   126→   126→| Error         | `#FF858B`  | `#B42332`   |
+   127→   127→| Information   | `#91B8FF`  | `#245CC5`   |
+   128→   128→| Focus         | `#D9FF66`  | `#6547C8`   |
+   129→   129→
+   130→   130→Do not use lemon green for every success message. Reserve the accent for primary actions and active interaction; use semantic colors for actual feedback.
+   131→   131→
+   132→   132→### 2.3 Color usage proportions
+   133→   133→
+   134→   134→A useful starting balance for the dark platform is:
+   135→   135→
+   136→   136→- 65–75%: dark canvas and neutral surfaces.
+   137→   137→- 15–25%: purple surfaces, borders, and secondary accents.
+   138→   138→- 5–10%: lemon green and other high-attention highlights.
+   139→   139→
+   140→   140→These are visual targets, not strict measurements. The accent should be concentrated in purposeful locations.
+   141→   141→
+   142→   142→### 2.4 Light and dark themes
+   143→   143→
+   144→   144→The platform's default theme should be dark because it best expresses the intended identity. A light theme should also be available for comfortable reading and varied working environments.
+   145→   145→
+   146→   146→DARK THEME
+   147→   147→
+   148→   148→## Obsidian workspace
+   149→   149→
+   150→   150→Deep surfaces, fine borders, bright focus states.
+   151→   151→
+   152→   152→Property inspector
+   153→   153→
+   154→   154→Selected value: 180 px
+   155→   155→
+   156→   156→Apply changes
+   157→   157→
+   158→   158→LIGHT THEME
+   159→   159→
+   160→   160→## Clear workspace
+   161→   161→
+   162→   162→Soft neutral canvas, restrained purple, dark text.
+   163→   163→
+   164→   164→Property inspector
+   165→   165→
+   166→   166→Selected value: 180 px
+   167→   167→
+   168→   168→Apply changes
+   169→   169→
+   170→   170→The component library itself must not require the website's dark theme. Its components should support their own documented styling and allow applications to adopt either theme—or define an entirely different one.
+   171→   171→
+   172→   172→## 3. Typography
+   173→   173→
+   174→   174→Typography should combine a contemporary sans-serif for interface clarity with a compact monospace face for code, values, and technical metadata.
+   175→   175→
+   176→   176→### Recommended font stack
+   177→   177→
+   178→   178→HEADINGS & INTERFACE
+   179→   179→
+   180→   180→# Inter
+   181→   181→
+   182→   182→Use Inter or a comparable neutral sans-serif for navigation, headings, buttons, labels, and body text.
+   183→   183→
+   184→   184→CODE & TECHNICAL VALUES
+   185→   185→
+   186→   186→# JetBrains Mono
+   187→   187→
+   188→   188→Use for code snippets, keyboard shortcuts, numeric property values, CSS tokens, and API signatures.
+   189→   189→
+   190→   190→Both fonts are available through open font projects. Prefer self-hosting licensed font files where practical, with system-font fallbacks.
+   191→   191→
+   192→   192→### Type scale
+   193→   193→
+   194→   194→| Token     | Size / line height | Usage                                |
+   195→   195→| --------- | ------------------ | ------------------------------------ |
+   196→   196→| `display` | 44 / 52 px         | Homepage hero only                   |
+   197→   197→| `h1`      | 32 / 40 px         | Main page title                      |
+   198→   198→| `h2`      | 24 / 32 px         | Major section heading                |
+   199→   199→| `h3`      | 20 / 28 px         | Subsection heading                   |
+   200→   200→| `h4`      | 16 / 24 px         | Card and panel headings              |
+   201→   201→| `body-lg` | 16 / 26 px         | Introductions and lead text          |
+   202→   202→| `body`    | 14 / 22 px         | Standard interface and documentation |
+   203→   203→| `body-sm` | 13 / 20 px         | Secondary information                |
+   204→   204→| `caption` | 12 / 16 px         | Metadata and helper text             |
+   205→   205→| `code`    | 13 / 20 px         | Code and technical values            |
+   206→   206→
+   207→   207→Use font weights 400 for body text, 500 for interface labels, 600 for section headings, and 700 sparingly for strong emphasis.
+   208→   208→
+   209→   209→Typography rules
+   210→   210→
+   211→   211→- Use sentence case rather than all caps for most labels.
+   212→   212→- Reserve uppercase text for small technical overlines or status metadata.
+   213→   213→- Avoid overly tight line-height in documentation.
+   214→   214→- Keep paragraphs at a comfortable reading width.
+   215→   215→- Use tabular numerals for changing numeric values where supported.
+   216→   216→- Do not make every heading bold or every label monospace.
+   217→   217→
+   218→   218→## 4. Spacing and layout
+   219→   219→
+   220→   220→Use a consistent four-pixel base grid.
+   221→   221→
+   222→   222→| Token      | Value | Typical use                    |
+   223→   223→| ---------- | ----- | ------------------------------ |
+   224→   224→| `space-1`  | 4 px  | Icon-to-label gaps             |
+   225→   225→| `space-2`  | 8 px  | Compact control spacing        |
+   226→   226→| `space-3`  | 12 px | Input and list spacing         |
+   227→   227→| `space-4`  | 16 px | Standard component padding     |
+   228→   228→| `space-5`  | 20 px | Card content spacing           |
+   229→   229→| `space-6`  | 24 px | Section spacing                |
+   230→   230→| `space-8`  | 32 px | Large group separation         |
+   231→   231→| `space-10` | 40 px | Page section separation        |
+   232→   232→| `space-12` | 48 px | Major layout transitions       |
+   233→   233→| `space-16` | 64 px | Hero and major section spacing |
+   234→   234→
+   235→   235→### Layout dimensions
+   236→   236→
+   237→   237→- Global header: approximately 60–68 px high.
+   238→   238→- Desktop documentation sidebar: approximately 224–256 px wide.
+   239→   239→- Contextual right sidebar: approximately 180–220 px wide.
+   240→   240→- Main content maximum width: approximately 1,200 px, with wider workspace layouts permitted.
+   241→   241→- Standard input height: 36–40 px.
+   242→   242→- Compact toolbar control height: 28–32 px.
+   243→   243→- Standard button height: 36–40 px.
+   244→   244→- Touch-target size: aim for at least 44 × 44 px on touch interfaces.
+   245→   245→
+   246→   246→The playground may use a wider, application-like layout than standard documentation pages. Do not force every page into the same narrow content column.
+   247→   247→
+   248→   248→## 5. Shape language, borders, and depth
+   249→   249→
+   250→   250→The interface should feel precise but not sterile. Use moderately rounded corners, crisp dividers, and limited depth rather than excessive pill shapes and floating cards.
+   251→   251→
+   252→   252→Sharp
+   253→   253→
+   254→   254→Code blocks, separators, technical regions
+   255→   255→
+   256→   256→Standard
+   257→   257→
+   258→   258→Inputs, buttons, cards, panels
+   259→   259→
+   260→   260→Soft
+   261→   261→
+   262→   262→Large previews, dialogs, feature areas
+   263→   263→
+   264→   264→Pill
+   265→   265→
+   266→   266→Chips, tags, segmented controls where suitable
+   267→   267→
+   268→   268→### Border radius tokens
+   269→   269→
+   270→   270→- `radius-sm`: 4 px.
+   271→   271→- `radius-md`: 8 px.
+   272→   272→- `radius-lg`: 12 px.
+   273→   273→- `radius-xl`: 16 px.
+   274→   274→- `radius-pill`: 999 px.
+   275→   275→
+   276→   276→### Border and shadow rules
+   277→   277→
+   278→   278→- Use subtle neutral borders to separate adjacent surfaces.
+   279→   279→- Reserve stronger purple borders for selected or emphasized regions.
+   280→   280→- Use a visible accent-colored focus ring for keyboard focus.
+   281→   281→- Prefer one subtle elevation level for overlays and popovers.
+   282→   282→- Avoid shadows on every card and button.
+   283→   283→- Use glow effects only for exceptional emphasis, never as a default state.
+   284→   284→
+   285→   285→## 6. Iconography system
+   286→   286→
+   287→   287→Use a consistent general-purpose icon library rather than drawing individual icons or mixing unrelated styles.
+   288→   288→
+   289→   289→### Recommended primary library: Lucide
+   290→   290→
+   291→   291→[Font libraries by Ashwin Bajaj on Muzli](https://images.openai.com/static-rsc-4/nwbb6yQPGEwCCzspAvAOnueZF3iE-PrqIwDoN9H5fBHMpXMJ9D6ht5yhNrKvXJ16berM3OmIOW9yZH3LELPLst71mm_DKfI1WDg1OpohOQ2uts5CLtF2evzXwKKeVJ3eBrunQ4erfXGgEpyjgWib4aggNy4ez06QIWTZbvu35wA?purpose=inline)
+   292→   292→
+   293→   293→Lucide
+   294→   294→
+   295→   295→Recommended default for navigation, toolbar actions, property controls, documentation, and status indicators. Its restrained outline style fits a precise developer-tool interface.
+   296→   296→
+   297→   297→[Browse Lucide icons](https://lucide.dev/icons/?utm_source=chatgpt.com) · [Source repository](https://github.com/lucide-icons/lucide?utm_source=chatgpt.com)
+   298→   298→
+   299→   299→[Penpot | Libraries & templates detail page](https://images.openai.com/static-rsc-4/VNWobzK4XI3LU_m4-389CjrbavjMEp70eeA3-cZBi2GMzt1ASOW5Wtidx1OjoQcSVu3HpQTrLGhJauTW9CldzkU6hUThjNmrT9EMssbBMpKXV_1Efc_5ZAunWxgMPvzxvugjPKhhXkjNOPaihHJ6nl92iUJLJO-HIupjRqgOPUo?purpose=inline)
+   300→   300→
+   301→   301→Phosphor
+   302→   302→
+   303→   303→A strong alternative when more expressive weights or duotone icons are desirable. Choose one consistent weight for ordinary interface actions.
+   304→   304→
+   305→   305→[Browse Phosphor icons](https://phosphoricons.com/?utm_source=chatgpt.com) · [Source organization](https://github.com/phosphor-icons?utm_source=chatgpt.com)
+   306→   306→
+   307→   307→[GitHub - gurindersingh/mdi-search-icons](https://images.openai.com/static-rsc-4/Jd2nCg3rHqQTmGbMzGp5csYunyuc0E8HXWu_oGrqWXNziOSP0fuRIA0FVHzZIIc4qBatmsVlfEoylWN9CipVJKsWEiD-Li4VMCge_H-WYHG_TRaoRpH_-xD-J5Q1FTuyuN9v0Ox7AnJWZ5LFWAZagUGkbNsLyVmS5qMawSRkiBY?purpose=inline)
+   308→   308→
+   309→   309→Material Design Icons
+   310→   310→
+   311→   311→Useful for specialist symbols and application-oriented actions not covered by the primary icon set. Use selectively to avoid visual inconsistency.
+   312→   312→
+   313→   313→[Browse MDI](https://pictogrammers.com/library/mdi/?utm_source=chatgpt.com) · [Source repository](https://github.com/Templarian/MaterialDesign?utm_source=chatgpt.com)
+   314→   314→
+   315→   315→### Icon usage rules
+   316→   316→
+   317→   317→| Context                    | Specification                                     |
+   318→   318→| -------------------------- | ------------------------------------------------- |
+   319→   319→| Inline text icon           | 14–16 px                                          |
+   320→   320→| Standard interface action  | 18 px                                             |
+   321→   321→| Navigation icon            | 18–20 px                                          |
+   322→   322→| Prominent empty-state icon | 28–40 px                                          |
+   323→   323→| Standard stroke            | Approximately 1.75–2 px                           |
+   324→   324→| Button icon spacing        | 8 px from label                                   |
+   325→   325→| Icon-only button           | Tooltip, accessible name, and visible focus state |
+   326→   326→
+   327→   327→Use consistent optical sizes and stroke weights. Avoid combining filled Material-style icons with thin outline icons in the same toolbar unless a deliberate distinction is needed.
+   328→   328→
+   329→   329→Implementation: Use the chosen library's official SVG or framework-independent package, or vendor selected SVG assets. The component library should not require an online request for every icon at runtime.
+   330→   330→
+   331→   331→## 7. Logo and brand-icon system
+   332→   332→
+   333→   333→The logo should be an original geometric mark, while third-party logo libraries should be used for the brands and technologies referenced by the platform—not as a substitute for the platform's own identity.
+   334→   334→
+   335→   335→### 7.1 Recommended logo direction
+   336→   336→
+   337→   337→Modular Grid
+   338→   338→
+   339→   339→Composition · reusable blocks · connections
+   340→   340→
+   341→   341→Connected Blocks
+   342→   342→
+   343→   343→Systems · composition · flexible architecture
+   344→   344→
+   345→   345→These are conceptual logo explorations, not finalized vector assets. The final logo should be custom-designed and tested at small sizes.
+   346→   346→
+   347→   347→### 7.2 Logo variants
+   348→   348→
+   349→   349→Create the following variants:
+   350→   350→
+   351→   351→- Primary lockup: symbol plus brand wordmark.
+   352→   352→- Compact lockup: reduced horizontal version for the header.
+   353→   353→- Symbol only: favicon, app icon, and compact navigation.
+   354→   354→- Monochrome: single-color version for constrained contexts.
+   355→   355→- Light and dark variants: versions with sufficient contrast on both surfaces.
+   356→   356→
+   357→   357→The symbol should remain recognizable at 16–24 px and must not depend on tiny internal details or color gradients to remain legible.
+   358→   358→
+   359→   359→### 7.3 Online brand-logo libraries
+   360→   360→
+   361→   361→Use an established logo-icon collection when displaying external technologies, framework compatibility, package managers, or development tools.
+   362→   362→
+   363→   363→[Simple Icons: SVG icons for popular brands | AlternativeTo](https://images.openai.com/static-rsc-4/Vz0xUw6FihWxMTmJQhtjX4HUTg4uTNQNTYHEGMMWvkboqjyM5-B-SK1NaWxqJ81kywXfS9UsZpTgu31B29jP-9TB92gwcoFTsAx_TbSbso0V68JxHcL74HHXsQZ2WSy_dZroN0K-Zs1jwCrLLdk6mJOZz45ejkc_m4DTPtwx-WM?purpose=inline)
+   364→   364→
+   365→   365→Simple Icons
+   366→   366→
+   367→   367→Preferred for recognizable technology and company logos, including development tools and frameworks.
+   368→   368→
+   369→   369→[Browse brand icons](https://simpleicons.org/?utm_source=chatgpt.com) · [Repository and licensing](https://github.com/simple-icons/simple-icons?utm_source=chatgpt.com)
+   370→   370→
+   371→   371→[Iconify is an open source icon library that collects over 275,000 icons from over 200 icon sets. - GIGAZINE](https://images.openai.com/static-rsc-4/EMbxaHndZ9GDMqQlll0rt4r-3Gvpq3hEC-2YJhul-mxZKzSVV-6MVGaRUfLF5lRL8jRZ47I9ow7nDuDbhYrwzX42GMGNhN8bHuOQ93Z_jIxM9WIRMHOxhP_0FnHKS0Cy_BEfNV2Sb0hIUEtJ8WRZrXxxPCbHVoDSoepA78Rf9iI?purpose=inline)
+   372→   372→
+   373→   373→Iconify
+   374→   374→
+   375→   375→Useful for discovering icons across many collections, especially when a specialist logo is missing. Verify the license of the specific icon set and icon.
+   376→   376→
+   377→   377→[Browse icon sets](https://icon-sets.iconify.design/?utm_source=chatgpt.com) · [Iconify website](https://iconify.design/?utm_source=chatgpt.com)
+   378→   378→
+   379→   379→### Brand-logo rules
+   380→   380→
+   381→   381→- Never use a third-party brand mark as the platform's primary logo.
+   382→   382→- Preserve the original proportions and recognizable silhouette of external logos.
+   383→   383→- Do not apply the platform's accent color to an official logo when its recognizable brand treatment should be preserved.
+   384→   384→- Check licensing and attribution requirements for each icon set.
+   385→   385→- Bundle frequently used assets locally where appropriate.
+   386→   386→- Avoid loading icons dynamically from an external service during normal component interaction.
+   387→   387→
+   388→   388→## 8. Component visual language
+   389→   389→
+   390→   390→The platform should distinguish between brand UI and demonstrated component UI.
+   391→   391→
+   392→   392→Brand UI includes navigation, documentation panels, the playground shell, buttons, and property inspectors. These use the black, purple, and lemon palette.
+   393→   393→
+   394→   394→Demonstrated components should use their own neutral or configurable styling so developers can judge their appearance independently of the platform branding.
+   395→   395→
+   396→   396→### 8.1 Buttons
+   397→   397→
+   398→   398→Primary action
+   399→   399→
+   400→   400→Primary
+   401→   401→
+   402→   402→Lemon background, near-black text. Use for one dominant action per region.
+   403→   403→
+   404→   404→Secondary action
+   405→   405→
+   406→   406→Secondary
+   407→   407→
+   408→   408→Purple surface with readable text. Use for alternative actions.
+   409→   409→
+   410→   410→Outline action
+   411→   411→
+   412→   412→Outline
+   413→   413→
+   414→   414→Transparent or neutral surface with a visible border.
+   415→   415→
+   416→   416→Text action ↗
+   417→   417→
+   418→   418→Text and icon action
+   419→   419→
+   420→   420→For navigation, low-emphasis actions, and inline links.
+   421→   421→
+   422→   422→Rules:
+   423→   423→
+   424→   424→- Avoid multiple competing primary buttons in the same small region.
+   425→   425→- Use a consistent 8 px corner radius.
+   426→   426→- Include hover, active, focus, disabled, and loading states where relevant.
+   427→   427→- Loading must not cause unexpected layout shifts.
+   428→   428→- Disabled actions must be visually distinct and non-interactive.
+   429→   429→
+   430→   430→### 8.2 Inputs and property controls
+   431→   431→
+   432→   432→Inputs should resemble precision instruments rather than oversized form fields.
+   433→   433→
+   434→   434→- Compact labels positioned consistently above or beside the control.
+   435→   435→- Clear value alignment, especially for numeric properties.
+   436→   436→- Visible units when relevant, such as `180 px` or `35°`.
+   437→   437→- Validation feedback near the affected input.
+   438→   438→- Keyboard navigation and editing support.
+   439→   439→- A visible focus ring.
+   440→   440→- Consistent disabled and read-only styles.
+   441→   441→
+   442→   442→Numeric fields should support direct editing, while sliders provide rapid adjustment when a bounded range is appropriate.
+   443→   443→
+   444→   444→### 8.3 Cards and panels
+   445→   445→
+   446→   446→Use three structural patterns:
+   447→   447→
+   448→   448→- Flat regions: documentation sections and ordinary page content.
+   449→   449→- Bordered panels: property inspectors, code editors, and grouped controls.
+   450→   450→- Elevated overlays: dialogs, menus, command palettes, and popovers.
+   451→   451→
+   452→   452→Do not wrap every paragraph or documentation section in a card. Cards should represent actual grouping, navigation, or a distinct interactive area.
+   453→   453→
+   454→   454→### 8.4 Tabs and segmented controls
+   455→   455→
+   456→   456→Use tabs when switching between content views, such as JavaScript, HTML, and CSS examples.
+   457→   457→
+   458→   458→Use segmented controls when selecting one of a small set of related values, such as triangle, square, disk, or none.
+   459→   459→
+   460→   460→Requirements:
+   461→   461→
+   462→   462→- Clear selected state.
+   463→   463→- Keyboard support.
+   464→   464→- Consistent dimensions.
+   465→   465→- Accessible labels.
+   466→   466→- No reliance on color alone to communicate selection.
+   467→   467→
+   468→   468→### 8.5 Status badges
+   469→   469→
+   470→   470→Use small, low-emphasis labels for states such as Stable, Beta, Experimental, Deprecated, and Planned.
+   471→   471→
+   472→   472→The badge must communicate a real state. It should not be used merely as decoration or repeated for every shared property.
+   473→   473→
+   474→   474→## 9. Component playground visual standards
+   475→   475→
+   476→   476→The playground is the defining feature of the platform. It should resemble a compact professional software workspace, with a clear division between the working area and the controls.
+   477→   477→
+   478→   478→### Component Playground
+   479→   479→
+   480→   480→LIVE CANVAS
+   481→   481→
+   482→   482→[Python - custom shaped user input area - Developer Questions - Krita Artists](https://images.openai.com/static-rsc-4/3p2rXRiIE5LeL0Gpt7CbxBUWVJUkQelmJjpf6hMkH_0XUnSLozFCr_uXeMorr_qE6ukGOOkoG9Fktwd8i5XOGq3aAxhC9o3HYLXbk5S9RJ_LPR6ztCCDzPamtRWmkaxZmiZywYjxY55AWrcJkO6P3BH44X0pYA_Gmlu04uXF1lc?purpose=inline)
+   483→   483→
+   484→   484→Selected value
+   485→   485→
+   486→   486→\#D9FF66
+   487→   487→
+   488→   488→Properties
+   489→   489→
+   490→   490→Inner shape
+   491→   491→
+   492→   492→Inner size
+   493→   493→
+   494→   494→180 px
+   495→   495→
+   496→   496→Hue
+   497→   497→
+   498→   498→210°
+   499→   499→
+   500→   500→Reset properties
+   501→   501→
+   502→   502→JavaScript
+   503→   503→
+   504→   504→HTML
+   505→   505→
+   506→   506→CSS
+   507→   507→
+   508→   508→Configuration example synchronized with the live preview.
+   509→   509→
+   510→   510→### Workspace layout rules
+   511→   511→
+   512→   512→- The preview canvas should be visually distinct from the property inspector.
+   513→   513→- Keep toolbars compact and predictable.
+   514→   514→- Use the lemon accent for selected tools and important actions, not as a canvas background.
+   515→   515→- Property controls should be grouped logically and labeled consistently.
+   516→   516→- Code panels should use a dark editor-like surface in the dark theme and a readable equivalent in the light theme.
+   517→   517→- Allow the preview area to expand without forcing the inspector to expand with it.
+   518→   518→- On narrow screens, stack the inspector beneath the preview.
+   519→   519→
+   520→   520→### Preview isolation
+   521→   521→
+   522→   522→The component preview must be isolated from the platform's own styles where necessary. Use an explicit preview container and scoped styles so global documentation styles cannot unintentionally change the component's rendering.
+   523→   523→
+   524→   524→The website's visual theme must never become a mandatory dependency of the vanilla JavaScript library.
+   525→   525→
+   526→   526→## 10. Motion and interaction feedback
+   527→   527→
+   528→   528→Motion should communicate changes, not decorate every interaction.
+   529→   529→
+   530→   530→| Interaction         | Recommended behavior                                 |
+   531→   531→| ------------------- | ---------------------------------------------------- |
+   532→   532→| Button hover        | Subtle surface or brightness change                  |
+   533→   533→| Button press        | Brief pressed-state feedback                         |
+   534→   534→| Popover open        | Short opacity and small-scale transition             |
+   535→   535→| Sidebar collapse    | Smooth width transition where practical              |
+   536→   536→| Tab change          | Immediate content change or restrained transition    |
+   537→   537→| Property adjustment | Update preview immediately                           |
+   538→   538→| Copy action         | Brief confirmation label or icon state               |
+   539→   539→| Loading             | Subtle indicator that preserves layout               |
+   540→   540→| Color wheel drag    | Direct, immediate response without delayed animation |
+   541→   541→
+   542→   542→Suggested timing tokens:
+   543→   543→
+   544→   544→- `motion-fast`: 100–140 ms.
+   545→   545→- `motion-standard`: 160–220 ms.
+   546→   546→- `motion-emphasis`: 240–300 ms.
+   547→   547→
+   548→   548→Use easing that feels responsive and controlled. Do not animate numeric values or color changes in ways that make the component feel laggy during direct manipulation.
+   549→   549→
+   550→   550→Respect `prefers-reduced-motion`. Animation must not be the only way to communicate an important state change.
+   551→   551→
+   552→   552→## 11. Design tokens and CSS architecture
+   553→   553→
+   554→   554→The design system should use semantic CSS custom properties rather than scattering literal hex values throughout the website.
+   555→   555→
+   556→   556→Example token foundation:
+   557→   557→
+   558→   558→```
+   559→   559→:root {
+   560→   560→  color-scheme: light dark;
+   561→   561→
+   562→   562→  --brand-black: #101014;
+   563→   563→  --brand-purple: #211A30;
+   564→   564→  --brand-purple-strong: #342348;
+   565→   565→  --brand-purple-soft: #B9A0FF;
+   566→   566→  --brand-lemon: #D9FF66;
+   567→   567→
+   568→   568→  --surface: #FAFAFC;
+   569→   569→  --surface-raised: #FFFFFF;
+   570→   570→  --text-primary: #17151D;
+   571→   571→  --text-secondary: #666371;
+   572→   572→  --border: #DCDCE4;
+   573→   573→
+   574→   574→  --font-sans: "Inter", sans-serif;
+   575→   575→  --font-mono: "JetBrains Mono", monospace;
+   576→   576→
+   577→   577→  --space-1: 4px;
+   578→   578→  --space-2: 8px;
+   579→   579→  --space-3: 12px;
+   580→   580→  --space-4: 16px;
+   581→   581→  --space-6: 24px;
+   582→   582→  --space-8: 32px;
+   583→   583→
+   584→   584→  --radius-sm: 4px;
+   585→   585→  --radius-md: 8px;
+   586→   586→  --radius-lg: 12px;
+   587→   587→  --radius-xl: 16px;
+   588→   588→
+   589→   589→  --border-width: 1px;
+   590→   590→  --focus-ring-width: 2px;
+   591→   591→
+   592→   592→  --motion-fast: 120ms;
+   593→   593→  --motion-standard: 180ms;
+   594→   594→}
+   595→   595→
+   596→   596→[data-theme="dark"] {
+   597→   597→  color-scheme: dark;
+   598→   598→
+   599→   599→  --surface: #101014;
+   600→   600→  --surface-raised: #211A30;
+   601→   601→  --text-primary: #F4F1FF;
+   602→   602→  --text-secondary: #B8B2CA;
+   603→   603→  --border: #383343;
+   604→   604→}
+   605→   605→```
+   606→   606→
+   607→   607→This is an initial example, not the final complete token file.
+   608→   608→
+   609→   609→### CSS architecture requirements
+   610→   610→
+   611→   611→- Separate global design tokens from component-specific tokens.
+   612→   612→- Use semantic roles such as `--surface`, `--text-primary`, and `--border` for everyday styling.
+   613→   613→- Keep brand-specific values separate from generic component behavior.
+   614→   614→- Avoid global selectors that unintentionally alter components embedded in other applications.
+   615→   615→- Document the supported customization API.
+   616→   616→- Use a clear prefix or another deliberate scoping strategy for library-owned CSS variables.
+   617→   617→- Do not make the library depend on the website's root theme tokens.
+   618→   618→
+   619→   619→A component may offer its own variables such as `--color-picker-ring-width` while retaining safe defaults when no custom values are provided.
+   620→   620→
+   621→   621→## 12. Accessibility and usability standards
+   622→   622→
+   623→   623→The design system must be accessible in both themes and across all supported interaction modes.
+   624→   624→
+   625→   625→### Requirements
+   626→   626→
+   627→   627→- Text and interactive controls meet WCAG 2.2 AA contrast requirements wherever applicable.
+   628→   628→- Keyboard focus is visible against dark and light surfaces.
+   629→   629→- Interactive controls have accessible names and appropriate semantic roles.
+   630→   630→- Icon-only controls include accessible labels and tooltips where useful.
+   631→   631→- Hover states have equivalent focus and touch behavior.
+   632→   632→- Error messages identify the affected input and explain how to correct it.
+   633→   633→- State changes are not communicated through color alone.
+   634→   634→- Components support keyboard interaction according to their control type.
+   635→   635→- Motion respects user preferences.
+   636→   636→- Touch controls have appropriately sized targets.
+   637→   637→
+   638→   638→For the lemon accent, dark text such as `#171521` should be used on the bright background. Do not assume white text will be readable on every purple or lemon shade; validate actual color combinations before release.
+   639→   639→
+   640→   640→## 13. Separation between the brand and component themes
+   641→   641→
+   642→   642→This is a core architectural requirement, not just a styling preference.
+   643→   643→
+   644→   644→### Platform design system
+   645→   645→
+   646→   646→Owns navigation, documentation, search, playground layout, code panels, and platform-level interactions.
+   647→   647→
+   648→   648→Black
+   649→   649→
+   650→   650→Purple
+   651→   651→
+   652→   652→Lemon
+   653→   653→
+   654→   654→### Vanilla JavaScript component system
+   655→   655→
+   656→   656→Owns component behavior, public properties, state, events, accessibility, and independently configurable styling.
+   657→   657→
+   658→   658→Default theme
+   659→   659→
+   660→   660→Custom theme
+   661→   661→
+   662→   662→Host application
+   663→   663→
+   664→   664→The website can use the brand palette as its default presentation, while a developer embedding a component can customize its appearance without inheriting the platform's branding.
+   665→   665→
+   666→   666→For example, the Color Wheel Picker must work inside a light-themed editor, a dark creative application, or a custom interface without requiring Next.js or the platform's CSS.
+   667→   667→
+   668→   668→## 14. Design system implementation checklist
+   669→   669→
+   670→   670→Use this checklist to validate the first design-system release.
+   671→   671→
+   672→   672→## Release readiness
+   673→   673→
+   674→   674→0 / 18
+   675→   675→
+   676→   676→Brand foundation
+   677→   677→
+   678→   678→Finalize the brand name and original logo
+   679→   679→
+   680→   680→Define dark and light color tokens
+   681→   681→
+   682→   682→Approve typography and font licensing
+   683→   683→
+   684→   684→Define spacing, radius, and border tokens
+   685→   685→
+   686→   686→Iconography
+   687→   687→
+   688→   688→Select Lucide as the primary icon family
+   689→   689→
+   690→   690→Define specialist icon and brand-logo usage rules
+   691→   691→
+   692→   692→Verify licenses and attribution
+   693→   693→
+   694→   694→Establish local asset and SVG conventions
+   695→   695→
+   696→   696→Reusable interface patterns
+   697→   697→
+   698→   698→Buttons and icon buttons
+   699→   699→
+   700→   700→Inputs and numeric property controls
+   701→   701→
+   702→   702→Cards, panels, and overlays
+   703→   703→
+   704→   704→Tabs, segmented controls, and badges
+   705→   705→
+   706→   706→Loading, empty, error, and disabled states
+   707→   707→
+   708→   708→Developer experience
+   709→   709→
+   710→   710→Playground layout and preview isolation
+   711→   711→
+   712→   712→Code panel and copy interaction
+   713→   713→
+   714→   714→Responsive documentation shell
+   715→   715→
+   716→   716→Keyboard navigation and accessibility
+   717→   717→
+   718→   718→Independent component theming
+   719→   719→
+   720→   720→Reset checklist
+   721→   721→
+   722→   722→## 15. Final design principles
+   723→   723→
+   724→   724→The final design system should follow these rules:
+   725→   725→
+   726→   726→1. Distinctive, not distracting. Black, purple, and lemon create identity without overpowering technical content.
+   727→   727→2. Functional over decorative. Every interactive preview and property control should do what it claims.
+   728→   728→3. Consistent but flexible. The website has one recognizable design language; components remain independently themeable.
+   729→   729→4. Precise, not cramped. Compact controls coexist with readable documentation and adequate spacing.
+   730→   730→5. Lightweight by design. Use reusable CSS tokens, carefully selected icon assets, and minimal runtime dependencies.
+   731→   731→6. Accessible by default. Contrast, keyboard operation, visible focus, and semantic controls are foundational.
+   732→   732→7. Honest documentation. Clearly distinguish available components, proposed features, static previews, and actual interactive implementations.
+   733→   733→
+   734→   734→The recommended starting combination is Obsidian `#101014` + Deep Violet `#211A30` + Lemon Signal `#D9FF66`, with Lucide for general icons and Simple Icons for external technology logos.

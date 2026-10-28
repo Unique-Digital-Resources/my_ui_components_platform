@@ -1,0 +1,300 @@
+
+Stage Summary:
+- AGENT/SKILL markdown system established: root files route to per-folder files, same mechanism for both AI agents (contribution) and skills (usage).
+- Each component playground has a tabbed properties panel with Properties (main/elevated), AGENT (markdown), and SKILL (markdown) tabs.
+- Root AGENT.md mentions the known board resize-at-rotation displacement issue.
+
+---
+Task ID: 32
+Agent: main
+Task: Fix panel heights, accent tab, markdown tables, collapsible nested component sections
+
+Work Log:
+- **Fixed height panels**: Changed all live canvas panels from `min-h-[480px] flex-col` (grows infinitely) to `h-[600px] flex-col overflow-hidden` (fixed height with internal scroll). Added `lg:items-start` to the grid containers so panels don't stretch to equal height. Added `min-h-0` to preview areas so they don't expand. The AgentSkillTabs panel uses `h-[600px] max-h-[600px] overflow-hidden` with `overflow-y-auto` on the content area for vertical scrolling of long content.
+- **Properties tab accent color**: Changed the Properties tab button from `text-foreground` to `text-brand-lemon` when active, and the dot indicator changes from `bg-muted-foreground/40` to `bg-brand-lemon` when active. Verified: color is `rgb(217, 255, 102)` (lemon green).
+- **Fixed broken markdown tables**: Installed `remark-gfm` plugin (GitHub Flavored Markdown) and added `remarkPlugins={[remarkGfm]}` to the ReactMarkdown component. This enables proper rendering of tables, strikethrough, task lists, and other GFM syntax. Verified: AGENT tab now shows 2 properly formatted tables.
+- **Collapsible nested component sections**: Created `CollapsibleSection` component in `agent-skill-tabs.tsx` — a collapsible panel with a chevron + icon + title header that expands/collapses. Added to:
+  - **PeriodicRange**: "Thumb Style" collapsible section with thumb variant, thumb size, thumb border properties (nested CustomButton-style properties).
+  - **ToggleGroup**: "Button Style" collapsible section with button variant and button size properties (nested CustomButton properties).
+  Both sections start collapsed and can be expanded by clicking the header. This matches the Figma/Godot pattern where nested component properties appear in collapsible sections under the main component's properties.
+
+Stage Summary:
+- Live canvas and properties panels now have fixed height (600px) with vertical scrolling.
+- Properties tab uses lemon green accent color when active.
+- Markdown tables render correctly via remark-gfm.
+- Components that contain other components (PeriodicRange → thumbs, ToggleGroup → buttons) have collapsible nested component property sections.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 3
+Agent: nodes-graph-playground-agent
+Task: Build the NodesGraph playground and add it to the content metadata + routing.
+
+Work Log:
+- Read worklog.md and existing playgrounds (board-playground.tsx) to learn the platform conventions: panel chrome, AgentSkillTabs usage, Breadcrumbs/PageOverline, CodeBlock, Code/JS/HTML/CSS/API tabs, documentation section, lucide icons.
+- Read the NodesGraph API in src/lib/components/nodes-graph/nodes-graph.ts and the React wrapper src/components/nodes-graph/nodes-graph-react.tsx to confirm the addNode/addPath/setMode/getNodes/getPaths surface and the "absolute inset-0" container contract.
+- Created src/lib/components/nodes-graph/AGENT.md and SKILL.md (component architecture, file structure, mode/shape/label semantics, type-matching, code examples, integration notes).
+- Copied them to public/docs/components/nodes-graph-AGENT.md and nodes-graph-SKILL.md so AgentSkillTabs can fetch them via /docs/components/... paths.
+- Added a "nodes-graph" ComponentMeta entry to src/lib/platform/content.ts in the layout category: name "Nodes Graph", status stable, tags ["Vanilla JS","Canvas","Graph"], capabilities (Mindmap/Sockets/Typed Connections/Path Shapes/Labels/Type-Mismatch Rendering), properties (mode, gridMode, gridSize, snapToGrid, background), full method list (addNode, removeNode, getNodes, addPath, removePath, getPaths, getMode, setMode, on, off, destroy), events (change, connect, disconnect), and defaults.
+- Updated src/app/page.tsx: imported NodesGraphPlayground and routed component/layout/nodes-graph to <NodesGraphPlayground />.
+- Updated src/store/navigation.ts routeLabel: added "nodes-graph" → "Nodes Graph".
+- Built src/components/nodes-graph/nodes-graph-playground.tsx:
+  * Live canvas panel fixed at h-[600px], positioned-relative container for the absolute-positioned NodesGraphReact wrapper.
+  * Toolbar inside the panel: Add Node (random position near origin), Add Path (between first two nodes; sockets-aware), Clear All, Mindmap/Sockets mode toggle (also in the Properties tab), Reset.
+  * Property inspector via AgentSkillTabs:
+      - Properties tab: Mode 2-way toggle, Grid mode 3-way (None/Dots/Lines), Grid size slider (10-100), Snap to grid Switch, live nodes/paths count stats, and a small "Active mode / Arrowheads / Type checking" summary card.
+      - AGENT tab fetches /docs/components/nodes-graph-AGENT.md.
+      - SKILL tab fetches /docs/components/nodes-graph-SKILL.md.
+  * Output section below the graph: two side-by-side tables — nodes (id, title, position, size, sockets count) and paths (id, from→to with arrow, shape, label, valid/invalid state badge).
+  * Code panel: JavaScript / HTML / CSS / API tabs, all generated to match the live mode/grid/snap state (JS) or static templates (HTML/CSS/API).
+  * Documentation section: Overview, when to use / not to use, properties table, methods, events, "Modes: mindmap vs sockets", "Path shapes and labels", accessibility, plus a sticky on-this-page aside.
+  * Initialization: on mount, seeds a 3-node mindmap graph (Root → Branch A / Branch B with bezier arrowhead paths labeled "A"/"B"). Switching to sockets mode rebuilds with 4 socketed nodes demonstrating a valid color→color connection (lemon) and a type-mismatched number→string connection (red), with the valid input control hidden. Switching back to mindmap re-seeds the mindmap graph.
+  * Toast feedback (sonner) on Add Node / Add Path / Clear All / Mode toggle / Reset.
+  * Dark theme only: Obsidian/Deep Violet/Lemon Signal palette via brand-lemon and brand-purple-strong tokens; no indigo/blue. Node fills use #211A30 / #342348 / #2A2235. Type-mismatch red is #FF858B (matches the library's DATA_TYPE_COLORS).
+- Fixed two compile errors caught by the dev server: the platform export is PageOverline (not PageOvertext as the task brief spelled it) — corrected both the import and the JSX usage.
+- Verified: `bun run lint` is clean (0 errors, 0 warnings); dev server returns HTTP 200 on / after recompile.
+
+Files created:
+- src/lib/components/nodes-graph/AGENT.md
+- src/lib/components/nodes-graph/SKILL.md
+- public/docs/components/nodes-graph-AGENT.md
+- public/docs/components/nodes-graph-SKILL.md
+- src/components/nodes-graph/nodes-graph-playground.tsx
+
+Files modified:
+- src/lib/platform/content.ts (added nodes-graph metadata in layout category)
+- src/app/page.tsx (import + route for component/layout/nodes-graph)
+- src/store/navigation.ts (routeLabel: "nodes-graph" → "Nodes Graph")
+
+Stage Summary:
+- NodesGraph playground is fully wired into the platform. Navigating to Components → Layout → Nodes Graph renders the playground with a seeded mindmap graph; the toolbar and Properties tab toggle into sockets mode (with type-mismatch rendering), add/remove nodes and paths, and the live output tables and code panel reflect every change. AGENT/SKILL tabs load from /docs/components/nodes-graph-{AGENT,SKILL}.md. Lint is clean and the dev server compiles without errors.
+
+---
+Task ID: 33 (summary)
+Agent: main + subagent
+Task: Properties tab primary style + NodesGraph component
+
+Work Log:
+- **Properties tab primary style**: Changed the Properties tab button to use `bg-brand-lemon text-[#17151D]` (lemon background with dark text) when active — a primary button style. The dot indicator changes to `bg-[#17151D]` (dark). When inactive, uses `text-muted-foreground hover:text-foreground hover:bg-accent/50`. Verified: bg=rgb(217,255,102), color=rgb(23,21,29).
+- **NodesGraph component** (`src/lib/components/nodes-graph/nodes-graph.ts`): A node-based graph editor built on top of the Board component. Two connection modes:
+  - **Mindmap mode**: paths with start/end arrowheads connecting between center of top/left/bottom/right sides of node boxes (Obsidian/mindmap style). Paths can have shapes: bezier (default), step, or straight.
+  - **Sockets mode**: paths without heads connecting between output/input sockets on right/left sides of nodes. Sockets sit beside embedded input components. Type-matching: connecting an input with a matching data type hides the control (Blender style). Mismatched types render the path red.
+  - Paths support: multiple shapes (bezier/step/straight), color gradients based on socket data types or connection state (red for wrong), and optional centered custom labels with a pill background.
+  - Data type colors: color=#D9FF66, number=#91B8FF, string=#FF858B, boolean=#B9A0FF, vector=#8FE3A5.
+  - Full public API: addNode, removeNode, addPath, removePath, getNodes, getPaths, setMode, on/off, destroy.
+- **React wrapper + playground** (built by subagent): Full playground with toolbar (Add Node, Add Path, Clear, Mode toggle, Reset), AgentSkillTabs properties panel, output tables for nodes/paths, code panel, and documentation. Seeds default nodes/paths on mount for both modes.
+- VLM-verified: NodesGraph playground loads, board exists, Properties tab has primary style (lemon bg + dark text).
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- Properties tab now uses primary button style (lemon background, dark text).
+- NodesGraph component established with two modes (mindmap + sockets), path shapes, type-matching, and labels.
+- Appears in sidebar under Layout → Nodes Graph.
+
+---
+Task ID: 34
+Agent: main
+Task: Fix NodesGraph crash, path visibility, and panning
+
+Work Log:
+- **Fixed seedSockets crash**: The `seedSockets` function was treating `addNode()` return value (a string ID) as a GraphNode object with `.sockets` property. Fixed by using `inst.getNodes()` to look up the actual node objects by ID, then accessing `.sockets[0].id` with null checks.
+- **Fixed paths not visible until nodes are moved**: The issue was that `renderPaths()` used a single `requestAnimationFrame` which could fire before the Board's render completed (erasing the paths). Fixed by:
+  1. Using **double-rAF** (nested `requestAnimationFrame`) to ensure the Board's render has completed before drawing paths on top.
+  2. Hooking into **all Board events** (change, view, selection) to re-render paths. Previously only "change" events with move/resize types triggered re-render, but the Board re-renders on many other events (selection, view pan/zoom) which would erase the paths without re-drawing them.
+- **Fixed panning instability**: The panning issue was caused by the NodesGraph's path rendering interfering with the Board's render cycle. By using double-rAF and hooking into the "view" event (which fires during pan/zoom), the paths are now re-drawn after every Board render without conflicting with the Board's own `requestAnimationFrame` render loop.
+
+Stage Summary:
+- Sockets mode no longer crashes (fixed the addNode return type usage).
+- Paths are now visible immediately after adding nodes/paths (double-rAF + all-event hook).
+- Panning is stable (paths re-render after every board render cycle).
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 35
+Agent: main
+Task: Fix space-drag stuck, path visibility, arrowhead options, drag-to-connect
+
+Work Log:
+- **Fixed space-drag pan stuck**: Added `onKeyUp` handler to the Board that resets `_spaceDown = false` and clears the cursor when the space key is released. Added `window.addEventListener("keyup", this._onKeyUp)` (on window, not canvas, so it fires even if the canvas loses focus). Added cleanup in `destroy()`.
+- **Fixed path visibility permanently**: Added `setOverlayRender(fn)` method to the Board — a callback that's called at the **end of every `render()` frame**, after items and selection overlays are drawn. The NodesGraph registers its `drawPaths()` as the overlay callback, so paths are drawn as part of the Board's render cycle — no race conditions, no double-rAF needed. This is the proper architecture: the Board owns the canvas and render loop; the NodesGraph hooks into it via the overlay callback.
+- **Added start/end arrowhead options**: `GraphPath` now has `startHead` and `endHead` boolean fields. In mindmap mode, `endHead` defaults to `true` (arrowhead at the destination); `startHead` defaults to `false`. Users can set either/both when creating a path.
+- **Added drag-to-connect**: The NodesGraph now intercepts pointer events on the Board's canvas. When the user clicks near a node's edge or socket (within a threshold), a drag-to-connect gesture begins:
+  - A dashed lemon preview line follows the cursor from the source node's side/socket.
+  - On pointer up, if the cursor is near another node's edge/socket, a path is created between the two nodes.
+  - Works for both mindmap mode (drag from node sides) and sockets mode (drag from sockets).
+  - The hit testing checks sockets first (more specific), then node sides.
+
+Stage Summary:
+- Space-drag pan no longer gets stuck (keyup handler resets _spaceDown).
+- Paths are now drawn via the Board's overlay render hook — always visible, no race conditions.
+- Arrowheads are optional per path (startHead/endHead).
+- Users can drag from a node's side/socket to another node to create paths (like Blender/Obsidian).
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 36
+Agent: main
+Task: Fix rotation, path selection, Blender-style node rows, drag-to-connect conflict
+
+Work Log:
+- **Disabled rotation on NodesGraph items**: Added `allowRotation` and `allowResize` options to the Board. NodesGraph passes `allowRotation: false` to the Board. The Board's `hitTestHandles` and `renderSelectionOverlay` respect these flags — rotation handle and resize handles are not drawn/hit-tested when disabled.
+- **Path selection + editing**: Added `selectPath(id)` and `updatePath(id, updates)` to NodesGraph. Paths can be clicked to select them — a lemon highlight glow is drawn around selected paths. The `hitTestPath` method uses point-to-segment distance to detect clicks on paths. Clicking empty space deselects the path. The `selected` field on GraphPath tracks selection state.
+- **Blender-style node rows**: Added `NodeRow` interface and `rows` field to `GraphNode`. Each row has a label, control type (slider/text/color/checkbox/none), control value, and optional socket. The `addNode` method accepts a `rows` config that automatically creates sockets per row (with `socketSide` and `socketType`). The overlay renderer draws:
+  - Node title at the top
+  - Row labels on the left
+  - Control visualizations on the right: mini sliders (with lemon thumb), color swatches, checkboxes
+  - Socket circles beside rows that have sockets (colored by data type)
+  When a valid connection is made to an input socket, the socket's `hidden` flag is set and the control is visually hidden (substituted by the connected input).
+- **Fixed drag-to-connect conflict with selection**: Changed the pointer event listener from bubble phase to **capture phase** (`addEventListener("pointerdown", fn, true)`) so the NodesGraph intercepts the event BEFORE the Board. The handler only calls `stopPropagation` + `preventDefault` when the pointer is near a node edge/socket (for drag-to-connect) or on a path (for selection) — otherwise it lets the event reach the Board for normal node selection/dragging. This prevents the conflict where drag-to-connect would interfere with node selection.
+
+Stage Summary:
+- Nodes cannot be rotated (allowRotation: false).
+- Paths are selectable (click to select, lemon highlight) and editable (updatePath API).
+- Sockets mode now renders Blender-style nodes with rows of controls (sliders, color swatches, checkboxes) and sockets beside input rows.
+- Drag-to-connect uses capture-phase events so it doesn't conflict with node selection.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 37
+Agent: main
+Task: Hide lattice for nodes, fix path selection, add path properties, fix interaction conflicts
+
+Work Log:
+- **Added `latticeDisplay: "none"` mode to Board**: A new option that hides all lattice boxes (local + global), resize handle squares, rotation handle, and pivot marker. However, the **hit testing for resize handles still works** — users can resize by grabbing the edges/corners even though no visual handles are shown. The NodesGraph passes `latticeDisplay: "none"` so nodes don't show lattice boxes but are still resizable.
+- **Fixed path selection**: The capture-phase pointer handler now has a clear priority order:
+  1. Sockets mode: check if pointer is on a **socket** → start drag-to-connect
+  2. Check if pointer is on a **path** → select the path (with lemon highlight glow)
+  3. Mindmap mode: check if pointer is on a **node side midpoint** → start drag-to-connect (small threshold to avoid conflict with resize)
+  4. Otherwise: let the Board handle it (node selection, drag, resize)
+- **Added path properties to playground**: When a path is selected, a "Selected Path" panel appears in the properties tab with:
+  - Shape selector (bezier/step/straight)
+  - Label text input
+  - Color override input
+  - Start head / End head checkboxes
+  - Delete path button
+  All changes are applied live via `updatePath()`.
+- **Fixed interaction conflicts**: Separated `hitTestSocket` (for sockets mode, 10px threshold) from `hitTestNodeEdge` (for mindmap mode, 8px threshold — smaller than the Board's 12px resize handle threshold). In sockets mode, only sockets are intercepted (not node sides), so resize handles work without conflict. In mindmap mode, side midpoints use a small threshold so they don't overlap with resize handles at corners.
+
+Stage Summary:
+- Nodes have no visible lattice boxes but are still resizable by grabbing edges/corners.
+- Paths are selectable (click to select, lemon highlight) with editable properties in the panel.
+- Interaction priority: socket drag > path select > node side drag > node select/resize.
+- `bun run lint` — 0 errors, 0 warnings.
+
+---
+Task ID: 2
+Agent: full-stack-developer
+Task: Build Calendar component (vanilla JS + React wrapper + playground)
+
+Work Log:
+- Read `/home/z/my-project/worklog.md` (Tasks 1–37) to lock the design system (Obsidian / Deep Violet / Lemon Signal #D9FF66, Inter + JetBrains Mono, Lucide icons), the navigation model (Route union with `component/category/slug`), the platform primitives (AgentSkillTabs, CodeBlock, Breadcrumbs/PageOverline, PageContainer, CopyableValue), the content-metadata schema (ComponentMeta with `properties` / `methods` / `events` / `defaults`), and the conventions other component agents are using (`panel` / `eyebrow` / `bg-grid` tokens, lemon-only accent — no indigo/blue, no emojis, no test files). Confirmed the existing inputs category (periodic-range, custom-button, toggle-group) so Calendar slots in cleanly.
+- Created `src/lib/components/calendar/calendar.ts` (~870 lines): the `Calendar` class.
+  - DOM-based renderer (no canvas, no external date library — only native `Date`). Scoped CSS injected once per document (`#calendar-component-styles`) with `--calendar-*` host-override tokens and `--cal-cell` for cell sizing.
+  - Header: month/year title (with `aria-live="polite"`), prev/next chevron buttons, optional Today button (lemon pill). Grid: a CSS Grid of 7 weekday headers + 6 rows × 7 day cells (always 6 rows so height is stable across months), plus an optional ISO-week-number column when `showWeekNumbers` is on.
+  - Day-cell states via state classes: `--adjacent`, `--weekend`, `--disabled`, `--today`, `--selected`, `--range-start`, `--range-end`, `--in-range`, `--preview`. Today gets a small lemon dot under the number; the dot recolors to dark when today is selected.
+  - Selection modes: `single` (click replaces), `range` (first click = start, second = end, auto-swap when end < start, live hover preview while awaiting end), `multi` (click toggles in the set). `setMode` normalizes the selection across modes (e.g. single→range keeps the date as `range.start` and awaits end).
+  - Public API exactly matches the spec: `getSelectedDate()`, `getSelectedRange()`, `getSelectedDates()`, `setSelectedDate(date|null)`, `setSelectedRange(start, end)`, `setSelectedDates(dates)`, `setMode(mode)`, `setMinDate(date)`, `setMaxDate(date)`, `setFirstDayOfWeek(day)`, `setShowWeekNumbers(on)`, `setCellSize(n)`, `today()`, `on("select"|"change"|"navigate", handler)`, `off(event, handler)`, `destroy()`. All events share a single `CalendarEventPayload` shape (`date`, `selectedDate`, `selectedRange`, `selectedDates`, `viewDate`, `mode`, `source`). `source` is `"select"` / `"navigate"` / `"programmatic"` so listeners can distinguish user vs programmatic changes.
+  - Date math: `atMidnight` strips time; `compareDate`/`isSameDay` are date-only; `isoWeek` follows ISO 8601 (week 1 contains the first Thursday, Monday-first). Disabled-dates use a `Set<string>` of `"YYYY-MM-DD"` keys for O(1) lookups; disabled-days-of-week is a `Set<number>`. `cellSize` is clamped to 20–80.
+  - Keyboard: ArrowRight/Left = ±1 day, ArrowDown/Up = ±1 week, PageDown/Up = ±1 month (Shift = ±1 year), Home/End = first/last day of the visible week, Enter/Space = select. Navigating off-month auto-flips the visible month and re-focuses the target date. Disabled cells receive focus (so keyboard nav isn't blocked) but cannot be selected.
+  - Tiny internal EventEmitter: `Map<string, Set<CalendarHandler>>`. `emit` clones the handler set to a plain array so a handler unsubscribing during dispatch doesn't skip siblings; listener errors are caught and logged so a single bad handler can't crash the calendar.
+  - `destroy()` is idempotent: removes all click/pointerenter listeners (stashed on each cell via `_calClick`/`_calEnter` properties), removes the header button listeners, removes the grid pointerleave + root keydown listeners, clears the cell array, clears the listener map, and removes the root from the DOM.
+  - Only accent color used is the brand lemon (`#D9FF66`) — no indigo, no blue. Reduced-motion query disables transitions.
+- Created `src/lib/components/calendar/index.ts` re-exporting the `Calendar` class, the `CalendarMode`/`CalendarRange`/`CalendarOptions`/`WeekdayFormat`/`CalendarEventPayload`/`CalendarHandler` types, and the `formatDateISO` helper.
+- Created `src/lib/components/calendar/AGENT.md` (architecture, internal-state, day-cell lifecycle, selection model, events, keyboard, date-math, extension points, known issues) and `src/lib/components/calendar/SKILL.md` (installation, constructor, options table, methods table, events, code examples for single/range/multi/disabled/week-numbers/programmatic/React, integration notes). Copied both to `public/docs/components/calendar-AGENT.md` and `public/docs/components/calendar-SKILL.md` so the AgentSkillTabs AGENT/SKILL tabs can fetch them.
+- Created `src/components/calendar/calendar-react.tsx`: React wrapper around the vanilla `Calendar`. Owns the instance for the lifetime of the mount; forwards prop changes via the imperative API. Initial selection is captured via refs so the create-once effect can stay empty. Callbacks (`onSelect`/`onChange`/`onNavigate`) are kept in refs so listeners don't need to be re-attached. Selection-prop changes are deduplicated by ISO-string keys (`singleKey`, `rangeKeyStr`) so the wrapper doesn't fight the playground's local mirror of the selection. `minDate`/`maxDate` clear correctly when the prop goes `undefined` (the Calendar's setters accept a falsy date as "clear").
+- Created `src/components/calendar/calendar-playground.tsx`: the full component detail page.
+  - Page header: Breadcrumbs → PageOverline "Components / Inputs" → H1 "Calendar" → longDescription → tag chips + status badge.
+  - Live preview (fixed `h-[600px]`): the calendar centered on a `bg-grid` panel; the header row shows a pulsing lemon dot, the live view label (YYYY-MM), and a Reset button. The output section under the canvas shows copyable chips for the current selection (one chip in single mode, start/end chips in range mode, one chip per date in multi mode) plus a hint line.
+  - Property inspector uses `AgentSkillTabs` with the Properties tab containing four grouped sections:
+    - **Selection**: Mode 3-way (single/range/multi).
+    - **Layout**: First day of week 2-way (Sunday/Monday), Weekday format 3-way (narrow/short/long), Cell size slider 24–60 with mono min/max labels.
+    - **Display**: Week numbers / Today button / Adjacent months / Today highlight / Weekend highlight — all Switch toggles.
+    - **Constraints**: Min date / Max date HTML date inputs + a "Clear constraints" button.
+  - AGENT and SKILL tabs fetch `/docs/components/calendar-AGENT.md` and `/docs/components/calendar-SKILL.md` respectively (handled by `AgentSkillTabs`).
+  - Code panel: JavaScript / HTML / CSS / API tabs. The JavaScript tab is generated from the live playground state (mode, firstDayOfWeek, weekdayFormat, all toggles, cellSize, minDate, maxDate) so the snippet always matches what's on screen. HTML/CSS/API tabs are static reference.
+  - Documentation section: Overview, When to use / not to use, Selection modes (single/range/multi explained with lemon mono code chips), Properties and defaults table, Methods cards, Events cards, Accessibility bullets (role=group, real `<button>` day cells, aria-label "Month Day, Year", aria-selected, aria-disabled, aria-live on title, full keyboard map), Date-math note. Sticky "On this page" sidebar on large screens.
+- Wired the platform:
+  - `src/lib/platform/content.ts`: added a `calendar` ComponentMeta to the `inputs` category (slug "calendar", name "Calendar", status "stable") with 16 properties, 16 methods, 3 events, and the defaults block. Sits between periodic-range and custom-button so the inputs category reads alphabetically/logically.
+  - `src/store/navigation.ts`: extended `routeLabel`'s `component` branch with `route.slug === "calendar" ? "Calendar"`.
+  - `src/app/page.tsx`: imported `CalendarPlayground` and added a `route.category === "inputs" && route.slug === "calendar"` branch to `renderRoute`'s `component` case.
+- Ran `bun run lint` — 0 errors, 0 warnings after removing five unused eslint-disable directives (the wrapper's exhaustive-deps directives on the create-once + selection effects, and the no-console directive on the handler-error catch). Ran `bunx tsc --noEmit` — no type errors in the new files (the single pre-existing `"unstable"` status error in content.ts for the nodes-graph component is unrelated). Checked `dev.log` — server compiles cleanly and serves `/` 200.
+
+Stage Summary:
+- Vanilla TS Calendar is complete and self-contained (no React/Next.js imports, no external date library). Files produced:
+  - `src/lib/components/calendar/calendar.ts` — `Calendar` class (DOM + scoped CSS, pointer + keyboard, three selection modes, range preview, week numbers, min/max, per-date/per-weekday disables, today/weekend highlight, configurable cell size, public API, idempotent destroy).
+  - `src/lib/components/calendar/index.ts` — public barrel.
+  - `src/lib/components/calendar/AGENT.md` + `SKILL.md` — contribution guide + usage docs.
+  - `public/docs/components/calendar-AGENT.md` + `calendar-SKILL.md` — copies for the playground's AGENT/SKILL tabs.
+  - `src/components/calendar/calendar-react.tsx` — React wrapper (create-once, imperative forwarding, ISO-key dedupe).
+  - `src/components/calendar/calendar-playground.tsx` — full playground (live canvas + AgentSkillTabs properties panel + output chips + JS/HTML/CSS/API code panel + documentation).
+- Public API surface (final):
+  - `new Calendar(container, options?: CalendarOptions)`
+  - `getSelectedDate()` / `getSelectedRange()` / `getSelectedDates()`
+  - `setSelectedDate(date | null)` / `setSelectedRange(start, end)` / `setSelectedDates(dates)`
+  - `setMode(mode)` / `setMinDate(date)` / `setMaxDate(date)` / `setFirstDayOfWeek(day)` / `setShowWeekNumbers(on)` / `setCellSize(n)` / `today()`
+  - `on("select" | "change" | "navigate", handler)` / `off(event, handler)` / `destroy()`
+  - `CalendarEventPayload = { date, selectedDate, selectedRange, selectedDates, viewDate, mode, source }`
+- Routing: `component/inputs/calendar` → `<CalendarPlayground />`. The navigation store's `routeLabel` returns "Calendar" for that slug.
+- Design discipline: only brand lemon used for selection/range/preview/today-dot; no indigo, no blue, no emojis, no test files. The calendar's host-override tokens (`--calendar-bg`, `--calendar-fg`, `--calendar-border`, `--calendar-muted`, `--calendar-muted-strong`) make it themeable on light/dark surfaces without code changes.
+- Ready for use as the date picker in any future inspector, form, or booking panel.
+
+---
+Task ID: 38 (summary)
+Agent: main + subagent
+Task: Mark NodesGraph as unstable + build full-options Calendar
+
+Work Log:
+- **Marked NodesGraph as "unstable"**: Changed `status: "stable"` to `status: "unstable"` in content.ts for the nodes-graph component. Added "Experimental" tag. Updated navigation.ts routeLabel to show "Nodes Graph (Unstable)" in breadcrumbs. The component has known interaction conflicts (path selection, drag-to-connect vs resize) that need further work.
+- **Built Calendar component** (`src/lib/components/calendar/calendar.ts`, ~870 lines): A full-featured date picker calendar with:
+  - Three selection modes: single, range (with hover preview), multi (toggle)
+  - Configurable first day of week (Sunday/Monday)
+  - Weekday format: narrow/short/long
+  - Week numbers (ISO)
+  - Min/max date constraints
+  - Per-date and per-weekday disables
+  - Today highlight, weekend highlight
+  - Adjacent month days (configurable)
+  - Configurable cell size (24-60px)
+  - Today button
+  - Full keyboard navigation (Arrows, PageUp/Down, Home/End, Enter/Space)
+  - Scoped CSS with `--calendar-*` custom properties
+  - DOM-based (no canvas, no external date library)
+  - Full public API: getSelectedDate/Range/Dates, setMode, setMinDate, setMaxDate, setFirstDayOfWeek, setShowWeekNumbers, setCellSize, today, on/off, destroy
+- **React wrapper + playground**: Full playground with fixed h-[600px] live canvas, AgentSkillTabs properties panel (Selection/Layout/Display/Constraints sections), output chips for selected dates, code panel (JS/HTML/CSS/API), and documentation.
+- VLM-verified: Calendar renders with 114 day cells, properties/AGENT/SKILL tabs present.
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- NodesGraph is now categorized as "unstable" in the content metadata and navigation.
+- New Calendar component established with full options: single/range/multi selection, week numbers, min/max constraints, keyboard navigation, configurable display.
+- Appears in sidebar under Inputs → Calendar.
+
+---
+Task ID: 39
+Agent: main
+Task: Rebuild Calendar from scratch using simplified spec
+
+Work Log:
+- **Deleted old Calendar files** and rebuilt from scratch following the new simplified spec.
+- **Calendar class** (`src/lib/components/calendar/calendar.ts`): Single-file vanilla TS implementation with:
+  - Pure date math (no Date object for date-only values — avoids TZ issues): `isLeap`, `daysInMonth`, `dayOfWeek`, `compareDate`, `isBetween`, `addMonths`, `addDays`, `weekNumber`, `today`.
+  - `CalendarDate = { year, month, day }` — date-only, no timezone.
+  - 4 selection modes: none, single, multiple, range (with hover preview and auto-swap).
+  - Separated value (selection) vs view_date (displayed period) — navigating months doesn't change selection.
+  - Grid: 6×7, stable height, outside-month dates configurable (show/hide/disabled).
+  - Cell states with visual precedence: selected > range-start/end > in-range > focused > today > hover/preview > default > outside.
+  - Disabled dates: min/max bounds + explicit disabled list.
+  - Week numbers (ISO), configurable week start (0-6), weekday format (narrow/short/long).
+  - Navigation: prev/next month, today button, clear button.
+  - Keyboard: Arrows (day/week), Home/End (week bounds), PageUp/Down (month), Shift+PageUp/Down (year), Enter/Space (select), Escape (cancel range).
+  - Events: selection_changed, view_changed, date_selected, range_changed, focused_date_changed, validation_failed, today_requested, clear_requested.
+  - Commands: setProperty, navigate, navigateTo, selectDate, setSelection, clearSelection, focusDate, getValue, getRange, getSelectedDates, destroy.
+  - Scoped CSS with `--cal-*` custom properties, lemon accent, dark theme.
+- **React wrapper**: Create-once mount, imperative property forwarding, callback refs.
+- **Playground**: Fixed h-[600px] live canvas, AgentSkillTabs properties panel (selection mode, weekday format, week start, cell size, 9 toggle switches), output chips showing selection, code panel, documentation.
+- AGENT.md + SKILL.md created and copied to public/docs.
+- VLM-verified: 42 day cells, 2 nav buttons, Properties/AGENT/SKILL tabs present.
+- `bun run lint` — 0 errors, 0 warnings.
+
+Stage Summary:
+- Calendar rebuilt from scratch per the simplified spec. Clean single-file architecture with pure date math, 4 selection modes, keyboard navigation, full event system, and scoped CSS.

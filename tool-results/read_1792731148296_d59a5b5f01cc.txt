@@ -1,0 +1,1508 @@
+     1→/**
+     2→ * GanttTimeline — a Gantt Chart Timeline Bars component (vanilla TypeScript).
+     3→ *
+     4→ * Spec reference: §15 Minimum viable specification.
+     5→ *
+     6→ *   - Display generic items as horizontal bars.
+     7→ *   - Configure start and end fields independently of item content.
+     8→ *   - Map time intervals to a shared horizontal coordinate system.
+     9→ *   - Support configurable visible range, scale, and scrolling.
+    10→ *   - Support optional row assignment and row headers.
+    11→ *   - Provide a minimal default bar appearance.
+    12→ *   - Allow custom templates without requiring them.
+    13→ *   - Keep bar geometry independent of rendered content.
+    14→ *   - Support selection and optional move/resize interactions.
+    15→ *   - Define interval validation, snapping, and time-zone behavior.
+    16→ *   - Expose view-range, scale, selection, move, and resize events.
+    17→ *   - Support responsive layout and usable targets for short bars.
+    18→ *   - Provide keyboard alternatives and accessible item descriptions.
+    19→ *   - Separate visualization behavior from scheduling logic and persistence.
+    20→ *
+    21→ * Architecture: single-file DOM-based renderer with scoped CSS (`.gantt-`
+    22→ * prefix). Time is epoch milliseconds (number) throughout — the host converts
+    23→ * to/from timezones. The time-to-pixel mapping is linear: x(t) = W * (t - T0)
+    24→ * / (T1 - T0). Bar content is laid out by the content-template system
+    25→ * (src/lib/templates/); pass "none" to use native rendering (plain bar).
+    26→ */
+    27→
+    28→import {
+    29→  templateRegistry,
+    30→  rendererRegistry,
+    31→  slotVisible,
+    32→  type ContentTemplate,
+    33→  type TemplateDensity,
+    34→} from "@/lib/templates";
+    35→
+    36→// ---- Public types ----
+    37→
+    38→export type GanttScale = "hour" | "day" | "week" | "month" | "quarter" | "year";
+    39→export type GanttSelectionMode = "none" | "single";
+    40→export type GanttAxisPosition = "top" | "bottom";
+    41→export type GanttResizeEndpoint = "start" | "end";
+    42→
+    43→export interface GanttItem {
+    44→  id: string;
+    45→  /** Start time as epoch milliseconds. */
+    46→  start: number;
+    47→  /** End time as epoch milliseconds. Must be >= start. */
+    48→  end: number;
+    49→  /** Row assignment. If omitted, the item is placed in the default row. */
+    50→  rowId?: string;
+    51→  /** Optional title for the default bar template and aria-label. */
+    52→  title?: string;
+    53→  /** Optional bar color (any CSS color). Overrides the default bar color. */
+    54→  color?: string;
+    55→  /** Optional progress 0–100. Renders a progress overlay when progressEnabled is true. */
+    56→  progress?: number;
+    57→  /** Optional flag to disable interactions on this specific bar. */
+    58→  disabled?: boolean;
+    59→  [key: string]: unknown;
+    60→}
+    61→
+    62→export interface GanttRow {
+    63→  id: string;
+    64→  title?: string;
+    65→  color?: string;
+    66→  collapsed?: boolean;
+    67→}
+    68→
+    69→export interface GanttOptions {
+    70→  items?: GanttItem[];
+    71→  rows?: GanttRow[];
+    72→  viewStart?: number;
+    73→  viewEnd?: number;
+    74→  scale?: GanttScale;
+    75→  showRowHeaders?: boolean;
+    76→  rowHeaderWidth?: number;
+    77→  rowHeight?: number;
+    78→  barHeight?: number;
+    79→  barGap?: number;
+    80→  rowGap?: number;
+    81→  barMinWidth?: number;
+    82→  selectable?: boolean;
+    83→  selectionMode?: GanttSelectionMode;
+    84→  movable?: boolean;
+    85→  resizable?: boolean;
+    86→  rowMovable?: boolean;
+    87→  snapInterval?: number;
+    88→  showGrid?: boolean;
+    89→  showToday?: boolean;
+    90→  showAxis?: boolean;
+    91→  axisPosition?: GanttAxisPosition;
+    92→  readOnly?: boolean;
+    93→  disabled?: boolean;
+    94→  progressEnabled?: boolean;
+    95→  minDuration?: number;
+    96→  templateId?: string;
+    97→}
+    98→
+    99→export interface GanttEventPayload {
+   100→  type?: string;
+   101→  itemId?: string | null;
+   102→  previousItemId?: string | null;
+   103→  itemIds?: string[];
+   104→  previousItemIds?: string[];
+   105→  rowId?: string | null;
+   106→  previousRowId?: string | null;
+   107→  targetRowId?: string | null;
+   108→  start?: number;
+   109→  end?: number;
+   110→  oldStart?: number;
+   111→  oldEnd?: number;
+   112→  newStart?: number;
+   113→  newEnd?: number;
+   114→  endpoint?: GanttResizeEndpoint;
+   115→  viewStart?: number;
+   116→  viewEnd?: number;
+   117→  scale?: GanttScale;
+   118→  reason?: string;
+   119→  source?: "pointer" | "keyboard" | "programmatic";
+   120→  operation?: "move" | "resize-start" | "resize-end" | "row-change";
+   121→}
+   122→
+   123→export type GanttHandler = (payload: GanttEventPayload) => void;
+   124→
+   125→// ---- Constants ----
+   126→
+   127→const STYLE_ID = "gantt-styles";
+   128→
+   129→/**
+   130→ * Sentinel template ID for native rendering (no content template). The bar
+   131→ * shows a plain colored fill with no templated content inside. Like the
+   132→ * Kanban's KANBAN_TEMPLATE_NONE, this demonstrates that the component is
+   133→ * independent of the template system.
+   134→ */
+   135→export const GANTT_TEMPLATE_NONE = "none";
+   136→
+   137→/** One day in milliseconds. */
+   138→const DAY_MS = 86_400_000;
+   139→/** One hour in milliseconds. */
+   140→const HOUR_MS = 3_600_000;
+   141→
+   142→/** Default snap intervals per scale (in ms). */
+   143→const SCALE_SNAP: Record<GanttScale, number> = {
+   144→  hour: HOUR_MS,
+   145→  day: DAY_MS,
+   146→  week: 7 * DAY_MS,
+   147→  month: 30 * DAY_MS,
+   148→  quarter: 90 * DAY_MS,
+   149→  year: 365 * DAY_MS,
+   150→};
+   151→
+   152→/** Header label format per scale. */
+   153→const SCALE_FORMAT: Record<GanttScale, (t: number, locale: string) => string> = {
+   154→  hour: (t, l) => new Date(t).toLocaleString(l, { month: "short", day: "numeric", hour: "2-digit" }),
+   155→  day: (t, l) => new Date(t).toLocaleDateString(l, { month: "short", day: "numeric" }),
+   156→  week: (t, l) => new Date(t).toLocaleDateString(l, { month: "short", day: "numeric" }),
+   157→  month: (t, l) => new Date(t).toLocaleDateString(l, { month: "short", year: "numeric" }),
+   158→  quarter: (t, l) => {
+   159→    const d = new Date(t);
+   160→    const q = Math.floor(d.getMonth() / 3) + 1;
+   161→    return `Q${q} ${d.getFullYear()}`;
+   162→  },
+   163→  year: (t) => String(new Date(t).getFullYear()),
+   164→};
+   165→
+   166→/** Minor tick interval per scale (for grid lines). */
+   167→const SCALE_TICK: Record<GanttScale, number> = {
+   168→  hour: HOUR_MS,
+   169→  day: 6 * HOUR_MS,
+   170→  week: DAY_MS,
+   171→  month: 7 * DAY_MS,
+   172→  quarter: 30 * DAY_MS,
+   173→  year: 90 * DAY_MS,
+   174→};
+   175→
+   176→/** Major tick interval per scale (for axis labels). */
+   177→const SCALE_MAJOR_TICK: Record<GanttScale, number> = {
+   178→  hour: DAY_MS,
+   179→  day: 7 * DAY_MS,
+   180→  week: 30 * DAY_MS,
+   181→  month: 90 * DAY_MS,
+   182→  quarter: 365 * DAY_MS,
+   183→  year: 365 * DAY_MS * 2,
+   184→};
+   185→
+   186→// ---- Style injection (scoped CSS, .gantt- prefix) ----
+   187→
+   188→function injectStyles(): void {
+   189→  if (typeof document === "undefined") return;
+   190→  if (document.getElementById(STYLE_ID)) return;
+   191→  const el = document.createElement("style");
+   192→  el.id = STYLE_ID;
+   193→  el.textContent = `
+   194→.gantt-timeline {
+   195→  --gt-bg: #101014;
+   196→  --gt-surface: #211A30;
+   197→  --gt-surface-2: #2A2238;
+   198→  --gt-surface-3: #342348;
+   199→  --gt-border: #383343;
+   200→  --gt-text: #F4F1FF;
+   201→  --gt-muted: #B8B2CA;
+   202→  --gt-accent: #D9FF66;
+   203→  --gt-accent-hover: #C8F34F;
+   204→  --gt-danger: #FF858B;
+   205→  --gt-warn: #FFD36B;
+   206→  --gt-ok: #8FE3A5;
+   207→  --gt-bar: #6B5FA8;
+   208→  --gt-bar-2: #8B7FC8;
+   209→  --gt-radius: 6px;
+   210→  font-family: inherit;
+   211→  color: var(--gt-text);
+   212→  background: var(--gt-bg);
+   213→  border: 1px solid var(--gt-border);
+   214→  border-radius: var(--gt-radius);
+   215→  display: flex;
+   216→  flex-direction: column;
+   217→  min-height: 0;
+   218→  height: 100%;
+   219→  width: 100%;
+   220→  overflow: hidden;
+   221→  position: relative;
+   222→  box-sizing: border-box;
+   223→}
+   224→.gantt-timeline * { box-sizing: border-box; }
+   225→.gantt-timeline.gantt-disabled { opacity: 0.55; pointer-events: none; }
+   226→.gantt-timeline.gantt-readonly .gantt-bar { cursor: default; }
+   227→
+   228→/* Layout: axis (optional) + body (row headers + scrollable timeline grid) */
+   229→.gantt-axis {
+   230→  flex: 0 0 auto;
+   231→  display: flex;
+   232→  border-bottom: 1px solid var(--gt-border);
+   233→  background: var(--gt-surface);
+   234→  overflow: hidden;
+   235→}
+   236→.gantt-timeline.gantt-axis-bottom .gantt-axis {
+   237→  border-bottom: none;
+   238→  border-top: 1px solid var(--gt-border);
+   239→  order: 2;
+   240→}
+   241→.gantt-axis-spacer {
+   242→  flex: 0 0 auto;
+   243→  border-right: 1px solid var(--gt-border);
+   244→  background: var(--gt-surface-2);
+   245→}
+   246→.gantt-axis-labels {
+   247→  flex: 1 1 auto;
+   248→  position: relative;
+   249→  overflow: hidden;
+   250→  height: 44px;
+   251→}
+   252→.gantt-axis-major {
+   253→  position: absolute;
+   254→  top: 0;
+   255→  bottom: 0;
+   256→  display: flex;
+   257→  align-items: center;
+   258→  padding: 0 8px;
+   259→  font-size: 11px;
+   260→  font-weight: 600;
+   261→  color: var(--gt-text);
+   262→  white-space: nowrap;
+   263→  border-left: 1px solid var(--gt-border);
+   264→}
+   265→.gantt-axis-minor {
+   266→  position: absolute;
+   267→  top: 50%;
+   268→  bottom: 0;
+   269→  width: 1px;
+   270→  background: var(--gt-border);
+   271→  opacity: 0.5;
+   272→}
+   273→
+   274→/* Body: row headers + scrollable grid */
+   275→.gantt-body {
+   276→  flex: 1 1 auto;
+   277→  min-height: 0;
+   278→  display: flex;
+   279→  overflow: hidden;
+   280→}
+   281→.gantt-row-headers {
+   282→  flex: 0 0 auto;
+   283→  display: flex;
+   284→  flex-direction: column;
+   285→  border-right: 1px solid var(--gt-border);
+   286→  background: var(--gt-surface-2);
+   287→  overflow: hidden;
+   288→}
+   289→.gantt-row-header {
+   290→  display: flex;
+   291→  align-items: center;
+   292→  gap: 6px;
+   293→  padding: 0 10px;
+   294→  font-size: 12px;
+   295→  font-weight: 500;
+   296→  color: var(--gt-text);
+   297→  white-space: nowrap;
+   298→  overflow: hidden;
+   299→  text-overflow: ellipsis;
+   300→  border-bottom: 1px solid var(--gt-border);
+   301→  flex: 0 0 auto;
+   302→}
+   303→.gantt-row-header-color {
+   304→  width: 8px;
+   305→  height: 8px;
+   306→  border-radius: 999px;
+   307→  background: var(--gt-muted);
+   308→  flex: 0 0 auto;
+   309→}
+   310→.gantt-row-header-title {
+   311→  flex: 1 1 auto;
+   312→  overflow: hidden;
+   313→  text-overflow: ellipsis;
+   314→}
+   315→.gantt-row-header-count {
+   316→  font-family: var(--font-mono, ui-monospace, monospace);
+   317→  font-size: 10px;
+   318→  color: var(--gt-muted);
+   319→  padding: 1px 5px;
+   320→  border-radius: 999px;
+   321→  background: var(--gt-surface-3);
+   322→  flex: 0 0 auto;
+   323→}
+   324→.gantt-row-header-empty {
+   325→  display: flex;
+   326→  align-items: center;
+   327→  justify-content: center;
+   328→  font-size: 11px;
+   329→  color: var(--gt-muted);
+   330→  font-style: italic;
+   331→}
+   332→
+   333→/* Scrollable timeline grid */
+   334→.gantt-scroll {
+   335→  flex: 1 1 auto;
+   336→  min-width: 0;
+   337→  overflow: auto;
+   338→  scrollbar-width: thin;
+   339→  position: relative;
+   340→}
+   341→.gantt-grid {
+   342→  position: relative;
+   343→  min-width: 100%;
+   344→}
+   345→.gantt-grid-line {
+   346→  position: absolute;
+   347→  top: 0;
+   348→  bottom: 0;
+   349→  width: 1px;
+   350→  background: var(--gt-border);
+   351→  opacity: 0.4;
+   352→  pointer-events: none;
+   353→}
+   354→.gantt-grid-line-major {
+   355→  opacity: 0.7;
+   356→}
+   357→.gantt-row {
+   358→  position: relative;
+   359→  border-bottom: 1px solid var(--gt-border);
+   360→  overflow: hidden;
+   361→}
+   362→.gantt-row:last-child {
+   363→  border-bottom: none;
+   364→}
+   365→.gantt-row.gantt-drop-target {
+   366→  background: color-mix(in srgb, var(--gt-accent) 6%, transparent);
+   367→}
+   368→
+   369→/* Bars */
+   370→.gantt-bar {
+   371→  position: absolute;
+   372→  left: 0;
+   373→  top: 50%;
+   374→  transform: translateY(-50%);
+   375→  display: flex;
+   376→  align-items: center;
+   377→  overflow: hidden;
+   378→  background: var(--gt-bar);
+   379→  border: 1px solid var(--gt-border);
+   380→  border-radius: 4px;
+   381→  cursor: grab;
+   382→  outline: none;
+   383→  transition: box-shadow 120ms ease, border-color 120ms ease;
+   384→  padding: 0 8px;
+   385→  gap: 6px;
+   386→  user-select: none;
+   387→}
+   388→.gantt-bar:hover {
+   389→  border-color: var(--gt-accent);
+   390→}
+   391→.gantt-bar:focus-visible {
+   392→  border-color: var(--gt-accent);
+   393→  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gt-accent) 40%, transparent);
+   394→  z-index: 5;
+   395→}
+   396→.gantt-bar.gantt-selected {
+   397→  border-color: var(--gt-accent);
+   398→  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gt-accent) 50%, transparent);
+   399→  z-index: 4;
+   400→}
+   401→.gantt-bar.gantt-dragging {
+   402→  opacity: 0.85;
+   403→  cursor: grabbing;
+   404→  z-index: 10;
+   405→  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+   406→}
+   407→.gantt-bar.gantt-readonly-bar { cursor: default; }
+   408→.gantt-bar.gantt-disabled-bar { opacity: 0.4; cursor: not-allowed; }
+   409→.gantt-bar.gantt-preview {
+   410→  opacity: 0.5;
+   411→  pointer-events: none;
+   412→  border-style: dashed;
+   413→}
+   414→
+   415→/* Progress overlay */
+   416→.gantt-bar-progress {
+   417→  position: absolute;
+   418→  left: 0;
+   419→  top: 0;
+   420→  bottom: 0;
+   421→  background: color-mix(in srgb, var(--gt-accent) 35%, transparent);
+   422→  pointer-events: none;
+   423→  border-right: 1px solid var(--gt-accent);
+   424→}
+   425→
+   426→/* Bar content */
+   427→.gantt-bar-content {
+   428→  position: relative;
+   429→  z-index: 1;
+   430→  display: flex;
+   431→  align-items: center;
+   432→  gap: 6px;
+   433→  width: 100%;
+   434→  height: 100%;
+   435→  overflow: hidden;
+   436→  pointer-events: none;
+   437→}
+   438→.gantt-bar-title {
+   439→  font-size: 11px;
+   440→  font-weight: 500;
+   441→  color: #fff;
+   442→  white-space: nowrap;
+   443→  overflow: hidden;
+   444→  text-overflow: ellipsis;
+   445→  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+   446→}
+   447→
+   448→/* Resize handles */
+   449→.gantt-resize-handle {
+   450→  position: absolute;
+   451→  top: 0;
+   452→  bottom: 0;
+   453→  width: 8px;
+   454→  cursor: ew-resize;
+   455→  z-index: 2;
+   456→  display: flex;
+   457→  align-items: center;
+   458→  justify-content: center;
+   459→}
+   460→.gantt-resize-handle-left {
+   461→  left: 0;
+   462→  border-left: 2px solid transparent;
+   463→}
+   464→.gantt-resize-handle-right {
+   465→  right: 0;
+   466→  border-right: 2px solid transparent;
+   467→}
+   468→.gantt-resize-handle:hover,
+   469→.gantt-resize-handle.gantt-active {
+   470→  border-color: var(--gt-accent);
+   471→}
+   472→.gantt-resize-handle::after {
+   473→  content: '';
+   474→  width: 2px;
+   475→  height: 12px;
+   476→  background: rgba(255,255,255,0.4);
+   477→  border-radius: 1px;
+   478→}
+   479→.gantt-resize-handle:hover::after,
+   480→.gantt-resize-handle.gantt-active::after {
+   481→  background: var(--gt-accent);
+   482→}
+   483→
+   484→/* Today marker */
+   485→.gantt-today {
+   486→  position: absolute;
+   487→  top: 0;
+   488→  bottom: 0;
+   489→  width: 2px;
+   490→  background: var(--gt-danger);
+   491→  z-index: 3;
+   492→  pointer-events: none;
+   493→  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gt-danger) 30%, transparent);
+   494→}
+   495→.gantt-today-label {
+   496→  position: absolute;
+   497→  top: 2px;
+   498→  left: 4px;
+   499→  font-family: var(--font-mono, ui-monospace, monospace);
+   500→  font-size: 9px;
+   501→  font-weight: 600;
+   502→  color: var(--gt-danger);
+   503→  background: var(--gt-bg);
+   504→  padding: 1px 4px;
+   505→  border-radius: 3px;
+   506→  white-space: nowrap;
+   507→}
+   508→
+   509→/* Empty state */
+   510→.gantt-empty {
+   511→  display: flex;
+   512→  align-items: center;
+   513→  justify-content: center;
+   514→  height: 100%;
+   515→  min-height: 120px;
+   516→  font-size: 12px;
+   517→  color: var(--gt-muted);
+   518→  font-style: italic;
+   519→}
+   520→
+   521→/* Drag preview ghost */
+   522→.gantt-drag-ghost {
+   523→  position: absolute;
+   524→  top: 50%;
+   525→  transform: translateY(-50%);
+   526→  height: var(--gt-bar-h, 24px);
+   527→  border: 2px dashed var(--gt-accent);
+   528→  border-radius: 4px;
+   529→  background: color-mix(in srgb, var(--gt-accent) 10%, transparent);
+   530→  pointer-events: none;
+   531→  z-index: 9;
+   532→}
+   533→
+   534→@media (prefers-reduced-motion: reduce) {
+   535→  .gantt-bar { transition: none; }
+   536→}
+   537→`;
+   538→  document.head.appendChild(el);
+   539→}
+   540→
+   541→// ---- Utilities ----
+   542→
+   543→function uid(prefix: string): string {
+   544→  return `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36).slice(-4)}`;
+   545→}
+   546→
+   547→function clamp(n: number, min: number, max: number): number {
+   548→  return Math.max(min, Math.min(max, n));
+   549→}
+   550→
+   551→/** Snap a time (epoch ms) to the nearest multiple of snapInterval. */
+   552→function snapTime(t: number, snap: number): number {
+   553→  if (!snap || snap <= 0) return t;
+   554→  return Math.round(t / snap) * snap;
+   555→}
+   556→
+   557→// ---- Component ----
+   558→
+   559→export class GanttTimeline {
+   560→  private container: HTMLElement;
+   561→  private root!: HTMLDivElement;
+   562→  private opts: Required<GanttOptions>;
+   563→  private items: GanttItem[];
+   564→  private rows: GanttRow[];
+   565→  private selectedItemId: string | null = null;
+   566→  private listeners = new Map<string, Set<GanttHandler>>();
+   567→  private barEls = new Map<string, HTMLElement>();
+   568→  private rowEls = new Map<string, HTMLElement>();
+   569→  private _destroyed = false;
+   570→  private gridEl!: HTMLDivElement;
+   571→  private scrollEl!: HTMLDivElement;
+   572→  private axisLabelsEl!: HTMLDivElement;
+   573→  private todayEl: HTMLDivElement | null = null;
+   574→
+   575→  // Drag state
+   576→  private dragItemId: string | null = null;
+   577→  private dragMode: "move" | "resize-start" | "resize-end" | null = null;
+   578→  private dragStartX = 0;
+   579→  private dragOriginalStart = 0;
+   580→  private dragOriginalEnd = 0;
+   581→  private dragOriginalRowId: string | null = null;
+   582→  private dragGhostEl: HTMLDivElement | null = null;
+   583→  private dragHappened = false;
+   584→
+   585→  constructor(container: HTMLElement, options: GanttOptions = {}) {
+   586→    this.container = container;
+   587→    injectStyles();
+   588→
+   589→    // Default view range: 30 days centered on today if not provided.
+   590→    const now = Date.now();
+   591→    const defaultViewStart = now - 15 * DAY_MS;
+   592→    const defaultViewEnd = now + 15 * DAY_MS;
+   593→
+   594→    this.opts = {
+   595→      items: options.items ?? [],
+   596→      rows: options.rows ?? [],
+   597→      viewStart: options.viewStart ?? defaultViewStart,
+   598→      viewEnd: options.viewEnd ?? defaultViewEnd,
+   599→      scale: options.scale ?? "day",
+   600→      showRowHeaders: options.showRowHeaders ?? true,
+   601→      rowHeaderWidth: options.rowHeaderWidth ?? 160,
+   602→      rowHeight: options.rowHeight ?? 48,
+   603→      barHeight: options.barHeight ?? 28,
+   604→      barGap: options.barGap ?? 4,
+   605→      rowGap: options.rowGap ?? 0,
+   606→      barMinWidth: options.barMinWidth ?? 12,
+   607→      selectable: options.selectable ?? true,
+   608→      selectionMode: options.selectionMode ?? "single",
+   609→      movable: options.movable ?? true,
+   610→      resizable: options.resizable ?? true,
+   611→      rowMovable: options.rowMovable ?? false,
+   612→      snapInterval: options.snapInterval ?? SCALE_SNAP[options.scale ?? "day"],
+   613→      showGrid: options.showGrid ?? true,
+   614→      showToday: options.showToday ?? true,
+   615→      showAxis: options.showAxis ?? true,
+   616→      axisPosition: options.axisPosition ?? "top",
+   617→      readOnly: options.readOnly ?? false,
+   618→      disabled: options.disabled ?? false,
+   619→      progressEnabled: options.progressEnabled ?? true,
+   620→      minDuration: options.minDuration ?? 0,
+   621→      templateId: options.templateId ?? "gantt.standard-bar",
+   622→    };
+   623→
+   624→    // Defensive clone
+   625→    this.items = (this.opts.items as GanttItem[]).map((it) => ({ ...it }));
+   626→    this.rows = (this.opts.rows as GanttRow[]).map((r) => ({ ...r }));
+   627→
+   628→    // If no rows provided, create a single default row
+   629→    if (this.rows.length === 0) {
+   630→      this.rows = [{ id: "default", title: "Timeline" }];
+   631→    }
+   632→
+   633→    this.render();
+   634→  }
+   635→
+   636→  // ---- Time-to-pixel mapping ----
+   637→
+   638→  /** Convert a time (epoch ms) to a pixel x within the grid. */
+   639→  private timeToX(t: number): number {
+   640→    const range = this.opts.viewEnd - this.opts.viewStart;
+   641→    if (range <= 0) return 0;
+   642→    return ((t - this.opts.viewStart) / range) * this.getGridWidth();
+   643→  }
+   644→
+   645→  /** Convert a pixel x to a time (epoch ms). */
+   646→  private xToTime(x: number): number {
+   647→    const w = this.getGridWidth();
+   648→    if (w <= 0) return this.opts.viewStart;
+   649→    return this.opts.viewStart + (x / w) * (this.opts.viewEnd - this.opts.viewStart);
+   650→  }
+   651→
+   652→  /** The grid width in pixels. At least the scroll container's clientWidth. */
+   653→  private getGridWidth(): number {
+   654→    if (!this.scrollEl) return 0;
+   655→    return Math.max(this.scrollEl.clientWidth, this.opts.rowHeaderWidth ? 0 : 0) || this.scrollEl.clientWidth;
+   656→  }
+   657→
+   658→  // ---- Rendering ----
+   659→
+   660→  private render(): void {
+   661→    if (this._destroyed) return;
+   662→    this.barEls.clear();
+   663→    this.rowEls.clear();
+   664→
+   665→    const root = document.createElement("div");
+   666→    root.className = "gantt-timeline";
+   667→    if (this.opts.axisPosition === "bottom") root.classList.add("gantt-axis-bottom");
+   668→    if (this.opts.readOnly) root.classList.add("gantt-readonly");
+   669→    if (this.opts.disabled) root.classList.add("gantt-disabled");
+   670→    root.style.setProperty("--gt-bar-h", `${this.opts.barHeight}px`);
+   671→
+   672→    // Axis
+   673→    if (this.opts.showAxis) {
+   674→      const axis = document.createElement("div");
+   675→      axis.className = "gantt-axis";
+   676→      if (this.opts.showRowHeaders) {
+   677→        const spacer = document.createElement("div");
+   678→        spacer.className = "gantt-axis-spacer";
+   679→        spacer.style.width = `${this.opts.rowHeaderWidth}px`;
+   680→        axis.appendChild(spacer);
+   681→      }
+   682→      const labels = document.createElement("div");
+   683→      labels.className = "gantt-axis-labels";
+   684→      this.renderAxisLabels(labels);
+   685→      axis.appendChild(labels);
+   686→      root.appendChild(axis);
+   687→    }
+   688→
+   689→    // Body
+   690→    const body = document.createElement("div");
+   691→    body.className = "gantt-body";
+   692→
+   693→    // Row headers
+   694→    if (this.opts.showRowHeaders) {
+   695→      const headers = document.createElement("div");
+   696→      headers.className = "gantt-row-headers";
+   697→      headers.style.width = `${this.opts.rowHeaderWidth}px`;
+   698→      for (const row of this.rows) {
+   699→        const h = document.createElement("div");
+   700→        h.className = "gantt-row-header";
+   701→        h.style.height = `${this.opts.rowHeight}px`;
+   702→        if (row.color) {
+   703→          const dot = document.createElement("span");
+   704→          dot.className = "gantt-row-header-color";
+   705→          dot.style.background = row.color;
+   706→          h.appendChild(dot);
+   707→        }
+   708→        const title = document.createElement("span");
+   709→        title.className = "gantt-row-header-title";
+   710→        title.textContent = row.title ?? row.id;
+   711→        h.appendChild(title);
+   712→        const count = this.items.filter((it) => (it.rowId ?? "default") === row.id).length;
+   713→        const countEl = document.createElement("span");
+   714→        countEl.className = "gantt-row-header-count";
+   715→        countEl.textContent = String(count);
+   716→        h.appendChild(countEl);
+   717→        headers.appendChild(h);
+   718→      }
+   719→      body.appendChild(headers);
+   720→    }
+   721→
+   722→    // Scrollable grid
+   723→    const scroll = document.createElement("div");
+   724→    scroll.className = "gantt-scroll";
+   725→    scroll.addEventListener("scroll", () => {
+   726→      if (this.opts.showAxis) {
+   727→        this.axisLabelsEl.style.transform = `translateX(${-scroll.scrollLeft}px)`;
+   728→      }
+   729→    });
+   730→    this.scrollEl = scroll;
+   731→
+   732→    const grid = document.createElement("div");
+   733→    grid.className = "gantt-grid";
+   734→    grid.style.minWidth = "100%";
+   735→    grid.style.width = `${this.getGridWidth()}px`;
+   736→    this.gridEl = grid;
+   737→
+   738→    // Grid lines
+   739→    if (this.opts.showGrid) {
+   740→      this.renderGridLines(grid);
+   741→    }
+   742→
+   743→    // Rows + bars
+   744→    for (const row of this.rows) {
+   745→      const rowEl = this.renderRow(row);
+   746→      grid.appendChild(rowEl);
+   747→      this.rowEls.set(row.id, rowEl);
+   748→    }
+   749→
+   750→    // Today marker
+   751→    if (this.opts.showToday) {
+   752→      this.renderTodayMarker(grid);
+   753→    }
+   754→
+   755→    scroll.appendChild(grid);
+   756→    body.appendChild(scroll);
+   757→    root.appendChild(body);
+   758→
+   759→    this.container.innerHTML = "";
+   760→    this.container.appendChild(root);
+   761→    this.root = root;
+   762→
+   763→    // After layout, set the grid width to match or exceed the scroll width
+   764→    requestAnimationFrame(() => {
+   765→      if (!this._destroyed) this.updateGridWidth();
+   766→    });
+   767→  }
+   768→
+   769→  private updateGridWidth(): void {
+   770→    if (!this.gridEl || !this.scrollEl) return;
+   771→    const w = this.scrollEl.clientWidth;
+   772→    this.gridEl.style.width = `${w}px`;
+   773→    // Re-position bars after width change
+   774→    this.positionAllBars();
+   775→    if (this.opts.showAxis) this.renderAxisLabels(this.axisLabelsEl);
+   776→    if (this.opts.showGrid) this.renderGridLines(this.gridEl);
+   777→    if (this.opts.showToday) this.renderTodayMarker(this.gridEl);
+   778→  }
+   779→
+   780→  private renderAxisLabels(container: HTMLElement): void {
+   781→    container.innerHTML = "";
+   782→    this.axisLabelsEl = container as HTMLDivElement;
+   783→    const w = container.clientWidth || this.getGridWidth();
+   784→    const majorTick = SCALE_MAJOR_TICK[this.opts.scale];
+   785→    const start = Math.ceil(this.opts.viewStart / majorTick) * majorTick;
+   786→    for (let t = start; t <= this.opts.viewEnd; t += majorTick) {
+   787→      const x = ((t - this.opts.viewStart) / (this.opts.viewEnd - this.opts.viewStart)) * w;
+   788→      const label = document.createElement("div");
+   789→      label.className = "gantt-axis-major";
+   790→      label.textContent = SCALE_FORMAT[this.opts.scale](t, "en-US");
+   791→      label.style.left = `${x}px`;
+   792→      container.appendChild(label);
+   793→    }
+   794→  }
+   795→
+   796→  private renderGridLines(grid: HTMLElement): void {
+   797→    // Remove old grid lines
+   798→    grid.querySelectorAll(".gantt-grid-line").forEach((el) => el.remove());
+   799→    const w = this.gridEl.clientWidth || this.getGridWidth();
+   800→    const minorTick = SCALE_TICK[this.opts.scale];
+   801→    const majorTick = SCALE_MAJOR_TICK[this.opts.scale];
+   802→    const start = Math.ceil(this.opts.viewStart / minorTick) * minorTick;
+   803→    for (let t = start; t <= this.opts.viewEnd; t += minorTick) {
+   804→      const x = ((t - this.opts.viewStart) / (this.opts.viewEnd - this.opts.viewStart)) * w;
+   805→      const line = document.createElement("div");
+   806→      line.className = "gantt-grid-line";
+   807→      if (t % majorTick === 0) line.classList.add("gantt-grid-line-major");
+   808→      line.style.left = `${x}px`;
+   809→      grid.appendChild(line);
+   810→    }
+   811→  }
+   812→
+   813→  private renderTodayMarker(grid: HTMLElement): void {
+   814→    if (this.todayEl) this.todayEl.remove();
+   815→    const now = Date.now();
+   816→    if (now < this.opts.viewStart || now > this.opts.viewEnd) return;
+   817→    const x = this.timeToX(now);
+   818→    const marker = document.createElement("div");
+   819→    marker.className = "gantt-today";
+   820→    marker.style.left = `${x}px`;
+   821→    const label = document.createElement("div");
+   822→    label.className = "gantt-today-label";
+   823→    label.textContent = "Today";
+   824→    marker.appendChild(label);
+   825→    grid.appendChild(marker);
+   826→    this.todayEl = marker;
+   827→  }
+   828→
+   829→  private renderRow(row: GanttRow): HTMLElement {
+   830→    const el = document.createElement("div");
+   831→    el.className = "gantt-row";
+   832→    el.setAttribute("data-row-id", row.id);
+   833→    el.style.height = `${this.opts.rowHeight}px`;
+   834→
+   835→    const rowItems = this.items.filter((it) => (it.rowId ?? "default") === row.id);
+   836→    if (rowItems.length === 0) {
+   837→      // Keep the row but don't render an empty-state inside the grid (would
+   838→      // be clipped). The row header shows the count.
+   839→    }
+   840→    for (const item of rowItems) {
+   841→      const barEl = this.renderBar(item, row);
+   842→      el.appendChild(barEl);
+   843→      this.barEls.set(item.id, barEl);
+   844→    }
+   845→    return el;
+   846→  }
+   847→
+   848→  private renderBar(item: GanttItem, _row: GanttRow): HTMLElement {
+   849→    const el = document.createElement("div");
+   850→    el.className = "gantt-bar";
+   851→    el.setAttribute("data-item-id", item.id);
+   852→    el.setAttribute("role", "button");
+   853→    el.setAttribute("tabindex", this.opts.readOnly ? "-1" : "0");
+   854→    el.setAttribute(
+   855→      "aria-label",
+   856→      this.buildBarAriaLabel(item),
+   857→    );
+   858→    if (this.selectedItemId === item.id) el.classList.add("gantt-selected");
+   859→    if (this.opts.readOnly) el.classList.add("gantt-readonly-bar");
+   860→    if (item.disabled) el.classList.add("gantt-disabled-bar");
+   861→    if (item.color) el.style.background = item.color;
+   862→
+   863→    // Progress overlay
+   864→    if (this.opts.progressEnabled && typeof item.progress === "number" && item.progress > 0) {
+   865→      const prog = document.createElement("div");
+   866→      prog.className = "gantt-bar-progress";
+   867→      prog.style.width = `${clamp(item.progress, 0, 100)}%`;
+   868→      el.appendChild(prog);
+   869→    }
+   870→
+   871→    // Templated content
+   872→    const tpl = this.getTemplate();
+   873→    const density: TemplateDensity = "standard";
+   874→    const hostState = {
+   875→      readOnly: this.opts.readOnly,
+   876→      movable: this.opts.movable,
+   877→      resizable: this.opts.resizable,
+   878→      scale: this.opts.scale,
+   879→    };
+   880→    if (tpl) {
+   881→      for (const slot of tpl.slots) {
+   882→        if (!slotVisible(slot, density)) continue;
+   883→        const renderer = rendererRegistry.get(slot.renderer);
+   884→        if (!renderer) continue;
+   885→        const slotEl = renderer({ item, slot, density, host: hostState });
+   886→        if (slotEl) {
+   887→          slotEl.style.pointerEvents = "none";
+   888→          el.appendChild(slotEl);
+   889→        }
+   890→      }
+   891→    } else {
+   892→      // Native rendering: plain bar with optional title
+   893→      if (item.title) {
+   894→        const title = document.createElement("div");
+   895→        title.className = "gantt-bar-title";
+   896→        title.textContent = item.title;
+   897→        el.appendChild(title);
+   898→      }
+   899→    }
+   900→
+   901→    // Resize handles
+   902→    if (this.opts.resizable && !this.opts.readOnly && !item.disabled) {
+   903→      const left = document.createElement("div");
+   904→      left.className = "gantt-resize-handle gantt-resize-handle-left";
+   905→      left.setAttribute("role", "slider");
+   906→      left.setAttribute("aria-label", `Resize start of ${item.title ?? item.id}`);
+   907→      left.addEventListener("pointerdown", (e) => this.onResizeStart(e, item, "start"));
+   908→      el.appendChild(left);
+   909→
+   910→      const right = document.createElement("div");
+   911→      right.className = "gantt-resize-handle gantt-resize-handle-right";
+   912→      right.setAttribute("role", "slider");
+   913→      right.setAttribute("aria-label", `Resize end of ${item.title ?? item.id}`);
+   914→      right.addEventListener("pointerdown", (e) => this.onResizeStart(e, item, "end"));
+   915→      el.appendChild(right);
+   916→    }
+   917→
+   918→    // Pointer interactions
+   919→    if (!this.opts.readOnly && !item.disabled) {
+   920→      el.addEventListener("pointerdown", (e) => this.onBarPointerDown(e, item));
+   921→      el.addEventListener("click", (e) => {
+   922→        const target = e.target as HTMLElement;
+   923→        if (target.closest(".gantt-resize-handle")) return;
+   924→        if (this.opts.selectable) this.selectBar(item.id, "pointer");
+   925→      });
+   926→      el.addEventListener("dblclick", () => {
+   927→        this.emit("bar_activated", { itemId: item.id, source: "pointer" });
+   928→      });
+   929→      el.addEventListener("keydown", (e) => this.onBarKeyDown(e, item));
+   930→    } else if (this.opts.selectable) {
+   931→      el.addEventListener("click", () => this.selectBar(item.id, "pointer"));
+   932→    }
+   933→
+   934→    // Position the bar
+   935→    this.positionBar(el, item);
+   936→    return el;
+   937→  }
+   938→
+   939→  private positionBar(el: HTMLElement, item: GanttItem): void {
+   940→    const x = this.timeToX(item.start);
+   941→    const w = Math.max(this.timeToX(item.end) - x, this.opts.barMinWidth);
+   942→    el.style.left = `${x}px`;
+   943→    el.style.width = `${w}px`;
+   944→    el.style.height = `${this.opts.barHeight}px`;
+   945→  }
+   946→
+   947→  private positionAllBars(): void {
+   948→    for (const [id, el] of this.barEls) {
+   949→      const item = this.findItem(id);
+   950→      if (item) this.positionBar(el, item);
+   951→    }
+   952→  }
+   953→
+   954→  private buildBarAriaLabel(item: GanttItem): string {
+   955→    const parts: string[] = [];
+   956→    if (item.title) parts.push(item.title);
+   957→    const fmt = (t: number) => new Date(t).toLocaleDateString("en-US", {
+   958→      month: "short", day: "numeric", year: "numeric",
+   959→    });
+   960→    parts.push(`${fmt(item.start)} to ${fmt(item.end)}`);
+   961→    if (typeof item.progress === "number") parts.push(`${Math.round(item.progress)}% complete`);
+   962→    return parts.join(", ");
+   963→  }
+   964→
+   965→  // ---- Template accessors ----
+   966→
+   967→  getTemplate(): ContentTemplate | undefined {
+   968→    return templateRegistry.get(this.opts.templateId);
+   969→  }
+   970→
+   971→  getTemplateId(): string {
+   972→    return this.opts.templateId;
+   973→  }
+   974→
+   975→  setTemplateId(id: string): void {
+   976→    if (this._destroyed) return;
+   977→    if (id !== GANTT_TEMPLATE_NONE && !templateRegistry.has(id)) return;
+   978→    if (this.opts.templateId === id) return;
+   979→    this.opts.templateId = id;
+   980→    this.render();
+   981→  }
+   982→
+   983→  // ---- Selection ----
+   984→
+   985→  selectBar(itemId: string | null, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+   986→    if (this._destroyed) return;
+   987→    if (!this.opts.selectable) return;
+   988→    const prev = this.selectedItemId;
+   989→    if (itemId !== null && !this.findItem(itemId)) return;
+   990→    this.selectedItemId = itemId;
+   991→    this.barEls.forEach((el, id) => {
+   992→      el.classList.toggle("gantt-selected", id === itemId);
+   993→    });
+   994→    if (prev !== itemId) {
+   995→      this.emit("bar_selected", { itemId, previousItemId: prev, source });
+   996→      this.emit("selection_changed", {
+   997→        itemIds: itemId ? [itemId] : [],
+   998→        previousItemIds: prev ? [prev] : [],
+   999→        source,
+  1000→      });
+  1001→    }
+  1002→  }
+  1003→
+  1004→  clearSelection(): void {
+  1005→    this.selectBar(null, "programmatic");
+  1006→  }
+  1007→
+  1008→  getSelectedBar(): string | null {
+  1009→    return this.selectedItemId;
+  1010→  }
+  1011→
+  1012→  // ---- Move / resize ----
+  1013→
+  1014→  moveBar(itemId: string, newStart: number, newEnd: number, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+  1015→    if (this._destroyed) return;
+  1016→    if (this.opts.readOnly) {
+  1017→      this.emit("bar_move_rejected", { itemId, start: newStart, end: newEnd, reason: "read_only", source });
+  1018→      return;
+  1019→    }
+  1020→    const item = this.findItem(itemId);
+  1021→    if (!item) {
+  1022→      this.emit("bar_move_rejected", { itemId, start: newStart, end: newEnd, reason: "invalid_item", source });
+  1023→      return;
+  1024→    }
+  1025→    if (newEnd < newStart) {
+  1026→      this.emit("bar_move_rejected", { itemId, start: newStart, end: newEnd, reason: "invalid_interval", source });
+  1027→      return;
+  1028→    }
+  1029→    if (this.opts.minDuration > 0 && newEnd - newStart < this.opts.minDuration) {
+  1030→      this.emit("bar_move_rejected", { itemId, start: newStart, end: newEnd, reason: "min_duration", source });
+  1031→      return;
+  1032→    }
+  1033→    const oldStart = item.start;
+  1034→    const oldEnd = item.end;
+  1035→    item.start = newStart;
+  1036→    item.end = newEnd;
+  1037→    const el = this.barEls.get(itemId);
+  1038→    if (el) this.positionBar(el, item);
+  1039→    this.emit("bar_moved", { itemId, oldStart, oldEnd, newStart, newEnd, source });
+  1040→  }
+  1041→
+  1042→  resizeBar(itemId: string, endpoint: GanttResizeEndpoint, time: number, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+  1043→    if (this._destroyed) return;
+  1044→    if (this.opts.readOnly || !this.opts.resizable) {
+  1045→      this.emit("bar_move_rejected", { itemId, endpoint, reason: "read_only", source });
+  1046→      return;
+  1047→    }
+  1048→    const item = this.findItem(itemId);
+  1049→    if (!item) {
+  1050→      this.emit("bar_move_rejected", { itemId, endpoint, reason: "invalid_item", source });
+  1051→      return;
+  1052→    }
+  1053→    const oldStart = item.start;
+  1054→    const oldEnd = item.end;
+  1055→    if (endpoint === "start") {
+  1056→      const newStart = Math.min(time, item.end - (this.opts.minDuration || 1));
+  1057→      if (newStart >= item.end) {
+  1058→        this.emit("bar_move_rejected", { itemId, endpoint, reason: "invalid_interval", source });
+  1059→        return;
+  1060→      }
+  1061→      item.start = newStart;
+  1062→    } else {
+  1063→      const newEnd = Math.max(time, item.start + (this.opts.minDuration || 1));
+  1064→      if (newEnd <= item.start) {
+  1065→        this.emit("bar_move_rejected", { itemId, endpoint, reason: "invalid_interval", source });
+  1066→        return;
+  1067→      }
+  1068→      item.end = newEnd;
+  1069→    }
+  1070→    const el = this.barEls.get(itemId);
+  1071→    if (el) this.positionBar(el, item);
+  1072→    this.emit("bar_resized", { itemId, oldStart, oldEnd, newStart: item.start, newEnd: item.end, endpoint, source });
+  1073→  }
+  1074→
+  1075→  moveBarToRow(itemId: string, rowId: string, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+  1076→    if (this._destroyed) return;
+  1077→    if (this.opts.readOnly || !this.opts.rowMovable) {
+  1078→      this.emit("bar_move_rejected", { itemId, targetRowId: rowId, reason: "row_movable_disabled", source });
+  1079→      return;
+  1080→    }
+  1081→    const item = this.findItem(itemId);
+  1082→    if (!item) return;
+  1083→    const row = this.findRow(rowId);
+  1084→    if (!row) {
+  1085→      this.emit("bar_move_rejected", { itemId, targetRowId: rowId, reason: "invalid_row", source });
+  1086→      return;
+  1087→    }
+  1088→    const prevRowId = item.rowId ?? "default";
+  1089→    if (prevRowId === rowId) return;
+  1090→    item.rowId = rowId;
+  1091→    this.render();
+  1092→    this.emit("bar_row_changed", { itemId, previousRowId: prevRowId, rowId, source });
+  1093→  }
+  1094→
+  1095→  // ---- View range / zoom ----
+  1096→
+  1097→  setViewRange(start: number, end: number, source: "pointer" | "keyboard" | "programmatic" = "programmatic"): void {
+  1098→    if (this._destroyed) return;
+  1099→    if (end <= start) return;
+  1100→    this.opts.viewStart = start;
+  1101→    this.opts.viewEnd = end;
+  1102→    this.render();
+  1103→    this.emit("view_range_changed", { viewStart: start, viewEnd: end, source });
+  1104→  }
+  1105→
+  1106→  setScale(scale: GanttScale): void {
+  1107→    if (this._destroyed) return;
+  1108→    this.opts.scale = scale;
+  1109→    this.opts.snapInterval = SCALE_SNAP[scale];
+  1110→    this.render();
+  1111→    this.emit("scale_changed", { scale });
+  1112→  }
+  1113→
+  1114→  zoomIn(): void {
+  1115→    const center = (this.opts.viewStart + this.opts.viewEnd) / 2;
+  1116→    const range = (this.opts.viewEnd - this.opts.viewStart) / 2;
+  1117→    this.setViewRange(center - range / 2, center + range / 2, "programmatic");
+  1118→  }
+  1119→
+  1120→  zoomOut(): void {
+  1121→    const center = (this.opts.viewStart + this.opts.viewEnd) / 2;
+  1122→    const range = (this.opts.viewEnd - this.opts.viewStart) / 2;
+  1123→    this.setViewRange(center - range * 2, center + range * 2, "programmatic");
+  1124→  }
+  1125→
+  1126→  fitToRange(start: number, end: number): void {
+  1127→    this.setViewRange(start - (end - start) * 0.05, end + (end - start) * 0.05, "programmatic");
+  1128→  }
+  1129→
+  1130→  navigateTo(time: number): void {
+  1131→    const range = this.opts.viewEnd - this.opts.viewStart;
+  1132→    this.setViewRange(time - range / 2, time + range / 2, "programmatic");
+  1133→  }
+  1134→
+  1135→  today(): void {
+  1136→    this.navigateTo(Date.now());
+  1137→  }
+  1138→
+  1139→  // ---- Data accessors ----
+  1140→
+  1141→  setItems(items: GanttItem[]): void {
+  1142→    if (this._destroyed) return;
+  1143→    this.items = items.map((it) => ({ ...it }));
+  1144→    this.render();
+  1145→  }
+  1146→
+  1147→  setRows(rows: GanttRow[]): void {
+  1148→    if (this._destroyed) return;
+  1149→    this.rows = rows.map((r) => ({ ...r }));
+  1150→    if (this.rows.length === 0) {
+  1151→      this.rows = [{ id: "default", title: "Timeline" }];
+  1152→    }
+  1153→    this.render();
+  1154→  }
+  1155→
+  1156→  getItems(): GanttItem[] {
+  1157→    return this.items.map((it) => ({ ...it }));
+  1158→  }
+  1159→
+  1160→  getRows(): GanttRow[] {
+  1161→    return this.rows.map((r) => ({ ...r }));
+  1162→  }
+  1163→
+  1164→  getViewRange(): { start: number; end: number } {
+  1165→    return { start: this.opts.viewStart, end: this.opts.viewEnd };
+  1166→  }
+  1167→
+  1168→  // ---- Helpers ----
+  1169→
+  1170→  private findItem(itemId: string): GanttItem | undefined {
+  1171→    return this.items.find((it) => it.id === itemId);
+  1172→  }
+  1173→
+  1174→  private findRow(rowId: string): GanttRow | undefined {
+  1175→    return this.rows.find((r) => r.id === rowId);
+  1176→  }
+  1177→
+  1178→  // ---- Pointer interactions ----
+  1179→
+  1180→  private onBarPointerDown(e: PointerEvent, item: GanttItem): void {
+  1181→    if (this.opts.readOnly || item.disabled) return;
+  1182→    const target = e.target as HTMLElement;
+  1183→    if (target.closest(".gantt-resize-handle")) return;
+  1184→    if (!this.opts.movable) return;
+  1185→    e.preventDefault();
+  1186→    this.dragItemId = item.id;
+  1187→    this.dragMode = "move";
+  1188→    this.dragStartX = e.clientX;
+  1189→    this.dragOriginalStart = item.start;
+  1190→    this.dragOriginalEnd = item.end;
+  1191→    this.dragOriginalRowId = item.rowId ?? "default";
+  1192→    this.dragHappened = false;
+  1193→    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  1194→    const barEl = this.barEls.get(item.id);
+  1195→    if (barEl) barEl.classList.add("gantt-dragging");
+  1196→    this.emit("drag_started", { itemId: item.id, operation: "move", source: "pointer" });
+  1197→
+  1198→    const onMove = (ev: PointerEvent) => this.onDragMove(ev);
+  1199→    const onUp = (ev: PointerEvent) => {
+  1200→      this.onDragEnd(ev, onMove, onUp);
+  1201→    };
+  1202→    window.addEventListener("pointermove", onMove);
+  1203→    window.addEventListener("pointerup", onUp);
+  1204→  }
+  1205→
+  1206→  private onResizeStart(e: PointerEvent, item: GanttItem, endpoint: GanttResizeEndpoint): void {
+  1207→    if (this.opts.readOnly || item.disabled || !this.opts.resizable) return;
+  1208→    e.preventDefault();
+  1209→    e.stopPropagation();
+  1210→    this.dragItemId = item.id;
+  1211→    this.dragMode = endpoint === "start" ? "resize-start" : "resize-end";
+  1212→    this.dragStartX = e.clientX;
+  1213→    this.dragOriginalStart = item.start;
+  1214→    this.dragOriginalEnd = item.end;
+  1215→    this.dragHappened = false;
+  1216→    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  1217→    const handle = e.target as HTMLElement;
+  1218→    handle.classList.add("gantt-active");
+  1219→    this.emit("drag_started", { itemId: item.id, operation: this.dragMode, source: "pointer" });
+  1220→
+  1221→    const onMove = (ev: PointerEvent) => this.onDragMove(ev);
+  1222→    const onUp = (ev: PointerEvent) => {
+  1223→      handle.classList.remove("gantt-active");
+  1224→      this.onDragEnd(ev, onMove, onUp);
+  1225→    };
+  1226→    window.addEventListener("pointermove", onMove);
+  1227→    window.addEventListener("pointerup", onUp);
+  1228→  }
+  1229→
+  1230→  private onDragMove(e: PointerEvent): void {
+  1231→    if (!this.dragItemId || !this.dragMode) return;
+  1232→    const item = this.findItem(this.dragItemId);
+  1233→    if (!item) return;
+  1234→    const dx = e.clientX - this.dragStartX;
+  1235→    if (Math.abs(dx) < 2 && !this.dragHappened) return;
+  1236→    this.dragHappened = true;
+  1237→
+  1238→    const dt = this.xToTime(this.timeToX(this.dragOriginalStart) + dx) - this.dragOriginalStart;
+  1239→    const snap = this.opts.snapInterval;
+  1240→
+  1241→    if (this.dragMode === "move") {
+  1242→      const newStart = snapTime(this.dragOriginalStart + dt, snap);
+  1243→      const newEnd = snapTime(this.dragOriginalEnd + dt, snap);
+  1244→      // Update visual position without committing
+  1245→      item.start = newStart;
+  1246→      item.end = newEnd;
+  1247→      const el = this.barEls.get(item.id);
+  1248→      if (el) this.positionBar(el, item);
+  1249→      this.emit("bar_move_requested", {
+  1250→        itemId: item.id,
+  1251→        oldStart: this.dragOriginalStart,
+  1252→        oldEnd: this.dragOriginalEnd,
+  1253→        start: newStart,
+  1254→        end: newEnd,
+  1255→        source: "pointer",
+  1256→      });
+  1257→    } else if (this.dragMode === "resize-start") {
+  1258→      const newStart = snapTime(this.dragOriginalStart + dt, snap);
+  1259→      if (newStart < this.dragOriginalEnd - (this.opts.minDuration || 1)) {
+  1260→        item.start = newStart;
+  1261→        const el = this.barEls.get(item.id);
+  1262→        if (el) this.positionBar(el, item);
+  1263→        this.emit("bar_resize_requested", {
+  1264→          itemId: item.id,
+  1265→          endpoint: "start",
+  1266→          oldStart: this.dragOriginalStart,
+  1267→          start: newStart,
+  1268→          source: "pointer",
+  1269→        });
+  1270→      }
+  1271→    } else if (this.dragMode === "resize-end") {
+  1272→      const newEnd = snapTime(this.dragOriginalEnd + dt, snap);
+  1273→      if (newEnd > this.dragOriginalStart + (this.opts.minDuration || 1)) {
+  1274→        item.end = newEnd;
+  1275→        const el = this.barEls.get(item.id);
+  1276→        if (el) this.positionBar(el, item);
+  1277→        this.emit("bar_resize_requested", {
+  1278→          itemId: item.id,
+  1279→          endpoint: "end",
+  1280→          oldEnd: this.dragOriginalEnd,
+  1281→          end: newEnd,
+  1282→          source: "pointer",
+  1283→        });
+  1284→      }
+  1285→    }
+  1286→  }
+  1287→
+  1288→  private onDragEnd(_e: PointerEvent, onMove: (ev: PointerEvent) => void, onUp: (ev: PointerEvent) => void): void {
+  1289→    window.removeEventListener("pointermove", onMove);
+  1290→    window.removeEventListener("pointerup", onUp);
+  1291→    if (!this.dragItemId || !this.dragMode) return;
+  1292→    const item = this.findItem(this.dragItemId);
+  1293→    const barEl = this.barEls.get(this.dragItemId);
+  1294→    if (barEl) barEl.classList.remove("gantt-dragging");
+  1295→
+  1296→    if (this.dragHappened && item) {
+  1297→      if (this.dragMode === "move") {
+  1298→        this.emit("bar_moved", {
+  1299→          itemId: item.id,
+  1300→          oldStart: this.dragOriginalStart,
+  1301→          oldEnd: this.dragOriginalEnd,
+  1302→          newStart: item.start,
+  1303→          newEnd: item.end,
+  1304→          source: "pointer",
+  1305→        });
+  1306→      } else {
+  1307→        this.emit("bar_resized", {
+  1308→          itemId: item.id,
+  1309→          oldStart: this.dragOriginalStart,
+  1310→          oldEnd: this.dragOriginalEnd,
+  1311→          newStart: item.start,
+  1312→          newEnd: item.end,
+  1313→          endpoint: this.dragMode === "resize-start" ? "start" : "end",
+  1314→          source: "pointer",
+  1315→        });
+  1316→      }
+  1317→    } else if (!this.dragHappened) {
+  1318→      this.emit("drag_cancelled", { itemId: this.dragItemId, operation: this.dragMode, source: "pointer" });
+  1319→    }
+  1320→
+  1321→    this.dragItemId = null;
+  1322→    this.dragMode = null;
+  1323→    this.dragHappened = false;
+  1324→  }
+  1325→
+  1326→  // ---- Keyboard ----
+  1327→
+  1328→  private onBarKeyDown(e: KeyboardEvent, item: GanttItem): void {
+  1329→    if (this.opts.readOnly || item.disabled) return;
+  1330→    const snap = this.opts.snapInterval || SCALE_TICK[this.opts.scale];
+  1331→    let handled = true;
+  1332→
+  1333→    switch (e.key) {
+  1334→      case " ":
+  1335→      case "Enter":
+  1336→        if (this.opts.selectable) this.selectBar(item.id, "keyboard");
+  1337→        else this.emit("bar_activated", { itemId: item.id, source: "keyboard" });
+  1338→        break;
+  1339→      case "ArrowLeft":
+  1340→        if (this.opts.movable && !e.shiftKey) {
+  1341→          this.moveBar(item.id, item.start - snap, item.end - snap, "keyboard");
+  1342→        } else if (this.opts.resizable && e.shiftKey) {
+  1343→          this.resizeBar(item.id, "start", item.start - snap, "keyboard");
+  1344→        }
+  1345→        break;
+  1346→      case "ArrowRight":
+  1347→        if (this.opts.movable && !e.shiftKey) {
+  1348→          this.moveBar(item.id, item.start + snap, item.end + snap, "keyboard");
+  1349→        } else if (this.opts.resizable && e.shiftKey) {
+  1350→          this.resizeBar(item.id, "end", item.end + snap, "keyboard");
+  1351→        }
+  1352→        break;
+  1353→      case "ArrowUp":
+  1354→        if (this.opts.rowMovable) {
+  1355→          const idx = this.rows.findIndex((r) => r.id === (item.rowId ?? "default"));
+  1356→          if (idx > 0) this.moveBarToRow(item.id, this.rows[idx - 1].id, "keyboard");
+  1357→        }
+  1358→        break;
+  1359→      case "ArrowDown":
+  1360→        if (this.opts.rowMovable) {
+  1361→          const idx = this.rows.findIndex((r) => r.id === (item.rowId ?? "default"));
+  1362→          if (idx >= 0 && idx < this.rows.length - 1) this.moveBarToRow(item.id, this.rows[idx + 1].id, "keyboard");
+  1363→        }
+  1364→        break;
+  1365→      case "Home":
+  1366→        if (this.opts.resizable) this.resizeBar(item.id, "start", this.opts.viewStart, "keyboard");
+  1367→        break;
+  1368→      case "End":
+  1369→        if (this.opts.resizable) this.resizeBar(item.id, "end", this.opts.viewEnd, "keyboard");
+  1370→        break;
+  1371→      case "Delete":
+  1372→      case "Backspace":
+  1373→        this.emit("bar_delete_requested", { itemId: item.id, source: "keyboard" });
+  1374→        break;
+  1375→      case "Escape":
+  1376→        this.clearSelection();
+  1377→        break;
+  1378→      default:
+  1379→        handled = false;
+  1380→    }
+  1381→    if (handled) e.preventDefault();
+  1382→  }
+  1383→
+  1384→  // ---- Property setter ----
+  1385→
+  1386→  setProperty(name: string, value: unknown): void {
+  1387→    if (this._destroyed) return;
+  1388→    switch (name) {
+  1389→      case "viewStart":
+  1390→        this.opts.viewStart = Number(value);
+  1391→        break;
+  1392→      case "viewEnd":
+  1393→        this.opts.viewEnd = Number(value);
+  1394→        break;
+  1395→      case "scale":
+  1396→        this.opts.scale = value as GanttScale;
+  1397→        this.opts.snapInterval = SCALE_SNAP[this.opts.scale];
+  1398→        break;
+  1399→      case "showRowHeaders":
+  1400→        this.opts.showRowHeaders = !!value;
+  1401→        break;
+  1402→      case "rowHeaderWidth":
+  1403→        this.opts.rowHeaderWidth = Number(value);
+  1404→        break;
+  1405→      case "rowHeight":
+  1406→        this.opts.rowHeight = Number(value);
+  1407→        break;
+  1408→      case "barHeight":
+  1409→        this.opts.barHeight = Number(value);
+  1410→        break;
+  1411→      case "barGap":
+  1412→        this.opts.barGap = Number(value);
+  1413→        break;
+  1414→      case "rowGap":
+  1415→        this.opts.rowGap = Number(value);
+  1416→        break;
+  1417→      case "barMinWidth":
+  1418→        this.opts.barMinWidth = Number(value);
+  1419→        break;
+  1420→      case "selectable":
+  1421→        this.opts.selectable = !!value;
+  1422→        break;
+  1423→      case "selectionMode":
+  1424→        this.opts.selectionMode = value as GanttSelectionMode;
+  1425→        break;
+  1426→      case "movable":
+  1427→        this.opts.movable = !!value;
+  1428→        break;
+  1429→      case "resizable":
+  1430→        this.opts.resizable = !!value;
+  1431→        break;
+  1432→      case "rowMovable":
+  1433→        this.opts.rowMovable = !!value;
+  1434→        break;
+  1435→      case "snapInterval":
+  1436→        this.opts.snapInterval = Number(value);
+  1437→        break;
+  1438→      case "showGrid":
+  1439→        this.opts.showGrid = !!value;
+  1440→        break;
+  1441→      case "showToday":
+  1442→        this.opts.showToday = !!value;
+  1443→        break;
+  1444→      case "showAxis":
+  1445→        this.opts.showAxis = !!value;
+  1446→        break;
+  1447→      case "axisPosition":
+  1448→        this.opts.axisPosition = value as GanttAxisPosition;
+  1449→        break;
+  1450→      case "readOnly":
+  1451→        this.opts.readOnly = !!value;
+  1452→        break;
+  1453→      case "disabled":
+  1454→        this.opts.disabled = !!value;
+  1455→        break;
+  1456→      case "progressEnabled":
+  1457→        this.opts.progressEnabled = !!value;
+  1458→        break;
+  1459→      case "minDuration":
+  1460→        this.opts.minDuration = Number(value);
+  1461→        break;
+  1462→      case "templateId":
+  1463→        if (typeof value === "string") this.setTemplateId(value);
+  1464→        return;
+  1465→      case "items":
+  1466→        this.setItems(value as GanttItem[]);
+  1467→        return;
+  1468→      case "rows":
+  1469→        this.setRows(value as GanttRow[]);
+  1470→        return;
+  1471→      default:
+  1472→        return;
+  1473→    }
+  1474→    this.render();
+  1475→  }
+  1476→
+  1477→  // ---- Events ----
+  1478→
+  1479→  on(event: string, handler: GanttHandler): void {
+  1480→    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+  1481→    this.listeners.get(event)!.add(handler);
+  1482→  }
+  1483→
+  1484→  off(event: string, handler: GanttHandler): void {
+  1485→    this.listeners.get(event)?.delete(handler);
+  1486→  }
+  1487→
+  1488→  private emit(event: string, payload: GanttEventPayload): void {
+  1489→    const set = this.listeners.get(event);
+  1490→    if (!set) return;
+  1491→    const p = { ...payload, type: event };
+  1492→    for (const h of set) {
+  1493→      try { h(p); } catch (err) { console.error(`Gantt handler error for ${event}:`, err); }
+  1494→    }
+  1495→  }
+  1496→
+  1497→  // ---- Destroy ----
+  1498→
+  1499→  destroy(): void {
+  1500→    if (this._destroyed) return;
+  1501→    this._destroyed = true;
+  1502→    this.listeners.clear();
+  1503→    this.barEls.clear();
+  1504→    this.rowEls.clear();
+  1505→    this.container.innerHTML = "";
+  1506→  }
+  1507→}
+  1508→

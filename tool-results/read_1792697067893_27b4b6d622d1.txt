@@ -1,0 +1,624 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { KanbanSquare, Plus, Trash2, RotateCcw } from "lucide-react";
+     5→import { getComponent } from "@/lib/platform/content";
+     6→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+     7→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+     8→import { AgentSkillTabs } from "@/components/platform/agent-skill-tabs";
+     9→import {
+    10→  KanbanReact,
+    11→  type KanbanItem,
+    12→  type KanbanColumn,
+    13→  type KanbanMode,
+    14→  type KanbanLayout,
+    15→  type KanbanCardLayout,
+    16→  type KanbanEventPayload,
+    17→} from "./kanban-react";
+    18→import type { KanbanBoard } from "@/lib/components/kanban";
+    19→import { cn } from "@/lib/utils";
+    20→import { toast } from "sonner";
+    21→
+    22→interface State {
+    23→  mode: KanbanMode;
+    24→  layout: KanbanLayout;
+    25→  cardLayout: KanbanCardLayout;
+    26→  dragEnabled: boolean;
+    27→  reorderWithinColumn: boolean;
+    28→  moveBetweenColumns: boolean;
+    29→  showCardBorder: boolean;
+    30→  showItemCount: boolean;
+    31→  showDropPreview: boolean;
+    32→  columnWidth: number;
+    33→  cardGap: number;
+    34→  columnGap: number;
+    35→}
+    36→
+    37→const DEFAULTS: State = {
+    38→  mode: "editable",
+    39→  layout: "horizontal",
+    40→  cardLayout: "standard",
+    41→  dragEnabled: true,
+    42→  reorderWithinColumn: true,
+    43→  moveBetweenColumns: true,
+    44→  showCardBorder: true,
+    45→  showItemCount: true,
+    46→  showDropPreview: true,
+    47→  columnWidth: 280,
+    48→  cardGap: 8,
+    49→  columnGap: 12,
+    50→};
+    51→
+    52→const SEED_COLUMNS: KanbanColumn[] = [
+    53→  { id: "todo", title: "To Do", color: "#B8B2CA", allowAddItem: true },
+    54→  { id: "in-progress", title: "In Progress", color: "#D9FF66", allowAddItem: true },
+    55→  { id: "done", title: "Done", color: "#8FE3A5", allowAddItem: true },
+    56→];
+    57→
+    58→const SEED_ITEMS: KanbanItem[] = [
+    59→  {
+    60→    id: "t1",
+    61→    columnId: "todo",
+    62→    title: "Design login screen",
+    63→    description: "Sketch the new auth flow in Figma and share for review.",
+    64→    labels: ["design", "auth"],
+    65→    priority: "medium",
+    66→    assignee: "Ava Kim",
+    67→  },
+    68→  {
+    69→    id: "t2",
+    70→    columnId: "todo",
+    71→    title: "Review product brief",
+    72→    description: "Read the Q3 brief and leave inline comments.",
+    73→    priority: "high",
+    74→    assignee: "Jordan Mehta",
+    75→  },
+    76→  {
+    77→    id: "t3",
+    78→    columnId: "todo",
+    79→    title: "Draft Q3 roadmap",
+    80→    labels: ["planning"],
+    81→    priority: "low",
+    82→  },
+    83→  {
+    84→    id: "t4",
+    85→    columnId: "in-progress",
+    86→    title: "Build kanban component",
+    87→    description: "Vanilla TS class, React wrapper, and full playground.",
+    88→    labels: ["component", "ui"],
+    89→    priority: "high",
+    90→    assignee: "Zai Bot",
+    91→  },
+    92→  {
+    93→    id: "t5",
+    94→    columnId: "in-progress",
+    95→    title: "Wire drag-and-drop events",
+    96→    description: "HTML5 DnD with drop indicator and validation.",
+    97→    priority: "medium",
+    98→  },
+    99→  {
+   100→    id: "t6",
+   101→    columnId: "done",
+   102→    title: "Set up project repository",
+   103→    priority: "low",
+   104→    assignee: "Ava Kim",
+   105→  },
+   106→  {
+   107→    id: "t7",
+   108→    columnId: "done",
+   109→    title: "Initialize design tokens",
+   110→    labels: ["theme"],
+   111→    priority: "medium",
+   112→  },
+   113→];
+   114→
+   115→function countsByColumn(items: KanbanItem[], columns: KanbanColumn[]): { id: string; title: string; count: number; color?: string }[] {
+   116→  return columns.map((c) => ({
+   117→    id: c.id,
+   118→    title: c.title,
+   119→    color: c.color,
+   120→    count: items.filter((it) => it.columnId === c.id).length,
+   121→  }));
+   122→}
+   123→
+   124→export function KanbanPlayground() {
+   125→  const meta = getComponent("kanban")!;
+   126→  const [state, setState] = React.useState<State>(DEFAULTS);
+   127→  const [items, setItems] = React.useState<KanbanItem[]>(SEED_ITEMS);
+   128→  const [columns] = React.useState<KanbanColumn[]>(SEED_COLUMNS);
+   129→  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+   130→  const [lastEvent, setLastEvent] = React.useState<string>("—");
+   131→  const [activeTab, setActiveTab] = React.useState<"javascript" | "html" | "css" | "api">("javascript");
+   132→  const instanceRef = React.useRef<KanbanBoard | null>(null);
+   133→
+   134→  const update = React.useCallback(<K extends keyof State>(k: K, v: State[K]) => {
+   135→    setState((s) => ({ ...s, [k]: v }));
+   136→  }, []);
+   137→
+   138→  // Sync local items mirror from the board after every meaningful event so the
+   139→  // output panel reflects the source-of-truth (the board's internal state).
+   140→  const syncFromBoard = React.useCallback(() => {
+   141→    if (instanceRef.current) {
+   142→      setItems(instanceRef.current.getItems());
+   143→      setSelectedId(instanceRef.current.getSelectedItem());
+   144→    }
+   145→  }, []);
+   146→
+   147→  const onItemSelected = React.useCallback((_p: KanbanEventPayload) => {
+   148→    syncFromBoard();
+   149→  }, [syncFromBoard]);
+   150→
+   151→  const onItemMoved = React.useCallback((p: KanbanEventPayload) => {
+   152→    setLastEvent(`moved ${p.itemId} → ${p.targetColumnId} @${p.newPosition}`);
+   153→    syncFromBoard();
+   154→  }, [syncFromBoard]);
+   155→
+   156→  const onItemMoveRejected = React.useCallback((p: KanbanEventPayload) => {
+   157→    setLastEvent(`rejected ${p.itemId} (${p.reason})`);
+   158→    toast.error(`Move rejected: ${p.reason}`, {
+   159→      description: `Target: ${p.targetColumnId ?? "—"} at position ${p.position ?? 0}`,
+   160→    });
+   161→  }, []);
+   162→
+   163→  const onItemReordered = React.useCallback((p: KanbanEventPayload) => {
+   164→    setLastEvent(`reordered ${p.itemId} @${p.newPosition}`);
+   165→    syncFromBoard();
+   166→  }, [syncFromBoard]);
+   167→
+   168→  const onItemActivated = React.useCallback((p: KanbanEventPayload) => {
+   169→    setLastEvent(`activated ${p.itemId}`);
+   170→    toast.info("Item activated", {
+   171→      description: `Double-click or Enter on ${p.itemId}. Host decides whether to open details.`,
+   172→    });
+   173→  }, []);
+   174→
+   175→  const onItemCreateRequested = React.useCallback((p: KanbanEventPayload) => {
+   176→    if (!instanceRef.current || !p.columnId) return;
+   177→    const n = instanceRef.current.getItems().filter((it) => it.columnId === p.columnId).length + 1;
+   178→    const id = instanceRef.current.createItem(p.columnId, {
+   179→      title: `New task #${n}`,
+   180→      description: "Added from the playground.",
+   181→      priority: "medium",
+   182→    });
+   183→    if (id) {
+   184→      setLastEvent(`created ${id} in ${p.columnId}`);
+   185→      toast.success("Item created", { description: `Added to ${p.columnId} as ${id}` });
+   186→      syncFromBoard();
+   187→    }
+   188→  }, [syncFromBoard]);
+   189→
+   190→  const onItemDeleteRequested = React.useCallback((p: KanbanEventPayload) => {
+   191→    if (!instanceRef.current || !p.itemId) return;
+   192→    instanceRef.current.removeItem(p.itemId);
+   193→    setLastEvent(`deleted ${p.itemId}`);
+   194→    toast.success("Item removed", { description: p.itemId });
+   195→    syncFromBoard();
+   196→  }, [syncFromBoard]);
+   197→
+   198→  const onDropTargetChanged = React.useCallback((p: KanbanEventPayload) => {
+   199→    setLastEvent(`drop-target → ${p.targetColumnId} @${p.targetPosition}`);
+   200→  }, []);
+   201→
+   202→  const onDragStarted = React.useCallback((p: KanbanEventPayload) => {
+   203→    setLastEvent(`drag-start ${p.itemId}`);
+   204→  }, []);
+   205→
+   206→  const onDragCancelled = React.useCallback((p: KanbanEventPayload) => {
+   207→    setLastEvent(`drag-cancel ${p.itemId}`);
+   208→  }, []);
+   209→
+   210→  const reset = React.useCallback(() => {
+   211→    setItems(SEED_ITEMS);
+   212→    setSelectedId(null);
+   213→    setLastEvent("reset");
+   214→    // Force the board to re-apply seed items
+   215→    setTimeout(() => {
+   216→      instanceRef.current?.setItems(SEED_ITEMS);
+   217→      instanceRef.current?.clearSelection();
+   218→    }, 0);
+   219→    toast.info("Board reset", { description: "Restored seed items and selection." });
+   220→  }, []);
+   221→
+   222→  const counts = React.useMemo(() => countsByColumn(items, columns), [items, columns]);
+   223→  const selectedItem = React.useMemo(() => items.find((it) => it.id === selectedId) ?? null, [items, selectedId]);
+   224→
+   225→  const jsCode = React.useMemo(() => `import { KanbanBoard } from "@workshop/kanban";
+   226→
+   227→const board = new KanbanBoard(container, {
+   228→  mode: "${state.mode}",
+   229→  layout: "${state.layout}",
+   230→  cardLayout: "${state.cardLayout}",
+   231→  dragEnabled: ${state.dragEnabled},
+   232→  reorderWithinColumn: ${state.reorderWithinColumn},
+   233→  moveBetweenColumns: ${state.moveBetweenColumns},
+   234→  showCardBorder: ${state.showCardBorder},
+   235→  showItemCount: ${state.showItemCount},
+   236→  showDropPreview: ${state.showDropPreview},
+   237→  columnWidth: ${state.columnWidth},
+   238→  cardGap: ${state.cardGap},
+   239→  columnGap: ${state.columnGap},
+   240→  columns: [
+   241→    { id: "todo", title: "To Do", color: "#B8B2CA" },
+   242→    { id: "in-progress", title: "In Progress", color: "#D9FF66" },
+   243→    { id: "done", title: "Done", color: "#8FE3A5" },
+   244→  ],
+   245→  items: [
+   246→    { id: "t1", columnId: "todo", title: "Design login screen", priority: "medium" },
+   247→    { id: "t2", columnId: "in-progress", title: "Build kanban", priority: "high" },
+   248→  ],
+   249→});
+   250→
+   251→board.on("item_moved", ({ itemId, sourceColumnId, targetColumnId, newPosition }) => {
+   252→  console.log(\`Moved \${itemId}: \${sourceColumnId} → \${targetColumnId} @\${newPosition}\`);
+   253→});
+   254→
+   255→board.on("item_move_rejected", ({ itemId, reason }) => {
+   256→  console.warn(\`Move of \${itemId} rejected: \${reason}\`);
+   257→});`, [state]);
+   258→
+   259→  return (
+   260→    <div>
+   261→      <div className="border-b border-border bg-background">
+   262→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   263→          <Breadcrumbs />
+   264→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   265→            <div>
+   266→              <PageOverline>Components / Productivity</PageOverline>
+   267→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Kanban Board</h1>
+   268→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">{meta.longDescription}</p>
+   269→            </div>
+   270→            <div className="flex flex-wrap items-center gap-2">
+   271→              {meta.tags.map((t) => (
+   272→                <span key={t} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">{t}</span>
+   273→              ))}
+   274→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   275→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />{meta.status}
+   276→              </span>
+   277→            </div>
+   278→          </div>
+   279→        </div>
+   280→      </div>
+   281→
+   282→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   283→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px] lg:items-start">
+   284→          {/* Live canvas */}
+   285→          <section aria-label="Live preview" className="panel relative flex h-[600px] flex-col overflow-hidden">
+   286→            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+   287→              <div className="flex items-center gap-2">
+   288→                <KanbanSquare className="h-4 w-4 text-brand-lemon" />
+   289→                <span className="eyebrow">Live canvas</span>
+   290→              </div>
+   291→              <div className="flex items-center gap-3">
+   292→                <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">
+   293→                  {items.length} items · {columns.length} cols
+   294→                </span>
+   295→                <button
+   296→                  type="button"
+   297→                  onClick={reset}
+   298→                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-brand-lemon/40"
+   299→                >
+   300→                  <RotateCcw className="h-3 w-3" />
+   301→                  Reset
+   302→                </button>
+   303→              </div>
+   304→            </div>
+   305→            <div className="flex-1 min-h-0 overflow-hidden bg-grid">
+   306→              <KanbanReact
+   307→                items={items}
+   308→                columns={columns}
+   309→                mode={state.mode}
+   310→                layout={state.layout}
+   311→                cardLayout={state.cardLayout}
+   312→                dragEnabled={state.dragEnabled}
+   313→                reorderWithinColumn={state.reorderWithinColumn}
+   314→                moveBetweenColumns={state.moveBetweenColumns}
+   315→                showCardBorder={state.showCardBorder}
+   316→                showItemCount={state.showItemCount}
+   317→                showDropPreview={state.showDropPreview}
+   318→                columnWidth={state.columnWidth}
+   319→                cardGap={state.cardGap}
+   320→                columnGap={state.columnGap}
+   321→                selectable
+   322→                allowEmptyColumns
+   323→                onItemSelected={onItemSelected}
+   324→                onSelectionChanged={onItemSelected}
+   325→                onItemActivated={onItemActivated}
+   326→                onItemCreateRequested={onItemCreateRequested}
+   327→                onItemMoved={onItemMoved}
+   328→                onItemMoveRejected={onItemMoveRejected}
+   329→                onItemReordered={onItemReordered}
+   330→                onItemDeleteRequested={onItemDeleteRequested}
+   331→                onDragStarted={onDragStarted}
+   332→                onDragCancelled={onDragCancelled}
+   333→                onDropTargetChanged={onDropTargetChanged}
+   334→                instanceRef={instanceRef}
+   335→                className="h-full"
+   336→              />
+   337→            </div>
+   338→            {/* Output */}
+   339→            <div className="shrink-0 border-t border-border p-4">
+   340→              <div className="mb-2 flex items-center justify-between gap-3">
+   341→                <span className="eyebrow">Output</span>
+   342→                <span className="truncate font-mono text-[11px] text-muted-foreground">
+   343→                  last: <span className="text-brand-lemon">{lastEvent}</span>
+   344→                </span>
+   345→              </div>
+   346→              <div className="flex flex-wrap items-center gap-2">
+   347→                <CopyableValue label="Selected" value={selectedItem ? `${selectedItem.id} · ${selectedItem.title}` : "—"} />
+   348→                {counts.map((c) => (
+   349→                  <span
+   350→                    key={c.id}
+   351→                    className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 font-mono text-[12px]"
+   352→                  >
+   353→                    <span className="h-2 w-2 rounded-full" style={{ background: c.color ?? "#B8B2CA" }} />
+   354→                    <span className="text-muted-foreground">{c.title}:</span>
+   355→                    <span className="text-foreground">{c.count}</span>
+   356→                  </span>
+   357→                ))}
+   358→              </div>
+   359→              <p className="mt-2 text-[11px] text-muted-foreground">
+   360→                Tip: drag cards between columns, press <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">M</kbd> on a focused card to open the Move menu, or <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Delete</kbd> to request removal.
+   361→              </p>
+   362→            </div>
+   363→          </section>
+   364→
+   365→          {/* Properties */}
+   366→          <AgentSkillTabs
+   367→            agentPath="/docs/components/kanban-AGENT.md"
+   368→            skillPath="/docs/components/kanban-SKILL.md"
+   369→          >
+   370→            {/* Mode */}
+   371→            <div>
+   372→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Mode</label>
+   373→              <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   374→                {(["editable", "read_only"] as const).map((m) => (
+   375→                  <button key={m} type="button" onClick={() => update("mode", m)} aria-pressed={state.mode === m}
+   376→                    className={cn("rounded px-2 py-2 text-[11px] font-medium transition-colors",
+   377→                      state.mode === m ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+   378→                    {m === "editable" ? "Editable" : "Read-only"}
+   379→                  </button>
+   380→                ))}
+   381→              </div>
+   382→            </div>
+   383→
+   384→            {/* Layout */}
+   385→            <div>
+   386→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Layout</label>
+   387→              <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   388→                {(["horizontal", "vertical"] as const).map((l) => (
+   389→                  <button key={l} type="button" onClick={() => update("layout", l)} aria-pressed={state.layout === l}
+   390→                    className={cn("rounded px-2 py-2 text-[11px] font-medium transition-colors",
+   391→                      state.layout === l ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+   392→                    {l === "horizontal" ? "Horizontal" : "Vertical"}
+   393→                  </button>
+   394→                ))}
+   395→              </div>
+   396→            </div>
+   397→
+   398→            {/* Card layout */}
+   399→            <div>
+   400→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Card layout</label>
+   401→              <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   402→                {(["compact", "standard", "detailed"] as const).map((c) => (
+   403→                  <button key={c} type="button" onClick={() => update("cardLayout", c)} aria-pressed={state.cardLayout === c}
+   404→                    className={cn("rounded px-2 py-2 text-[11px] font-medium capitalize transition-colors",
+   405→                      state.cardLayout === c ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+   406→                    {c}
+   407→                  </button>
+   408→                ))}
+   409→              </div>
+   410→            </div>
+   411→
+   412→            {/* Toggles */}
+   413→            <div className="flex flex-col gap-2">
+   414→              {([
+   415→                { k: "dragEnabled" as const, l: "Drag enabled" },
+   416→                { k: "reorderWithinColumn" as const, l: "Reorder within column" },
+   417→                { k: "moveBetweenColumns" as const, l: "Move between columns" },
+   418→                { k: "showCardBorder" as const, l: "Show card border" },
+   419→                { k: "showItemCount" as const, l: "Show item count" },
+   420→                { k: "showDropPreview" as const, l: "Show drop preview" },
+   421→              ]).map(({ k, l }) => (
+   422→                <div key={k} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+   423→                  <span className="text-[12px] text-foreground">{l}</span>
+   424→                  <button type="button" role="switch" aria-checked={state[k]} onClick={() => update(k, !state[k])}
+   425→                    className={cn("relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+   426→                      state[k] ? "bg-brand-lemon" : "bg-muted-foreground/30")}>
+   427→                    <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform",
+   428→                      state[k] ? "translate-x-4" : "translate-x-0.5")} />
+   429→                  </button>
+   430→                </div>
+   431→              ))}
+   432→            </div>
+   433→
+   434→            {/* Sliders */}
+   435→            <div>
+   436→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Column width: <span className="font-mono text-brand-lemon">{state.columnWidth}px</span></label>
+   437→              <input type="range" min={220} max={400} step={10} value={state.columnWidth} onChange={(e) => update("columnWidth", Number(e.target.value))}
+   438→                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+   439→                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.columnWidth - 220) / 180 * 100}%, var(--muted) ${(state.columnWidth - 220) / 180 * 100}%)` }} />
+   440→              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+   441→                <span>220</span><span>400</span>
+   442→              </div>
+   443→            </div>
+   444→
+   445→            <div>
+   446→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Card gap: <span className="font-mono text-brand-lemon">{state.cardGap}px</span></label>
+   447→              <input type="range" min={2} max={20} step={1} value={state.cardGap} onChange={(e) => update("cardGap", Number(e.target.value))}
+   448→                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+   449→                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.cardGap - 2) / 18 * 100}%, var(--muted) ${(state.cardGap - 2) / 18 * 100}%)` }} />
+   450→              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+   451→                <span>2</span><span>20</span>
+   452→              </div>
+   453→            </div>
+   454→
+   455→            <div>
+   456→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Column gap: <span className="font-mono text-brand-lemon">{state.columnGap}px</span></label>
+   457→              <input type="range" min={4} max={32} step={1} value={state.columnGap} onChange={(e) => update("columnGap", Number(e.target.value))}
+   458→                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+   459→                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.columnGap - 4) / 28 * 100}%, var(--muted) ${(state.columnGap - 4) / 28 * 100}%)` }} />
+   460→              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+   461→                <span>4</span><span>32</span>
+   462→              </div>
+   463→            </div>
+   464→
+   465→            {/* Quick actions */}
+   466→            <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+   467→              <button
+   468→                type="button"
+   469→                onClick={() => {
+   470→                  const id = `t-${Math.random().toString(36).slice(2, 7)}`;
+   471→                  instanceRef.current?.createItem("todo", { id, title: "Quick task", priority: "low" });
+   472→                  syncFromBoard();
+   473→                  toast.success("Added", { description: id });
+   474→                }}
+   475→                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-brand-lemon/40 hover:bg-accent"
+   476→              >
+   477→                <Plus className="h-3 w-3 text-brand-lemon" /> Add to To Do
+   478→              </button>
+   479→              <button
+   480→                type="button"
+   481→                onClick={() => {
+   482→                  if (!selectedId) {
+   483→                    toast.error("No selection", { description: "Select a card first." });
+   484→                    return;
+   485→                  }
+   486→                  instanceRef.current?.removeItem(selectedId);
+   487→                  syncFromBoard();
+   488→                  toast.success("Removed", { description: selectedId });
+   489→                }}
+   490→                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-destructive/40 hover:bg-accent"
+   491→              >
+   492→                <Trash2 className="h-3 w-3 text-destructive" /> Remove selected
+   493→              </button>
+   494→            </div>
+   495→          </AgentSkillTabs>
+   496→        </div>
+   497→
+   498→        {/* Code panel */}
+   499→        <section className="panel mt-6 overflow-hidden">
+   500→          <div className="flex items-center justify-between border-b border-border px-2">
+   501→            <div className="flex">
+   502→              {([["javascript","JavaScript"],["html","HTML"],["css","CSS"],["api","API"]] as const).map(([k, l]) => (
+   503→                <button key={k} type="button" onClick={() => setActiveTab(k)}
+   504→                  className={cn("relative h-9 px-3 text-[12px] font-medium transition-colors",
+   505→                    activeTab === k ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+   506→                  {l}
+   507→                  {activeTab === k && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   508→                </button>
+   509→              ))}
+   510→            </div>
+   511→          </div>
+   512→          <div className="p-4">
+   513→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   514→            {activeTab === "html" && <CodeBlock code={'<div id="kanban" style="height: 600px;"></div>\n<script type="module" src="init.js"></script>'} language="html" filename="index.html" />}
+   515→            {activeTab === "css" && <CodeBlock code={".kanban-board {\n  /* Override tokens to retheme the board */\n  --kb-accent: #D9FF66;\n  --kb-surface: #211A30;\n  --kb-border: #383343;\n  --kb-text: #F4F1FF;\n  --kb-muted: #B8B2CA;\n}\n\n/* Compact density for side panels */\n.kanban-board.kanban-card-compact .kanban-card {\n  padding: 4px 8px;\n}"} language="css" filename="styles.css" />}
+   516→            {activeTab === "api" && <CodeBlock code={"class KanbanBoard {\n  constructor(container, options)\n  setItems(items): void\n  setColumns(columns): void\n  selectItem(itemId | null, source?): void\n  clearSelection(): void\n  getSelectedItem(): string | null\n  moveItem(itemId, targetColumnId, position, source?): void\n  reorderItem(itemId, position, source?): void\n  createItem(columnId, partial): string\n  updateItem(itemId, changes): void\n  removeItem(itemId): void\n  collapseColumn(columnId): void\n  expandColumn(columnId): void\n  getItems(): KanbanItem[]\n  getColumns(): KanbanColumn[]\n  setProperty(name, value): void\n  on(event, handler): void\n  off(event, handler): void\n  destroy(): void\n}\n\n// Events:\n//   item_selected, selection_changed, item_activated,\n//   item_create_requested, item_edit_requested,\n//   item_moved, item_move_rejected, item_reordered,\n//   item_delete_requested, drag_started, drag_cancelled,\n//   drop_target_changed, column_selected, column_create_requested"} language="typescript" filename="api.ts" />}
+   517→          </div>
+   518→        </section>
+   519→
+   520→        {/* Documentation */}
+   521→        <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_220px]">
+   522→          <div className="flex flex-col gap-6">
+   523→            <div className="panel p-6">
+   524→              <h2 className="text-lg font-semibold text-foreground">Overview</h2>
+   525→              <p className="mt-2 text-[14px] text-muted-foreground">{meta.description}</p>
+   526→              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+   527→                <div>
+   528→                  <h3 className="text-[12px] font-semibold uppercase tracking-wide text-brand-lemon">When to use</h3>
+   529→                  <ul className="mt-2 space-y-1 text-[13px] text-muted-foreground">
+   530→                    {meta.whenToUse.map((u) => <li key={u} className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />{u}</li>)}
+   531→                  </ul>
+   532→                </div>
+   533→                <div>
+   534→                  <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Not for</h3>
+   535→                  <ul className="mt-2 space-y-1 text-[13px] text-muted-foreground">
+   536→                    {meta.whenNotToUse.map((u) => <li key={u} className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />{u}</li>)}
+   537→                  </ul>
+   538→                </div>
+   539→              </div>
+   540→            </div>
+   541→
+   542→            <div className="panel p-6">
+   543→              <h2 className="text-lg font-semibold text-foreground">Properties</h2>
+   544→              <div className="mt-3 overflow-x-auto">
+   545→                <table className="w-full text-left text-[12px]">
+   546→                  <thead>
+   547→                    <tr className="border-b border-border text-muted-foreground">
+   548→                      <th className="py-2 pr-4 font-mono font-medium">Property</th>
+   549→                      <th className="py-2 pr-4 font-mono font-medium">Type</th>
+   550→                      <th className="py-2 pr-4 font-mono font-medium">Default</th>
+   551→                      <th className="py-2 font-mono font-medium">Description</th>
+   552→                    </tr>
+   553→                  </thead>
+   554→                  <tbody>
+   555→                    {meta.properties.map((p) => (
+   556→                      <tr key={p.name} className="border-b border-border/60 align-top">
+   557→                        <td className="py-2 pr-4 font-mono text-brand-lemon">{p.name}</td>
+   558→                        <td className="py-2 pr-4 font-mono text-foreground">{p.type}</td>
+   559→                        <td className="py-2 pr-4 font-mono text-muted-foreground">{p.default}</td>
+   560→                        <td className="py-2 text-muted-foreground">{p.description}</td>
+   561→                      </tr>
+   562→                    ))}
+   563→                  </tbody>
+   564→                </table>
+   565→              </div>
+   566→            </div>
+   567→
+   568→            <div className="grid gap-6 sm:grid-cols-2">
+   569→              <div className="panel p-6">
+   570→                <h2 className="text-lg font-semibold text-foreground">Methods</h2>
+   571→                <ul className="mt-3 space-y-2">
+   572→                  {meta.methods.slice(0, 12).map((m) => (
+   573→                    <li key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   574→                      <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   575→                      <p className="mt-1 text-[12px] text-muted-foreground">{m.description}</p>
+   576→                    </li>
+   577→                  ))}
+   578→                </ul>
+   579→              </div>
+   580→              <div className="panel p-6">
+   581→                <h2 className="text-lg font-semibold text-foreground">Events</h2>
+   582→                <ul className="mt-3 space-y-2">
+   583→                  {meta.events.map((e) => (
+   584→                    <li key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   585→                      <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   586→                      <p className="mt-1 text-[12px] text-muted-foreground">{e.description}</p>
+   587→                      <p className="mt-1 font-mono text-[11px] text-muted-foreground/80">payload: {e.payload}</p>
+   588→                    </li>
+   589→                  ))}
+   590→                </ul>
+   591→              </div>
+   592→            </div>
+   593→
+   594→            <div className="panel p-6">
+   595→              <h2 className="text-lg font-semibold text-foreground">Accessibility</h2>
+   596→              <ul className="mt-3 space-y-1.5 text-[13px] text-muted-foreground">
+   597→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Cards are real DOM elements with <code className="font-mono text-brand-lemon">tabindex=&quot;0&quot;</code> and <code className="font-mono text-brand-lemon">role=&quot;button&quot;</code>.</li>
+   598→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Visible focus ring (lemon) on every card and column control.</li>
+   599→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" /><kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Space</kbd> selects, <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Enter</kbd> activates, <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">M</kbd> opens the Move menu.</li>
+   600→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Arrow keys reorder (Up/Down) and move between columns (Left/Right).</li>
+   601→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Drop indicator and column highlighting use color + outline, never color alone.</li>
+   602→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" /><code className="font-mono text-brand-lemon">prefers-reduced-motion</code> disables the drop-indicator pulse.</li>
+   603→              </ul>
+   604→            </div>
+   605→          </div>
+   606→
+   607→          <aside className="hidden lg:block">
+   608→            <div className="sticky top-6 panel p-4">
+   609→              <h3 className="eyebrow mb-3">On this page</h3>
+   610→              <ul className="space-y-2 text-[12px] text-muted-foreground">
+   611→                <li><a href="#" className="hover:text-foreground">Overview</a></li>
+   612→                <li><a href="#" className="hover:text-foreground">Properties</a></li>
+   613→                <li><a href="#" className="hover:text-foreground">Methods</a></li>
+   614→                <li><a href="#" className="hover:text-foreground">Events</a></li>
+   615→                <li><a href="#" className="hover:text-foreground">Accessibility</a></li>
+   616→              </ul>
+   617→            </div>
+   618→          </aside>
+   619→        </section>
+   620→      </div>
+   621→    </div>
+   622→  );
+   623→}
+   624→

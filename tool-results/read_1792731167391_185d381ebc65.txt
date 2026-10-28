@@ -1,0 +1,955 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import * as React from "react";
+     4→     4→import { KanbanSquare, Plus, Trash2, RotateCcw, LayoutTemplate, Ban, BookOpen } from "lucide-react";
+     5→     5→import { getComponent } from "@/lib/platform/content";
+     6→     6→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+     7→     7→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+     8→     8→import { AgentSkillTabs } from "@/components/platform/agent-skill-tabs";
+     9→     9→import { CollapsibleDescription } from "@/components/platform/collapsible-description";
+    10→    10→import {
+    11→    11→  KanbanReact,
+    12→    12→  type KanbanItem,
+    13→    13→  type KanbanColumn,
+    14→    14→  type KanbanMode,
+    15→    15→  type KanbanLayout,
+    16→    16→  type KanbanCardLayout,
+    17→    17→  type KanbanEventPayload,
+    18→    18→} from "./kanban-react";
+    19→    19→import { KanbanBoard, KANBAN_TEMPLATE_NONE } from "@/lib/components/kanban";
+    20→    20→import {
+    21→    21→  registerBuiltinTemplates,
+    22→    22→  templateRegistry,
+    23→    23→  type ContentTemplate,
+    24→    24→} from "@/lib/templates";
+    25→    25→import { cn } from "@/lib/utils";
+    26→    26→import { toast } from "sonner";
+    27→    27→
+    28→    28→// Register the platform's built-in content templates + slot renderers at
+    29→    29→// module load time. The KanbanBoard constructor reads the registry to lay
+    30→    30→// out card content, so templates must be registered BEFORE the board is
+    31→    31→// constructed. This is idempotent (the registries are Maps) and safe under
+    32→    32→// SSR (injectStyles() is `typeof document`-guarded). Mirrors how
+    33→    33→// `registerBuiltinCommands()` is used by other playgrounds, but called at
+    34→    34→// module scope because templates are consumed at construction time.
+    35→    35→registerBuiltinTemplates();
+    36→    36→
+    37→    37→interface State {
+    38→    38→  mode: KanbanMode;
+    39→    39→  layout: KanbanLayout;
+    40→    40→  cardLayout: KanbanCardLayout;
+    41→    41→  dragEnabled: boolean;
+    42→    42→  reorderWithinColumn: boolean;
+    43→    43→  moveBetweenColumns: boolean;
+    44→    44→  showCardBorder: boolean;
+    45→    45→  showItemCount: boolean;
+    46→    46→  showDropPreview: boolean;
+    47→    47→  columnWidth: number;
+    48→    48→  cardGap: number;
+    49→    49→  columnGap: number;
+    50→    50→  templateId: string;
+    51→    51→}
+    52→    52→
+    53→    53→const DEFAULTS: State = {
+    54→    54→  mode: "editable",
+    55→    55→  layout: "horizontal",
+    56→    56→  cardLayout: "standard",
+    57→    57→  dragEnabled: true,
+    58→    58→  reorderWithinColumn: true,
+    59→    59→  moveBetweenColumns: true,
+    60→    60→  showCardBorder: true,
+    61→    61→  showItemCount: true,
+    62→    62→  showDropPreview: true,
+    63→    63→  columnWidth: 280,
+    64→    64→  cardGap: 8,
+    65→    65→  columnGap: 12,
+    66→    66→  templateId: "kanban.standard-task",
+    67→    67→};
+    68→    68→
+    69→    69→const SEED_COLUMNS: KanbanColumn[] = [
+    70→    70→  { id: "todo", title: "To Do", color: "#B8B2CA", allowAddItem: true },
+    71→    71→  { id: "in-progress", title: "In Progress", color: "#D9FF66", allowAddItem: true },
+    72→    72→  { id: "done", title: "Done", color: "#8FE3A5", allowAddItem: true },
+    73→    73→];
+    74→    74→
+    75→    75→const SEED_ITEMS: KanbanItem[] = [
+    76→    76→  {
+    77→    77→    id: "t1",
+    78→    78→    columnId: "todo",
+    79→    79→    title: "Design login screen",
+    80→    80→    description: "Sketch the new auth flow in Figma and share for review.",
+    81→    81→    labels: ["design", "auth"],
+    82→    82→    priority: "medium",
+    83→    83→    assignee: "Ava Kim",
+    84→    84→    // Bug-report template fields
+    85→    85→    severity: "minor",
+    86→    86→    reporter: "Ava Kim",
+    87→    87→    // Milestone template fields
+    88→    88→    dueDate: "2025-11-12",
+    89→    89→    progress: 10,
+    90→    90→  },
+    91→    91→  {
+    92→    92→    id: "t2",
+    93→    93→    columnId: "todo",
+    94→    94→    title: "Review product brief",
+    95→    95→    description: "Read the Q3 brief and leave inline comments.",
+    96→    96→    priority: "high",
+    97→    97→    assignee: "Jordan Mehta",
+    98→    98→    severity: "major",
+    99→    99→    reporter: "Jordan Mehta",
+   100→   100→    dueDate: "2025-11-05",
+   101→   101→    progress: 0,
+   102→   102→  },
+   103→   103→  {
+   104→   104→    id: "t3",
+   105→   105→    columnId: "todo",
+   106→   106→    title: "Draft Q3 roadmap",
+   107→   107→    labels: ["planning"],
+   108→   108→    priority: "low",
+   109→   109→    severity: "info",
+   110→   110→    reporter: "Ava Kim",
+   111→   111→    dueDate: "2025-12-01",
+   112→   112→    progress: 0,
+   113→   113→  },
+   114→   114→  {
+   115→   115→    id: "t4",
+   116→   116→    columnId: "in-progress",
+   117→   117→    title: "Build kanban component",
+   118→   118→    description: "Vanilla TS class, React wrapper, and full playground.",
+   119→   119→    labels: ["component", "ui"],
+   120→   120→    priority: "high",
+   121→   121→    assignee: "Zai Bot",
+   122→   122→    severity: "critical",
+   123→   123→    reporter: "Zai Bot",
+   124→   124→    dueDate: "2025-10-30",
+   125→   125→    progress: 55,
+   126→   126→  },
+   127→   127→  {
+   128→   128→    id: "t5",
+   129→   129→    columnId: "in-progress",
+   130→   130→    title: "Wire drag-and-drop events",
+   131→   131→    description: "HTML5 DnD with drop indicator and validation.",
+   132→   132→    priority: "medium",
+   133→   133→    severity: "major",
+   134→   134→    reporter: "Zai Bot",
+   135→   135→    dueDate: "2025-11-02",
+   136→   136→    progress: 35,
+   137→   137→  },
+   138→   138→  {
+   139→   139→    id: "t6",
+   140→   140→    columnId: "done",
+   141→   141→    title: "Set up project repository",
+   142→   142→    priority: "low",
+   143→   143→    assignee: "Ava Kim",
+   144→   144→    severity: "info",
+   145→   145→    reporter: "Ava Kim",
+   146→   146→    dueDate: "2025-09-15",
+   147→   147→    progress: 100,
+   148→   148→  },
+   149→   149→  {
+   150→   150→    id: "t7",
+   151→   151→    columnId: "done",
+   152→   152→    title: "Initialize design tokens",
+   153→   153→    labels: ["theme"],
+   154→   154→    priority: "medium",
+   155→   155→    severity: "minor",
+   156→   156→    reporter: "Ava Kim",
+   157→   157→    dueDate: "2025-09-20",
+   158→   158→    progress: 100,
+   159→   159→  },
+   160→   160→];
+   161→   161→
+   162→   162→function countsByColumn(items: KanbanItem[], columns: KanbanColumn[]): { id: string; title: string; count: number; color?: string }[] {
+   163→   163→  return columns.map((c) => ({
+   164→   164→    id: c.id,
+   165→   165→    title: c.title,
+   166→   166→    color: c.color,
+   167→   167→    count: items.filter((it) => it.columnId === c.id).length,
+   168→   168→  }));
+   169→   169→}
+   170→   170→
+   171→   171→export function KanbanPlayground() {
+   172→   172→  const meta = getComponent("kanban")!;
+   173→   173→  const [state, setState] = React.useState<State>(DEFAULTS);
+   174→   174→  const [items, setItems] = React.useState<KanbanItem[]>(SEED_ITEMS);
+   175→   175→  const [columns] = React.useState<KanbanColumn[]>(SEED_COLUMNS);
+   176→   176→  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+   177→   177→  const [lastEvent, setLastEvent] = React.useState<string>("—");
+   178→   178→  const [activeTab, setActiveTab] = React.useState<"javascript" | "html" | "css" | "api">("javascript");
+   179→   179→  const instanceRef = React.useRef<KanbanBoard | null>(null);
+   180→   180→
+   181→   181→  // All templates in the "Kanban" category power the template picker.
+   182→   182→  // Registration happens at module load (see top of file) so the registry
+   183→   183→  // is populated before this component renders. The empty dep array is
+   184→   184→  // safe because the registry is a singleton Map that doesn't change shape
+   185→   185→  // after module init.
+   186→   186→  const kanbanTemplates: ContentTemplate[] = React.useMemo(
+   187→   187→    () => templateRegistry.byCategory("Kanban"),
+   188→   188→    [],
+   189→   189→  );
+   190→   190→
+   191→   191→  // The picker shows "None" first (native rendering, no content template),
+   192→   192→  // then every registered Kanban template. "None" is a synthetic entry —
+   193→   193→  // it is NOT registered in the template registry. The Kanban board
+   194→   194→  // recognizes the sentinel ID `KANBAN_TEMPLATE_NONE` and falls back to
+   195→   195→  // its native rendering (a bare title per card) when it is selected.
+   196→   196→  const templateOptions: ContentTemplate[] = React.useMemo(
+   197→   197→    () => [
+   198→   198→      {
+   199→   199→        id: KANBAN_TEMPLATE_NONE,
+   200→   200→        name: "None",
+   201→   201→        category: "Kanban",
+   202→   202→        description:
+   203→   203→          "Native component rendering — no content template. Cards show only their title. Demonstrates that the board is independent of the template system.",
+   204→   204→        slots: [],
+   205→   205→      },
+   206→   206→      ...kanbanTemplates,
+   207→   207→    ],
+   208→   208→    [kanbanTemplates],
+   209→   209→  );
+   210→   210→
+   211→   211→  const activeTemplate = React.useMemo(
+   212→   212→    () => templateOptions.find((t) => t.id === state.templateId) ?? templateOptions[0],
+   213→   213→    [templateOptions, state.templateId],
+   214→   214→  );
+   215→   215→
+   216→   216→  const update = React.useCallback(<K extends keyof State>(k: K, v: State[K]) => {
+   217→   217→    setState((s) => ({ ...s, [k]: v }));
+   218→   218→  }, []);
+   219→   219→
+   220→   220→  // Sync local items mirror from the board after every meaningful event so the
+   221→   221→  // output panel reflects the source-of-truth (the board's internal state).
+   222→   222→  const syncFromBoard = React.useCallback(() => {
+   223→   223→    if (instanceRef.current) {
+   224→   224→      setItems(instanceRef.current.getItems());
+   225→   225→      setSelectedId(instanceRef.current.getSelectedItem());
+   226→   226→    }
+   227→   227→  }, []);
+   228→   228→
+   229→   229→  const onItemSelected = React.useCallback((_p: KanbanEventPayload) => {
+   230→   230→    syncFromBoard();
+   231→   231→  }, [syncFromBoard]);
+   232→   232→
+   233→   233→  const onItemMoved = React.useCallback((p: KanbanEventPayload) => {
+   234→   234→    setLastEvent(`moved ${p.itemId} → ${p.targetColumnId} @${p.newPosition}`);
+   235→   235→    syncFromBoard();
+   236→   236→  }, [syncFromBoard]);
+   237→   237→
+   238→   238→  const onItemMoveRejected = React.useCallback((p: KanbanEventPayload) => {
+   239→   239→    setLastEvent(`rejected ${p.itemId} (${p.reason})`);
+   240→   240→    toast.error(`Move rejected: ${p.reason}`, {
+   241→   241→      description: `Target: ${p.targetColumnId ?? "—"} at position ${p.position ?? 0}`,
+   242→   242→    });
+   243→   243→  }, []);
+   244→   244→
+   245→   245→  const onItemReordered = React.useCallback((p: KanbanEventPayload) => {
+   246→   246→    setLastEvent(`reordered ${p.itemId} @${p.newPosition}`);
+   247→   247→    syncFromBoard();
+   248→   248→  }, [syncFromBoard]);
+   249→   249→
+   250→   250→  const onItemActivated = React.useCallback((p: KanbanEventPayload) => {
+   251→   251→    setLastEvent(`activated ${p.itemId}`);
+   252→   252→    toast.info("Item activated", {
+   253→   253→      description: `Double-click or Enter on ${p.itemId}. Host decides whether to open details.`,
+   254→   254→    });
+   255→   255→  }, []);
+   256→   256→
+   257→   257→  const onItemCreateRequested = React.useCallback((p: KanbanEventPayload) => {
+   258→   258→    if (!instanceRef.current || !p.columnId) return;
+   259→   259→    const n = instanceRef.current.getItems().filter((it) => it.columnId === p.columnId).length + 1;
+   260→   260→    const id = instanceRef.current.createItem(p.columnId, {
+   261→   261→      title: `New task #${n}`,
+   262→   262→      description: "Added from the playground.",
+   263→   263→      priority: "medium",
+   264→   264→    });
+   265→   265→    if (id) {
+   266→   266→      setLastEvent(`created ${id} in ${p.columnId}`);
+   267→   267→      toast.success("Item created", { description: `Added to ${p.columnId} as ${id}` });
+   268→   268→      syncFromBoard();
+   269→   269→    }
+   270→   270→  }, [syncFromBoard]);
+   271→   271→
+   272→   272→  const onItemDeleteRequested = React.useCallback((p: KanbanEventPayload) => {
+   273→   273→    if (!instanceRef.current || !p.itemId) return;
+   274→   274→    instanceRef.current.removeItem(p.itemId);
+   275→   275→    setLastEvent(`deleted ${p.itemId}`);
+   276→   276→    toast.success("Item removed", { description: p.itemId });
+   277→   277→    syncFromBoard();
+   278→   278→  }, [syncFromBoard]);
+   279→   279→
+   280→   280→  const onDropTargetChanged = React.useCallback((p: KanbanEventPayload) => {
+   281→   281→    setLastEvent(`drop-target → ${p.targetColumnId} @${p.targetPosition}`);
+   282→   282→  }, []);
+   283→   283→
+   284→   284→  const onDragStarted = React.useCallback((p: KanbanEventPayload) => {
+   285→   285→    setLastEvent(`drag-start ${p.itemId}`);
+   286→   286→  }, []);
+   287→   287→
+   288→   288→  const onDragCancelled = React.useCallback((p: KanbanEventPayload) => {
+   289→   289→    setLastEvent(`drag-cancel ${p.itemId}`);
+   290→   290→  }, []);
+   291→   291→
+   292→   292→  const reset = React.useCallback(() => {
+   293→   293→    setItems(SEED_ITEMS);
+   294→   294→    setSelectedId(null);
+   295→   295→    setLastEvent("reset");
+   296→   296→    // Force the board to re-apply seed items
+   297→   297→    setTimeout(() => {
+   298→   298→      instanceRef.current?.setItems(SEED_ITEMS);
+   299→   299→      instanceRef.current?.clearSelection();
+   300→   300→    }, 0);
+   301→   301→    toast.info("Board reset", { description: "Restored seed items and selection." });
+   302→   302→  }, []);
+   303→   303→
+   304→   304→  const counts = React.useMemo(() => countsByColumn(items, columns), [items, columns]);
+   305→   305→  const selectedItem = React.useMemo(() => items.find((it) => it.id === selectedId) ?? null, [items, selectedId]);
+   306→   306→
+   307→   307→  const jsCode = React.useMemo(() => `import { KanbanBoard } from "@workshop/kanban";
+   308→   308→import { registerBuiltinTemplates } from "@workshop/templates";
+   309→   309→
+   310→   310→// Register the platform's built-in content templates + slot renderers.
+   311→   311→// Idempotent — safe to call multiple times.
+   312→   312→registerBuiltinTemplates();
+   313→   313→
+   314→   314→const board = new KanbanBoard(container, {
+   315→   315→  mode: "${state.mode}",
+   316→   316→  layout: "${state.layout}",
+   317→   317→  cardLayout: "${state.cardLayout}",
+   318→   318→  dragEnabled: ${state.dragEnabled},
+   319→   319→  reorderWithinColumn: ${state.reorderWithinColumn},
+   320→   320→  moveBetweenColumns: ${state.moveBetweenColumns},
+   321→   321→  showCardBorder: ${state.showCardBorder},
+   322→   322→  showItemCount: ${state.showItemCount},
+   323→   323→  showDropPreview: ${state.showDropPreview},
+   324→   324→  columnWidth: ${state.columnWidth},
+   325→   325→  cardGap: ${state.cardGap},
+   326→   326→  columnGap: ${state.columnGap},
+   327→   327→  templateId: "${state.templateId}",
+   328→   328→  columns: [
+   329→   329→    { id: "todo", title: "To Do", color: "#B8B2CA" },
+   330→   330→    { id: "in-progress", title: "In Progress", color: "#D9FF66" },
+   331→   331→    { id: "done", title: "Done", color: "#8FE3A5" },
+   332→   332→  ],
+   333→   333→  items: [
+   334→   334→    { id: "t1", columnId: "todo", title: "Design login screen", priority: "medium" },
+   335→   335→    { id: "t2", columnId: "in-progress", title: "Build kanban", priority: "high" },
+   336→   336→  ],
+   337→   337→});
+   338→   338→
+   339→   339→// Switch templates at runtime without touching the data:
+   340→   340→// board.setTemplateId("kanban.bug-report");
+   341→   341→
+   342→   342→board.on("item_moved", ({ itemId, sourceColumnId, targetColumnId, newPosition }) => {
+   343→   343→  console.log(\`Moved \${itemId}: \${sourceColumnId} → \${targetColumnId} @\${newPosition}\`);
+   344→   344→});
+   345→   345→
+   346→   346→board.on("item_move_rejected", ({ itemId, reason }) => {
+   347→   347→  console.warn(\`Move of \${itemId} rejected: \${reason}\`);
+   348→   348→});`, [state]);
+   349→   349→
+   350→   350→  return (
+   351→   351→    <div>
+   352→   352→      <div className="border-b border-border bg-background">
+   353→   353→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   354→   354→          <Breadcrumbs />
+   355→   355→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   356→   356→            <div>
+   357→   357→              <PageOverline>Components / Productivity</PageOverline>
+   358→   358→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Kanban Board</h1>
+   359→   359→              <CollapsibleDescription
+   360→   360→                text={meta.longDescription}
+   361→   361→                maxLength={220}
+   362→   362→                className="mt-2 max-w-2xl text-[15px] text-muted-foreground"
+   363→   363→              />
+   364→   364→            </div>
+   365→   365→            <div className="flex flex-wrap items-center gap-2">
+   366→   366→              {meta.tags.map((t) => (
+   367→   367→                <span key={t} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">{t}</span>
+   368→   368→              ))}
+   369→   369→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   370→   370→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />{meta.status}
+   371→   371→              </span>
+   372→   372→            </div>
+   373→   373→          </div>
+   374→   374→        </div>
+   375→   375→      </div>
+   376→   376→
+   377→   377→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   378→   378→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px] lg:items-start">
+   379→   379→          {/* Live canvas */}
+   380→   380→          <section aria-label="Live preview" className="panel relative flex h-[600px] flex-col overflow-hidden">
+   381→   381→            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+   382→   382→              <div className="flex items-center gap-2">
+   383→   383→                <KanbanSquare className="h-4 w-4 text-brand-lemon" />
+   384→   384→                <span className="eyebrow">Live canvas</span>
+   385→   385→                {activeTemplate && (
+   386→   386→                  <span className="ml-2 inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+   387→   387→                    {state.templateId === KANBAN_TEMPLATE_NONE ? (
+   388→   388→                      <Ban className="h-3 w-3 text-muted-foreground" />
+   389→   389→                    ) : (
+   390→   390→                      <LayoutTemplate className="h-3 w-3 text-brand-lemon" />
+   391→   391→                    )}
+   392→   392→                    {activeTemplate.name}
+   393→   393→                  </span>
+   394→   394→                )}
+   395→   395→              </div>
+   396→   396→              <div className="flex items-center gap-3">
+   397→   397→                <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">
+   398→   398→                  {items.length} items · {columns.length} cols
+   399→   399→                </span>
+   400→   400→                <button
+   401→   401→                  type="button"
+   402→   402→                  onClick={reset}
+   403→   403→                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-brand-lemon/40"
+   404→   404→                >
+   405→   405→                  <RotateCcw className="h-3 w-3" />
+   406→   406→                  Reset
+   407→   407→                </button>
+   408→   408→              </div>
+   409→   409→            </div>
+   410→   410→            <div className="flex-1 min-h-0 overflow-hidden bg-grid">
+   411→   411→              <KanbanReact
+   412→   412→                items={items}
+   413→   413→                columns={columns}
+   414→   414→                mode={state.mode}
+   415→   415→                layout={state.layout}
+   416→   416→                cardLayout={state.cardLayout}
+   417→   417→                dragEnabled={state.dragEnabled}
+   418→   418→                reorderWithinColumn={state.reorderWithinColumn}
+   419→   419→                moveBetweenColumns={state.moveBetweenColumns}
+   420→   420→                showCardBorder={state.showCardBorder}
+   421→   421→                showItemCount={state.showItemCount}
+   422→   422→                showDropPreview={state.showDropPreview}
+   423→   423→                columnWidth={state.columnWidth}
+   424→   424→                cardGap={state.cardGap}
+   425→   425→                columnGap={state.columnGap}
+   426→   426→                templateId={state.templateId}
+   427→   427→                selectable
+   428→   428→                allowEmptyColumns
+   429→   429→                onItemSelected={onItemSelected}
+   430→   430→                onSelectionChanged={onItemSelected}
+   431→   431→                onItemActivated={onItemActivated}
+   432→   432→                onItemCreateRequested={onItemCreateRequested}
+   433→   433→                onItemMoved={onItemMoved}
+   434→   434→                onItemMoveRejected={onItemMoveRejected}
+   435→   435→                onItemReordered={onItemReordered}
+   436→   436→                onItemDeleteRequested={onItemDeleteRequested}
+   437→   437→                onDragStarted={onDragStarted}
+   438→   438→                onDragCancelled={onDragCancelled}
+   439→   439→                onDropTargetChanged={onDropTargetChanged}
+   440→   440→                instanceRef={instanceRef}
+   441→   441→                className="h-full"
+   442→   442→              />
+   443→   443→            </div>
+   444→   444→            {/* Output */}
+   445→   445→            <div className="shrink-0 border-t border-border p-4">
+   446→   446→              <div className="mb-2 flex items-center justify-between gap-3">
+   447→   447→                <span className="eyebrow">Output</span>
+   448→   448→                <span className="truncate font-mono text-[11px] text-muted-foreground">
+   449→   449→                  last: <span className="text-brand-lemon">{lastEvent}</span>
+   450→   450→                </span>
+   451→   451→              </div>
+   452→   452→              <div className="flex flex-wrap items-center gap-2">
+   453→   453→                <CopyableValue label="Selected" value={selectedItem ? `${selectedItem.id} · ${selectedItem.title}` : "—"} />
+   454→   454→                {counts.map((c) => (
+   455→   455→                  <span
+   456→   456→                    key={c.id}
+   457→   457→                    className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 font-mono text-[12px]"
+   458→   458→                  >
+   459→   459→                    <span className="h-2 w-2 rounded-full" style={{ background: c.color ?? "#B8B2CA" }} />
+   460→   460→                    <span className="text-muted-foreground">{c.title}:</span>
+   461→   461→                    <span className="text-foreground">{c.count}</span>
+   462→   462→                  </span>
+   463→   463→                ))}
+   464→   464→              </div>
+   465→   465→              <p className="mt-2 text-[11px] text-muted-foreground">
+   466→   466→                Tip: drag cards between columns, press <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">M</kbd> on a focused card to open the Move menu, or <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Delete</kbd> to request removal.
+   467→   467→              </p>
+   468→   468→            </div>
+   469→   469→          </section>
+   470→   470→
+   471→   471→          {/* Properties + Templates + AGENT + SKILL */}
+   472→   472→          <AgentSkillTabs
+   473→   473→            agentPath="/docs/components/kanban-AGENT.md"
+   474→   474→            skillPath="/docs/components/kanban-SKILL.md"
+   475→   475→            templatesSlot={
+   476→   476→              <>
+   477→   477→                {/* Template picker — includes "None" (native rendering) + all registered Kanban templates */}
+   478→   478→                <div>
+   479→   479→                  <label className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-foreground">
+   480→   480→                    <LayoutTemplate className="h-3.5 w-3.5 text-brand-lemon" />
+   481→   481→                    Content template
+   482→   482→                  </label>
+   483→   483→                  <div className="rounded-md border border-border bg-muted/20 p-1">
+   484→   484→                    <div className="flex flex-col gap-0.5">
+   485→   485→                      {templateOptions.map((t) => {
+   486→   486→                        const isNone = t.id === KANBAN_TEMPLATE_NONE;
+   487→   487→                        const isActive = state.templateId === t.id;
+   488→   488→                        return (
+   489→   489→                          <button
+   490→   490→                            key={t.id}
+   491→   491→                            type="button"
+   492→   492→                            onClick={() => update("templateId", t.id)}
+   493→   493→                            aria-pressed={isActive}
+   494→   494→                            className={cn(
+   495→   495→                              "rounded px-2.5 py-2 text-left transition-colors",
+   496→   496→                              isActive
+   497→   497→                                ? "bg-brand-purple-strong text-foreground"
+   498→   498→                                : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   499→   499→                            )}
+   500→   500→                          >
+   501→   501→                            <div className="flex items-center justify-between gap-2">
+   502→   502→                              <span className="flex items-center gap-1.5 text-[12px] font-medium">
+   503→   503→                                {isNone ? (
+   504→   504→                                  <Ban className="h-3 w-3 text-muted-foreground" />
+   505→   505→                                ) : (
+   506→   506→                                  <LayoutTemplate className="h-3 w-3 text-brand-lemon" />
+   507→   507→                                )}
+   508→   508→                                {t.name}
+   509→   509→                              </span>
+   510→   510→                              <code className="font-mono text-[10px] text-muted-foreground/80">{t.id}</code>
+   511→   511→                            </div>
+   512→   512→                            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+   513→   513→                              {t.description}
+   514→   514→                            </p>
+   515→   515→                            {t.slots.length > 0 && (
+   516→   516→                              <div className="mt-1.5 flex flex-wrap gap-1">
+   517→   517→                                {t.slots.map((s) => (
+   518→   518→                                  <span
+   519→   519→                                    key={`${t.id}-${s.field}-${s.renderer}`}
+   520→   520→                                    className="inline-flex items-center rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground"
+   521→   521→                                  >
+   522→   522→                                    {s.field}
+   523→   523→                                    <span className="mx-1 text-muted-foreground/40">·</span>
+   524→   524→                                    <span className="text-brand-lemon/80">{s.renderer}</span>
+   525→   525→                                  </span>
+   526→   526→                                ))}
+   527→   527→                              </div>
+   528→   528→                            )}
+   529→   529→                            {isNone && (
+   530→   530→                              <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground/80">
+   531→   531→                                The board works with zero templates registered — content templates are an opt-in layer on top.
+   532→   532→                              </p>
+   533→   533→                            )}
+   534→   534→                          </button>
+   535→   535→                        );
+   536→   536→                      })}
+   537→   537→                    </div>
+   538→   538→                  </div>
+   539→   539→                  <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">
+   540→   540→                    Templates live in <code className="font-mono text-brand-lemon/80">src/lib/templates/</code> and
+   541→   541→                    are reusable across components. Switching swaps the card content layout without touching the data.
+   542→   542→                  </p>
+   543→   543→                </div>
+   544→   544→
+   545→   545→                {/* How to create custom templates */}
+   546→   546→                <div className="rounded-md border border-border bg-muted/10 p-4">
+   547→   547→                  <h4 className="flex items-center gap-1.5 text-[12px] font-semibold text-foreground">
+   548→   548→                    <BookOpen className="h-3.5 w-3.5 text-brand-lemon" />
+   549→   549→                    Creating custom templates
+   550→   550→                  </h4>
+   551→   551→                  <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+   552→   552→                    The board is independent of templates — it works with <code className="font-mono text-brand-lemon/80">&quot;none&quot;</code> or
+   553→   553→                    any registered ID. Templates are declarative: an ordered list of slots, each naming a field and a renderer.
+   554→   554→                  </p>
+   555→   555→                  <ol className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-muted-foreground">
+   556→   556→                    <li>
+   557→   557→                      <span className="font-mono text-brand-lemon">1.</span> Register a renderer (or reuse a built-in one
+   558→   558→                      like <code className="font-mono text-brand-lemon/80">title</code>, <code className="font-mono text-brand-lemon/80">priority-row</code>,
+   559→   559→                      <code className="font-mono text-brand-lemon/80">label-chips</code>):
+   560→   560→                    </li>
+   561→   561→                  </ol>
+   562→   562→                  <pre className="mt-1.5 overflow-x-auto rounded border border-border bg-background/60 p-2 font-mono text-[10px] text-foreground"><code>{`import { defineRenderer } from "@/lib/templates";
+   563→   563→
+   564→   564→defineRenderer("my-prefix", (ctx) => {
+   565→   565→  const v = ctx.item[ctx.slot.field];
+   566→   566→  if (!v) return null;
+   567→   567→  const el = document.createElement("div");
+   568→   568→  el.className = "ctpl-meta-line";
+   569→   569→  el.textContent = String(v);
+   570→   570→  return el;
+   571→   571→});`}</code></pre>
+   572→   572→                  <ol className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-muted-foreground" start={2}>
+   573→   573→                    <li>
+   574→   574→                      <span className="font-mono text-brand-lemon">2.</span> Register a template that references your
+   575→   575→                      renderers (or the built-in ones):
+   576→   576→                    </li>
+   577→   577→                  </ol>
+   578→   578→                  <pre className="mt-1.5 overflow-x-auto rounded border border-border bg-background/60 p-2 font-mono text-[10px] text-foreground"><code>{`import { defineTemplate } from "@/lib/templates";
+   579→   579→
+   580→   580→defineTemplate({
+   581→   581→  id: "kanban.my-card",
+   582→   582→  name: "My Card",
+   583→   583→  category: "Kanban",
+   584→   584→  description: "Title + custom prefix line.",
+   585→   585→  slots: [
+   586→   586→    { field: "title",  renderer: "title",      visibleIn: ["compact","standard","detailed"] },
+   587→   587→    { field: "myField", renderer: "my-prefix", visibleIn: ["standard","detailed"], props: { prefix: "MY" } },
+   588→   588→  ],
+   589→   589→});`}</code></pre>
+   590→   590→                  <ol className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-muted-foreground" start={3}>
+   591→   591→                    <li>
+   592→   592→                      <span className="font-mono text-brand-lemon">3.</span> Switch the board to your template:
+   593→   593→                    </li>
+   594→   594→                  </ol>
+   595→   595→                  <pre className="mt-1.5 overflow-x-auto rounded border border-border bg-background/60 p-2 font-mono text-[10px] text-foreground"><code>{`board.setTemplateId("kanban.my-card");
+   596→   596→// or at construction:
+   597→   597→new KanbanBoard(el, { templateId: "kanban.my-card", ... });`}</code></pre>
+   598→   598→                  <p className="mt-2 text-[10px] leading-snug text-muted-foreground/80">
+   599→   599→                    The renderer contract is <code className="font-mono text-brand-lemon/80">{"(ctx: { item, slot, density, host }) => HTMLElement | null"}</code>.
+   600→   600→                    Return <code className="font-mono text-brand-lemon/80">null</code> to skip the slot. See the
+   601→   601→                    SKILL tab for the full renderer registry API.
+   602→   602→                  </p>
+   603→   603→                </div>
+   604→   604→              </>
+   605→   605→            }
+   606→   606→          >
+   607→   607→            {/* Mode */}
+   608→   608→            <div>
+   609→   609→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Mode</label>
+   610→   610→              <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   611→   611→                {(["editable", "read_only"] as const).map((m) => (
+   612→   612→                  <button key={m} type="button" onClick={() => update("mode", m)} aria-pressed={state.mode === m}
+   613→   613→                    className={cn("rounded px-2 py-2 text-[11px] font-medium transition-colors",
+   614→   614→                      state.mode === m ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+   615→   615→                    {m === "editable" ? "Editable" : "Read-only"}
+   616→   616→                  </button>
+   617→   617→                ))}
+   618→   618→              </div>
+   619→   619→            </div>
+   620→   620→
+   621→   621→            {/* Layout */}
+   622→   622→            <div>
+   623→   623→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Layout</label>
+   624→   624→              <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   625→   625→                {(["horizontal", "vertical"] as const).map((l) => (
+   626→   626→                  <button key={l} type="button" onClick={() => update("layout", l)} aria-pressed={state.layout === l}
+   627→   627→                    className={cn("rounded px-2 py-2 text-[11px] font-medium transition-colors",
+   628→   628→                      state.layout === l ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+   629→   629→                    {l === "horizontal" ? "Horizontal" : "Vertical"}
+   630→   630→                  </button>
+   631→   631→                ))}
+   632→   632→              </div>
+   633→   633→            </div>
+   634→   634→
+   635→   635→            {/* Card layout */}
+   636→   636→            <div>
+   637→   637→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Card layout</label>
+   638→   638→              <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   639→   639→                {(["compact", "standard", "detailed"] as const).map((c) => (
+   640→   640→                  <button key={c} type="button" onClick={() => update("cardLayout", c)} aria-pressed={state.cardLayout === c}
+   641→   641→                    className={cn("rounded px-2 py-2 text-[11px] font-medium capitalize transition-colors",
+   642→   642→                      state.cardLayout === c ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+   643→   643→                    {c}
+   644→   644→                  </button>
+   645→   645→                ))}
+   646→   646→              </div>
+   647→   647→            </div>
+   648→   648→
+   649→   649→            {/* Toggles */}
+   650→   650→            <div className="flex flex-col gap-2">
+   651→   651→              {([
+   652→   652→                { k: "dragEnabled" as const, l: "Drag enabled" },
+   653→   653→                { k: "reorderWithinColumn" as const, l: "Reorder within column" },
+   654→   654→                { k: "moveBetweenColumns" as const, l: "Move between columns" },
+   655→   655→                { k: "showCardBorder" as const, l: "Show card border" },
+   656→   656→                { k: "showItemCount" as const, l: "Show item count" },
+   657→   657→                { k: "showDropPreview" as const, l: "Show drop preview" },
+   658→   658→              ]).map(({ k, l }) => (
+   659→   659→                <div key={k} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+   660→   660→                  <span className="text-[12px] text-foreground">{l}</span>
+   661→   661→                  <button type="button" role="switch" aria-checked={state[k]} onClick={() => update(k, !state[k])}
+   662→   662→                    className={cn("relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+   663→   663→                      state[k] ? "bg-brand-lemon" : "bg-muted-foreground/30")}>
+   664→   664→                    <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform",
+   665→   665→                      state[k] ? "translate-x-4" : "translate-x-0.5")} />
+   666→   666→                  </button>
+   667→   667→                </div>
+   668→   668→              ))}
+   669→   669→            </div>
+   670→   670→
+   671→   671→            {/* Sliders */}
+   672→   672→            <div>
+   673→   673→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Column width: <span className="font-mono text-brand-lemon">{state.columnWidth}px</span></label>
+   674→   674→              <input type="range" min={220} max={400} step={10} value={state.columnWidth} onChange={(e) => update("columnWidth", Number(e.target.value))}
+   675→   675→                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+   676→   676→                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.columnWidth - 220) / 180 * 100}%, var(--muted) ${(state.columnWidth - 220) / 180 * 100}%)` }} />
+   677→   677→              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+   678→   678→                <span>220</span><span>400</span>
+   679→   679→              </div>
+   680→   680→            </div>
+   681→   681→
+   682→   682→            <div>
+   683→   683→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Card gap: <span className="font-mono text-brand-lemon">{state.cardGap}px</span></label>
+   684→   684→              <input type="range" min={2} max={20} step={1} value={state.cardGap} onChange={(e) => update("cardGap", Number(e.target.value))}
+   685→   685→                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+   686→   686→                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.cardGap - 2) / 18 * 100}%, var(--muted) ${(state.cardGap - 2) / 18 * 100}%)` }} />
+   687→   687→              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+   688→   688→                <span>2</span><span>20</span>
+   689→   689→              </div>
+   690→   690→            </div>
+   691→   691→
+   692→   692→            <div>
+   693→   693→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Column gap: <span className="font-mono text-brand-lemon">{state.columnGap}px</span></label>
+   694→   694→              <input type="range" min={4} max={32} step={1} value={state.columnGap} onChange={(e) => update("columnGap", Number(e.target.value))}
+   695→   695→                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+   696→   696→                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${(state.columnGap - 4) / 28 * 100}%, var(--muted) ${(state.columnGap - 4) / 28 * 100}%)` }} />
+   697→   697→              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+   698→   698→                <span>4</span><span>32</span>
+   699→   699→              </div>
+   700→   700→            </div>
+   701→   701→
+   702→   702→            {/* Quick actions */}
+   703→   703→            <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+   704→   704→              <button
+   705→   705→                type="button"
+   706→   706→                onClick={() => {
+   707→   707→                  const id = `t-${Math.random().toString(36).slice(2, 7)}`;
+   708→   708→                  instanceRef.current?.createItem("todo", { id, title: "Quick task", priority: "low" });
+   709→   709→                  syncFromBoard();
+   710→   710→                  toast.success("Added", { description: id });
+   711→   711→                }}
+   712→   712→                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-brand-lemon/40 hover:bg-accent"
+   713→   713→              >
+   714→   714→                <Plus className="h-3 w-3 text-brand-lemon" /> Add to To Do
+   715→   715→              </button>
+   716→   716→              <button
+   717→   717→                type="button"
+   718→   718→                onClick={() => {
+   719→   719→                  if (!selectedId) {
+   720→   720→                    toast.error("No selection", { description: "Select a card first." });
+   721→   721→                    return;
+   722→   722→                  }
+   723→   723→                  instanceRef.current?.removeItem(selectedId);
+   724→   724→                  syncFromBoard();
+   725→   725→                  toast.success("Removed", { description: selectedId });
+   726→   726→                }}
+   727→   727→                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-destructive/40 hover:bg-accent"
+   728→   728→              >
+   729→   729→                <Trash2 className="h-3 w-3 text-destructive" /> Remove selected
+   730→   730→              </button>
+   731→   731→            </div>
+   732→   732→          </AgentSkillTabs>
+   733→   733→        </div>
+   734→   734→
+   735→   735→        {/* Code panel */}
+   736→   736→        <section className="panel mt-6 overflow-hidden">
+   737→   737→          <div className="flex items-center justify-between border-b border-border px-2">
+   738→   738→            <div className="flex">
+   739→   739→              {([["javascript","JavaScript"],["html","HTML"],["css","CSS"],["api","API"]] as const).map(([k, l]) => (
+   740→   740→                <button key={k} type="button" onClick={() => setActiveTab(k)}
+   741→   741→                  className={cn("relative h-9 px-3 text-[12px] font-medium transition-colors",
+   742→   742→                    activeTab === k ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+   743→   743→                  {l}
+   744→   744→                  {activeTab === k && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   745→   745→                </button>
+   746→   746→              ))}
+   747→   747→            </div>
+   748→   748→          </div>
+   749→   749→          <div className="p-4">
+   750→   750→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   751→   751→            {activeTab === "html" && <CodeBlock code={'<div id="kanban" style="height: 600px;"></div>\n<script type="module" src="init.js"></script>'} language="html" filename="index.html" />}
+   752→   752→            {activeTab === "css" && <CodeBlock code={".kanban-board {\n  /* Override tokens to retheme the board */\n  --kb-accent: #D9FF66;\n  --kb-surface: #211A30;\n  --kb-border: #383343;\n  --kb-text: #F4F1FF;\n  --kb-muted: #B8B2CA;\n}\n\n/* Compact density for side panels */\n.kanban-board.kanban-card-compact .kanban-card {\n  padding: 4px 8px;\n}"} language="css" filename="styles.css" />}
+   753→   753→            {activeTab === "api" && <CodeBlock code={"class KanbanBoard {\n  constructor(container, options)\n  setItems(items): void\n  setColumns(columns): void\n  selectItem(itemId | null, source?): void\n  clearSelection(): void\n  getSelectedItem(): string | null\n  moveItem(itemId, targetColumnId, position, source?): void\n  reorderItem(itemId, position, source?): void\n  createItem(columnId, partial): string\n  updateItem(itemId, changes): void\n  removeItem(itemId): void\n  collapseColumn(columnId): void\n  expandColumn(columnId): void\n  getItems(): KanbanItem[]\n  getColumns(): KanbanColumn[]\n\n  // Content templates (see src/lib/templates/)\n  getTemplate(): ContentTemplate | undefined\n  getTemplateId(): string\n  setTemplateId(id): void\n\n  setProperty(name, value): void\n  on(event, handler): void\n  off(event, handler): void\n  destroy(): void\n}\n\n// Events:\n//   item_selected, selection_changed, item_activated,\n//   item_create_requested, item_edit_requested,\n//   item_moved, item_move_rejected, item_reordered,\n//   item_delete_requested, drag_started, drag_cancelled,\n//   drop_target_changed, column_selected, column_create_requested\n\n// Content templates are registered in a singleton registry:\n//   import { registerBuiltinTemplates, templateRegistry } from \"@/lib/templates\";\n//   registerBuiltinTemplates();\n//   templateRegistry.byCategory(\"Kanban\");\n//   // → [{ id: \"kanban.standard-task\", ... }, { id: \"kanban.minimal\", ... }, ...]"} language="typescript" filename="api.ts" />}
+   754→   754→          </div>
+   755→   755→        </section>
+   756→   756→
+   757→   757→        {/* Documentation */}
+   758→   758→        <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_220px]">
+   759→   759→          <div className="flex flex-col gap-6">
+   760→   760→            <div className="panel p-6">
+   761→   761→              <h2 className="text-lg font-semibold text-foreground">Overview</h2>
+   762→   762→              <p className="mt-2 text-[14px] text-muted-foreground">{meta.description}</p>
+   763→   763→              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+   764→   764→                <div>
+   765→   765→                  <h3 className="text-[12px] font-semibold uppercase tracking-wide text-brand-lemon">When to use</h3>
+   766→   766→                  <ul className="mt-2 space-y-1 text-[13px] text-muted-foreground">
+   767→   767→                    {meta.whenToUse.map((u) => <li key={u} className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />{u}</li>)}
+   768→   768→                  </ul>
+   769→   769→                </div>
+   770→   770→                <div>
+   771→   771→                  <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Not for</h3>
+   772→   772→                  <ul className="mt-2 space-y-1 text-[13px] text-muted-foreground">
+   773→   773→                    {meta.whenNotToUse.map((u) => <li key={u} className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />{u}</li>)}
+   774→   774→                  </ul>
+   775→   775→                </div>
+   776→   776→              </div>
+   777→   777→            </div>
+   778→   778→
+   779→   779→            <div className="panel p-6">
+   780→   780→              <h2 className="text-lg font-semibold text-foreground">Properties</h2>
+   781→   781→              <div className="mt-3 overflow-x-auto">
+   782→   782→                <table className="w-full text-left text-[12px]">
+   783→   783→                  <thead>
+   784→   784→                    <tr className="border-b border-border text-muted-foreground">
+   785→   785→                      <th className="py-2 pr-4 font-mono font-medium">Property</th>
+   786→   786→                      <th className="py-2 pr-4 font-mono font-medium">Type</th>
+   787→   787→                      <th className="py-2 pr-4 font-mono font-medium">Default</th>
+   788→   788→                      <th className="py-2 font-mono font-medium">Description</th>
+   789→   789→                    </tr>
+   790→   790→                  </thead>
+   791→   791→                  <tbody>
+   792→   792→                    {meta.properties.map((p) => (
+   793→   793→                      <tr key={p.name} className="border-b border-border/60 align-top">
+   794→   794→                        <td className="py-2 pr-4 font-mono text-brand-lemon">{p.name}</td>
+   795→   795→                        <td className="py-2 pr-4 font-mono text-foreground">{p.type}</td>
+   796→   796→                        <td className="py-2 pr-4 font-mono text-muted-foreground">{p.default}</td>
+   797→   797→                        <td className="py-2 text-muted-foreground">{p.description}</td>
+   798→   798→                      </tr>
+   799→   799→                    ))}
+   800→   800→                  </tbody>
+   801→   801→                </table>
+   802→   802→              </div>
+   803→   803→            </div>
+   804→   804→
+   805→   805→            <div className="grid gap-6 sm:grid-cols-2">
+   806→   806→              <div className="panel p-6">
+   807→   807→                <h2 className="text-lg font-semibold text-foreground">Methods</h2>
+   808→   808→                <ul className="mt-3 space-y-2">
+   809→   809→                  {meta.methods.slice(0, 12).map((m) => (
+   810→   810→                    <li key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   811→   811→                      <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   812→   812→                      <p className="mt-1 text-[12px] text-muted-foreground">{m.description}</p>
+   813→   813→                    </li>
+   814→   814→                  ))}
+   815→   815→                </ul>
+   816→   816→              </div>
+   817→   817→              <div className="panel p-6">
+   818→   818→                <h2 className="text-lg font-semibold text-foreground">Events</h2>
+   819→   819→                <ul className="mt-3 space-y-2">
+   820→   820→                  {meta.events.map((e) => (
+   821→   821→                    <li key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   822→   822→                      <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   823→   823→                      <p className="mt-1 text-[12px] text-muted-foreground">{e.description}</p>
+   824→   824→                      <p className="mt-1 font-mono text-[11px] text-muted-foreground/80">payload: {e.payload}</p>
+   825→   825→                    </li>
+   826→   826→                  ))}
+   827→   827→                </ul>
+   828→   828→              </div>
+   829→   829→            </div>
+   830→   830→
+   831→   831→            <div className="panel p-6">
+   832→   832→              <h2 className="text-lg font-semibold text-foreground">Accessibility</h2>
+   833→   833→              <ul className="mt-3 space-y-1.5 text-[13px] text-muted-foreground">
+   834→   834→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Cards are real DOM elements with <code className="font-mono text-brand-lemon">tabindex=&quot;0&quot;</code> and <code className="font-mono text-brand-lemon">role=&quot;button&quot;</code>.</li>
+   835→   835→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Visible focus ring (lemon) on every card and column control.</li>
+   836→   836→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" /><kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Space</kbd> selects, <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Enter</kbd> activates, <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">M</kbd> opens the Move menu.</li>
+   837→   837→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Arrow keys reorder (Up/Down) and move between columns (Left/Right).</li>
+   838→   838→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Drop indicator and column highlighting use color + outline, never color alone.</li>
+   839→   839→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" /><code className="font-mono text-brand-lemon">prefers-reduced-motion</code> disables the drop-indicator pulse.</li>
+   840→   840→              </ul>
+   841→   841→            </div>
+   842→   842→
+   843→   843→            <div className="panel p-6">
+   844→   844→              <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+   845→   845→                <LayoutTemplate className="h-4 w-4 text-brand-lemon" />
+   846→   846→                Content templates
+   847→   847→              </h2>
+   848→   848→              <p className="mt-2 text-[14px] text-muted-foreground">
+   849→   849→                Card content is laid out by a registered content template (see <code className="font-mono text-brand-lemon">src/lib/templates/</code>).
+   850→   850→                The board is independent of templates — pass <code className="font-mono text-brand-lemon">&quot;none&quot;</code> as
+   851→   851→                the <code className="font-mono text-brand-lemon">templateId</code> to render cards with their native
+   852→   852→                content (a bare title). Templates are an opt-in layer; the board works with zero templates registered.
+   853→   853→              </p>
+   854→   854→              <div className="mt-4 overflow-x-auto">
+   855→   855→                <table className="w-full text-left text-[12px]">
+   856→   856→                  <thead>
+   857→   857→                    <tr className="border-b border-border text-muted-foreground">
+   858→   858→                      <th className="py-2 pr-4 font-mono font-medium">Template ID</th>
+   859→   859→                      <th className="py-2 pr-4 font-mono font-medium">Name</th>
+   860→   860→                      <th className="py-2 font-mono font-medium">Slots</th>
+   861→   861→                    </tr>
+   862→   862→                  </thead>
+   863→   863→                  <tbody>
+   864→   864→                    <tr className="border-b border-border/60 align-top">
+   865→   865→                      <td className="py-2 pr-4 font-mono text-muted-foreground">none</td>
+   866→   866→                      <td className="py-2 pr-4 font-medium text-foreground">None</td>
+   867→   867→                      <td className="py-2 text-muted-foreground">— (native rendering: title only)</td>
+   868→   868→                    </tr>
+   869→   869→                    {kanbanTemplates.map((t) => (
+   870→   870→                      <tr key={t.id} className="border-b border-border/60 align-top">
+   871→   871→                        <td className="py-2 pr-4 font-mono text-brand-lemon">{t.id}</td>
+   872→   872→                        <td className="py-2 pr-4 font-medium text-foreground">{t.name}</td>
+   873→   873→                        <td className="py-2 text-muted-foreground">
+   874→   874→                          {t.slots.map((s) => s.field).join(" → ")}
+   875→   875→                        </td>
+   876→   876→                      </tr>
+   877→   877→                    ))}
+   878→   878→                  </tbody>
+   879→   879→                </table>
+   880→   880→              </div>
+   881→   881→              <h3 className="mt-5 text-[12px] font-semibold uppercase tracking-wide text-brand-lemon">Creating a custom template</h3>
+   882→   882→              <p className="mt-1.5 text-[13px] text-muted-foreground">
+   883→   883→                The component does not know which templates exist — it looks them up by ID in the
+   884→   884→                singleton registry at render time. To add a custom template:
+   885→   885→              </p>
+   886→   886→              <ol className="mt-2 space-y-2 text-[13px] text-muted-foreground">
+   887→   887→                <li className="flex gap-2">
+   888→   888→                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-lemon/10 font-mono text-[10px] font-semibold text-brand-lemon">1</span>
+   889→   889→                  <span>Register a slot renderer (a pure function from <code className="font-mono text-brand-lemon">{ "{ item, slot, density, host }" }</code> to <code className="font-mono text-brand-lemon">HTMLElement | null</code>), or reuse one of the 12 built-in renderers (<code className="font-mono text-brand-lemon">title</code>, <code className="font-mono text-brand-lemon">priority-row</code>, <code className="font-mono text-brand-lemon">label-chips</code>, etc.).</span>
+   890→   890→                </li>
+   891→   891→                <li className="flex gap-2">
+   892→   892→                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-lemon/10 font-mono text-[10px] font-semibold text-brand-lemon">2</span>
+   893→   893→                  <span>Register a template that references your renderers by name, with per-slot <code className="font-mono text-brand-lemon">visibleIn</code> density filters and optional <code className="font-mono text-brand-lemon">props</code>.</span>
+   894→   894→                </li>
+   895→   895→                <li className="flex gap-2">
+   896→   896→                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-lemon/10 font-mono text-[10px] font-semibold text-brand-lemon">3</span>
+   897→   897→                  <span>Pass the template ID to the board (<code className="font-mono text-brand-lemon">{ "templateId" }</code> option or <code className="font-mono text-brand-lemon">setTemplateId()</code>). Switch at any time — the data is untouched.</span>
+   898→   898→                </li>
+   899→   899→              </ol>
+   900→   900→              <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-background/60 p-3 font-mono text-[11px] text-foreground"><code>{`import { defineRenderer, defineTemplate } from "@/lib/templates";
+   901→   901→
+   902→   902→// 1. Optional: register a custom renderer (or reuse a built-in one).
+   903→   903→defineRenderer("my-prefix", (ctx) => {
+   904→   904→  const v = ctx.item[ctx.slot.field];
+   905→   905→  if (!v) return null;
+   906→   906→  const el = document.createElement("div");
+   907→   907→  el.className = "ctpl-meta-line";
+   908→   908→  el.textContent = String(v);
+   909→   909→  return el;
+   910→   910→});
+   911→   911→
+   912→   912→// 2. Register a template that references renderers by name.
+   913→   913→defineTemplate({
+   914→   914→  id: "kanban.my-card",
+   915→   915→  name: "My Card",
+   916→   916→  category: "Kanban",
+   917→   917→  description: "Title + custom prefix line.",
+   918→   918→  slots: [
+   919→   919→    { field: "title",   renderer: "title",      visibleIn: ["compact", "standard", "detailed"] },
+   920→   920→    { field: "myField", renderer: "my-prefix",  visibleIn: ["standard", "detailed"], props: { prefix: "MY" } },
+   921→   921→  ],
+   922→   922→});
+   923→   923→
+   924→   924→// 3. Use it — the board looks up the template by ID at render time.
+   925→   925→const board = new KanbanBoard(el, { templateId: "kanban.my-card", ... });
+   926→   926→// or switch at runtime:
+   927→   927→board.setTemplateId("kanban.my-card");
+   928→   928→// or go template-free:
+   929→   929→board.setTemplateId("none");`}</code></pre>
+   930→   930→              <p className="mt-3 text-[12px] text-muted-foreground">
+   931→   931→                See the Templates tab (right) for the live picker, or the SKILL tab for the full
+   932→   932→                renderer registry API and the complete list of built-in renderers.
+   933→   933→              </p>
+   934→   934→            </div>
+   935→   935→          </div>
+   936→   936→
+   937→   937→          <aside className="hidden lg:block">
+   938→   938→            <div className="sticky top-6 panel p-4">
+   939→   939→              <h3 className="eyebrow mb-3">On this page</h3>
+   940→   940→              <ul className="space-y-2 text-[12px] text-muted-foreground">
+   941→   941→                <li><a href="#" className="hover:text-foreground">Overview</a></li>
+   942→   942→                <li><a href="#" className="hover:text-foreground">Properties</a></li>
+   943→   943→                <li><a href="#" className="hover:text-foreground">Methods</a></li>
+   944→   944→                <li><a href="#" className="hover:text-foreground">Events</a></li>
+   945→   945→                <li><a href="#" className="hover:text-foreground">Accessibility</a></li>
+   946→   946→                <li><a href="#" className="hover:text-foreground">Content templates</a></li>
+   947→   947→              </ul>
+   948→   948→            </div>
+   949→   949→          </aside>
+   950→   950→        </section>
+   951→   951→      </div>
+   952→   952→    </div>
+   953→   953→  );
+   954→   954→}
+   955→   955→

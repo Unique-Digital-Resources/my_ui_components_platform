@@ -1,0 +1,899 @@
+     1→/**
+     2→ * PeriodicRange — a dual-thumb range slider component (vanilla TypeScript).
+     3→ *
+     4→ * Renders a horizontal or vertical track with two draggable thumbs: a low
+     5→ * (min) thumb and a high (max) thumb. The selected range between the two
+     6→ * thumbs is filled with the lemon accent color. Optional snapping to a step
+     7→ * increment and optional tick-mark markers with numeric labels.
+     8→ *
+     9→ * Public API:
+    10→ *   new PeriodicRange(container, options?)
+    11→ *   getValueMin(): number
+    12→ *   getValueMax(): number
+    13→ *   setValueMin(v: number): void
+    14→ *   setValueMax(v: number): void
+    15→ *   setRange(min: number, max: number): void
+    16→ *   setStep(step: number): void
+    17→ *   setShowMarkers(on: boolean): void
+    18→ *   setMarkerStep(step: number): void
+    19→ *   setOrientation(orientation): void
+    20→ *   setThickness(n: number): void
+    21→ *   setLength(n: number): void
+    22→ *   on("input" | "change", handler): void
+    23→ *   off(event, handler): void
+    24→ *   destroy(): void
+    25→ *
+    26→ * Framework-independent. Canvas-based. No React or other UI framework.
+    27→ */
+    28→
+    29→export type PeriodicRangeOrientation = "horizontal" | "vertical";
+    30→
+    31→export interface PeriodicRangeOptions {
+    32→  /** Range minimum. Default 0. */
+    33→  min?: number;
+    34→  /** Range maximum. Default 100. */
+    35→  max?: number;
+    36→  /** Current low value. Default 25. */
+    37→  valueMin?: number;
+    38→  /** Current high value. Default 75. */
+    39→  valueMax?: number;
+    40→  /** Snap step. 0 = no snapping. Default 0. */
+    41→  step?: number;
+    42→  /** Show tick marks/labels. Default false. */
+    43→  showMarkers?: boolean;
+    44→  /** Interval between markers. Default 10. */
+    45→  markerStep?: number;
+    46→  /** Track orientation. Default "horizontal". */
+    47→  orientation?: PeriodicRangeOrientation;
+    48→  /** Track thickness in px. Default 8. */
+    49→  thickness?: number;
+    50→  /** Track length in px. Default 280. */
+    51→  length?: number;
+    52→}
+    53→
+    54→export interface PeriodicRangeValue {
+    55→  valueMin: number;
+    56→  valueMax: number;
+    57→}
+    58→
+    59→interface Geometry {
+    60→  /** Total component width in CSS pixels (including padding). */
+    61→  totalW: number;
+    62→  /** Total component height in CSS pixels. */
+    63→  totalH: number;
+    64→  /** Track x origin (left). */
+    65→  tx: number;
+    66→  /** Track y origin (top). */
+    67→  ty: number;
+    68→  /** Track length (long dimension). */
+    69→  tLen: number;
+    70→  /** Track thickness (short dimension). */
+    71→  tThick: number;
+    72→  /** Marker label area size (perpendicular to track). */
+    73→  labelArea: number;
+    74→}
+    75→
+    76→const DEFAULTS: Required<PeriodicRangeOptions> = {
+    77→  min: 0,
+    78→  max: 100,
+    79→  valueMin: 25,
+    80→  valueMax: 75,
+    81→  step: 0,
+    82→  showMarkers: false,
+    83→  markerStep: 10,
+    84→  orientation: "horizontal",
+    85→  thickness: 8,
+    86→  length: 280,
+    87→};
+    88→
+    89→const STYLE_ID = "periodic-range-styles";
+    90→
+    91→/** Padding around the track so thumbs (which overhang the track) fit. */
+    92→const PAD = 14;
+    93→/** Space reserved for marker labels when showMarkers is on. */
+    94→const LABEL_AREA = 22;
+    95→
+    96→function injectStyles(): void {
+    97→  if (typeof document === "undefined") return;
+    98→  if (document.getElementById(STYLE_ID)) return;
+    99→  const style = document.createElement("style");
+   100→  style.id = STYLE_ID;
+   101→  style.textContent = `
+   102→.periodic-range {
+   103→  display: inline-block;
+   104→  position: relative;
+   105→  font-family: inherit;
+   106→  --periodic-range-focus-ring: rgba(217, 255, 102, 0.55);
+   107→}
+   108→.periodic-range canvas {
+   109→  display: block;
+   110→  touch-action: none;
+   111→  outline: none;
+   112→  cursor: pointer;
+   113→  border-radius: 8px;
+   114→}
+   115→.periodic-range canvas:focus-visible {
+   116→  box-shadow: 0 0 0 3px var(--periodic-range-focus-ring);
+   117→}`;
+   118→  document.head.appendChild(style);
+   119→}
+   120→
+   121→// ---- Tiny helpers (self-contained, no external deps) ----
+   122→
+   123→function clamp(v: number, min: number, max: number): number {
+   124→  return v < min ? min : v > max ? max : v;
+   125→}
+   126→
+   127→function approxEqual(a: number, b: number, eps = 1e-9): boolean {
+   128→  return Math.abs(a - b) < eps;
+   129→}
+   130→
+   131→type Handler = (v: PeriodicRangeValue) => void;
+   132→
+   133→export class PeriodicRange {
+   134→  private readonly container: HTMLElement;
+   135→  private readonly canvas: HTMLCanvasElement;
+   136→  private readonly ctx: CanvasRenderingContext2D;
+   137→
+   138→  private options: Required<PeriodicRangeOptions>;
+   139→
+   140→  private readonly listeners: Map<string, Set<Handler>> = new Map();
+   141→  private pointerState: { pointerId: number; thumb: "min" | "max" } | null = null;
+   142→  /** Which thumb keyboard actions affect. Defaults to "min". */
+   143→  private activeThumb: "min" | "max" = "min";
+   144→  private _destroyed = false;
+   145→
+   146→  private readonly _onPointerDown: (e: PointerEvent) => void;
+   147→  private readonly _onPointerMove: (e: PointerEvent) => void;
+   148→  private readonly _onPointerUp: (e: PointerEvent) => void;
+   149→  private readonly _onKeyDown: (e: KeyboardEvent) => void;
+   150→
+   151→  constructor(container: HTMLElement, options: PeriodicRangeOptions = {}) {
+   152→    if (!container) throw new Error("PeriodicRange: container is required");
+   153→    this.container = container;
+   154→
+   155→    // Normalize options with defaults and validation.
+   156→    const min = options.min ?? DEFAULTS.min;
+   157→    const max = options.max ?? DEFAULTS.max;
+   158→    const safeMax = Math.max(min, max);
+   159→    const step = Math.max(0, options.step ?? DEFAULTS.step);
+   160→    const valueMin = clamp(options.valueMin ?? DEFAULTS.valueMin, min, safeMax);
+   161→    const valueMax = clamp(options.valueMax ?? DEFAULTS.valueMax, min, safeMax);
+   162→    // Enforce valueMin ≤ valueMax invariant.
+   163→    const sortedMin = Math.min(valueMin, valueMax);
+   164→    const sortedMax = Math.max(valueMin, valueMax);
+   165→
+   166→    this.options = {
+   167→      min,
+   168→      max: safeMax,
+   169→      valueMin: sortedMin,
+   170→      valueMax: sortedMax,
+   171→      step,
+   172→      showMarkers: options.showMarkers ?? DEFAULTS.showMarkers,
+   173→      markerStep: Math.max(1, options.markerStep ?? DEFAULTS.markerStep),
+   174→      orientation: options.orientation ?? DEFAULTS.orientation,
+   175→      thickness: Math.max(4, options.thickness ?? DEFAULTS.thickness),
+   176→      length: Math.max(40, options.length ?? DEFAULTS.length),
+   177→    };
+   178→
+   179→    injectStyles();
+   180→
+   181→    this.canvas = document.createElement("canvas");
+   182→    this.canvas.className = "periodic-range-canvas";
+   183→    this.canvas.setAttribute("role", "slider");
+   184→    this.canvas.setAttribute(
+   185→      "aria-label",
+   186→      "Range slider with two thumbs. Drag to set a minimum and maximum value.",
+   187→    );
+   188→    this.canvas.tabIndex = 0;
+   189→
+   190→    const ctx = this.canvas.getContext("2d");
+   191→    if (!ctx) throw new Error("PeriodicRange: 2D canvas context unavailable");
+   192→    this.ctx = ctx;
+   193→
+   194→    this.container.classList.add("periodic-range");
+   195→    this.container.appendChild(this.canvas);
+   196→
+   197→    this._onPointerDown = this.onPointerDown.bind(this);
+   198→    this._onPointerMove = this.onPointerMove.bind(this);
+   199→    this._onPointerUp = this.onPointerUp.bind(this);
+   200→    this._onKeyDown = this.onKeyDown.bind(this);
+   201→
+   202→    this.canvas.addEventListener("pointerdown", this._onPointerDown);
+   203→    this.canvas.addEventListener("pointermove", this._onPointerMove);
+   204→    this.canvas.addEventListener("pointerup", this._onPointerUp);
+   205→    this.canvas.addEventListener("pointercancel", this._onPointerUp);
+   206→    this.canvas.addEventListener("keydown", this._onKeyDown);
+   207→
+   208→    this.updateCanvasSize();
+   209→    this.render();
+   210→    this.updateAria();
+   211→  }
+   212→
+   213→  // ---- Public API ----
+   214→
+   215→  getValueMin(): number {
+   216→    return this.options.valueMin;
+   217→  }
+   218→
+   219→  getValueMax(): number {
+   220→    return this.options.valueMax;
+   221→  }
+   222→
+   223→  setValueMin(v: number): void {
+   224→    const clamped = this.applyStep(clamp(v, this.options.min, this.options.valueMax));
+   225→    if (approxEqual(clamped, this.options.valueMin)) {
+   226→      // Still re-render in case external state drifted.
+   227→      this.scheduleRender();
+   228→      return;
+   229→    }
+   230→    this.options.valueMin = clamped;
+   231→    this.updateAria();
+   232→    this.scheduleRender();
+   233→    this.emit("input", this.getValue());
+   234→    this.emit("change", this.getValue());
+   235→  }
+   236→
+   237→  setValueMax(v: number): void {
+   238→    const clamped = this.applyStep(clamp(v, this.options.valueMin, this.options.max));
+   239→    if (approxEqual(clamped, this.options.valueMax)) {
+   240→      this.scheduleRender();
+   241→      return;
+   242→    }
+   243→    this.options.valueMax = clamped;
+   244→    this.updateAria();
+   245→    this.scheduleRender();
+   246→    this.emit("input", this.getValue());
+   247→    this.emit("change", this.getValue());
+   248→  }
+   249→
+   250→  setRange(min: number, max: number): void {
+   251→    const safeMax = Math.max(min, max);
+   252→    this.options.min = min;
+   253→    this.options.max = safeMax;
+   254→    // Re-clamp values to the new range, preserving the invariant.
+   255→    let vMin = clamp(this.options.valueMin, min, safeMax);
+   256→    let vMax = clamp(this.options.valueMax, min, safeMax);
+   257→    if (vMin > vMax) {
+   258→      // Preserve the lower and upper ends preferentially.
+   259→      vMin = min;
+   260→      vMax = safeMax;
+   261→    }
+   262→    this.options.valueMin = this.applyStep(vMin);
+   263→    this.options.valueMax = this.applyStep(vMax);
+   264→    this.updateAria();
+   265→    this.scheduleRender();
+   266→    this.emit("input", this.getValue());
+   267→    this.emit("change", this.getValue());
+   268→  }
+   269→
+   270→  setStep(step: number): void {
+   271→    const s = Math.max(0, step);
+   272→    if (approxEqual(s, this.options.step)) return;
+   273→    this.options.step = s;
+   274→    // Re-snap current values to the new step grid.
+   275→    this.options.valueMin = this.applyStep(this.options.valueMin);
+   276→    this.options.valueMax = this.applyStep(this.options.valueMax);
+   277→    // Re-enforce invariant after snapping.
+   278→    if (this.options.valueMin > this.options.valueMax) {
+   279→      this.options.valueMin = this.options.valueMax;
+   280→    }
+   281→    this.updateAria();
+   282→    this.scheduleRender();
+   283→  }
+   284→
+   285→  setShowMarkers(on: boolean): void {
+   286→    const v = !!on;
+   287→    if (this.options.showMarkers === v) return;
+   288→    this.options.showMarkers = v;
+   289→    this.updateCanvasSize();
+   290→    this.scheduleRender();
+   291→  }
+   292→
+   293→  setMarkerStep(step: number): void {
+   294→    const s = Math.max(1, step);
+   295→    if (approxEqual(s, this.options.markerStep)) return;
+   296→    this.options.markerStep = s;
+   297→    this.scheduleRender();
+   298→  }
+   299→
+   300→  setOrientation(orientation: PeriodicRangeOrientation): void {
+   301→    if (this.options.orientation === orientation) return;
+   302→    this.options.orientation = orientation;
+   303→    this.updateCanvasSize();
+   304→    this.scheduleRender();
+   305→  }
+   306→
+   307→  setThickness(n: number): void {
+   308→    const t = Math.max(4, Math.round(n));
+   309→    if (this.options.thickness === t) return;
+   310→    this.options.thickness = t;
+   311→    this.updateCanvasSize();
+   312→    this.scheduleRender();
+   313→  }
+   314→
+   315→  setLength(n: number): void {
+   316→    const l = Math.max(40, Math.round(n));
+   317→    if (this.options.length === l) return;
+   318→    this.options.length = l;
+   319→    this.updateCanvasSize();
+   320→    this.scheduleRender();
+   321→  }
+   322→
+   323→  on(event: "input" | "change", handler: Handler): void;
+   324→  on(event: string, handler: Handler): void {
+   325→    let set = this.listeners.get(event);
+   326→    if (!set) {
+   327→      set = new Set<Handler>();
+   328→      this.listeners.set(event, set);
+   329→    }
+   330→    set.add(handler);
+   331→  }
+   332→
+   333→  off(event: string, handler: Handler): void {
+   334→    const set = this.listeners.get(event);
+   335→    if (set) set.delete(handler);
+   336→  }
+   337→
+   338→  destroy(): void {
+   339→    if (this._destroyed) return;
+   340→    this._destroyed = true;
+   341→    this.canvas.removeEventListener("pointerdown", this._onPointerDown);
+   342→    this.canvas.removeEventListener("pointermove", this._onPointerMove);
+   343→    this.canvas.removeEventListener("pointerup", this._onPointerUp);
+   344→    this.canvas.removeEventListener("pointercancel", this._onPointerUp);
+   345→    this.canvas.removeEventListener("keydown", this._onKeyDown);
+   346→    if (this.pointerState) {
+   347→      try {
+   348→        this.canvas.releasePointerCapture(this.pointerState.pointerId);
+   349→      } catch {
+   350→        /* ignore */
+   351→      }
+   352→      this.pointerState = null;
+   353→    }
+   354→    this.listeners.clear();
+   355→    if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
+   356→    this.container.classList.remove("periodic-range");
+   357→  }
+   358→
+   359→  // ---- Geometry ----
+   360→
+   361→  private getGeometry(): Geometry {
+   362→    const { orientation, thickness, length, showMarkers } = this.options;
+   363→    const labelArea = showMarkers ? LABEL_AREA : 0;
+   364→    if (orientation === "horizontal") {
+   365→      const totalW = length + PAD * 2;
+   366→      const totalH = thickness + PAD * 2 + labelArea;
+   367→      const tx = PAD;
+   368→      const ty = PAD;
+   369→      return { totalW, totalH, tx, ty, tLen: length, tThick: thickness, labelArea };
+   370→    } else {
+   371→      const totalW = thickness + PAD * 2 + labelArea;
+   372→      const totalH = length + PAD * 2;
+   373→      // Push the track to the right of the label area for vertical orientation
+   374→      // so labels sit to the LEFT of the track.
+   375→      const tx = PAD + labelArea;
+   376→      const ty = PAD;
+   377→      return { totalW, totalH, tx, ty, tLen: length, tThick: thickness, labelArea };
+   378→    }
+   379→  }
+   380→
+   381→  private updateCanvasSize(): void {
+   382→    const geom = this.getGeometry();
+   383→    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   384→    this.canvas.style.width = `${geom.totalW}px`;
+   385→    this.canvas.style.height = `${geom.totalH}px`;
+   386→    this.canvas.width = Math.round(geom.totalW * dpr);
+   387→    this.canvas.height = Math.round(geom.totalH * dpr);
+   388→    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   389→  }
+   390→
+   391→  private scheduleRender(): void {
+   392→    if (this._destroyed) return;
+   393→    requestAnimationFrame(() => {
+   394→      if (!this._destroyed) this.render();
+   395→    });
+   396→  }
+   397→
+   398→  private render(): void {
+   399→    const geom = this.getGeometry();
+   400→    this.ctx.clearRect(0, 0, geom.totalW, geom.totalH);
+   401→    this.renderTrack(geom);
+   402→    this.renderSelection(geom);
+   403→    if (this.options.showMarkers) this.renderMarkers(geom);
+   404→    this.renderThumb(geom, "min");
+   405→    this.renderThumb(geom, "max");
+   406→  }
+   407→
+   408→  // ---- Rendering: track ----
+   409→
+   410→  private renderTrack(geom: Geometry): void {
+   411→    const { tx, ty, tLen, tThick } = geom;
+   412→    const horizontal = this.options.orientation === "horizontal";
+   413→    const trackW = horizontal ? tLen : tThick;
+   414→    const trackH = horizontal ? tThick : tLen;
+   415→    const r = Math.min(tThick / 2, 6);
+   416→
+   417→    const ctx = this.ctx;
+   418→    ctx.save();
+   419→    // Track fill — dark Deep Violet.
+   420→    ctx.beginPath();
+   421→    roundRect(ctx, tx, ty, trackW, trackH, r);
+   422→    ctx.fillStyle = "rgba(255,255,255,0.06)";
+   423→    ctx.fill();
+   424→    // Inner subtle border.
+   425→    ctx.beginPath();
+   426→    roundRect(ctx, tx, ty, trackW, trackH, r);
+   427→    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+   428→    ctx.lineWidth = 1;
+   429→    ctx.stroke();
+   430→    ctx.restore();
+   431→  }
+   432→
+   433→  // ---- Rendering: selected range ----
+   434→
+   435→  private renderSelection(geom: Geometry): void {
+   436→    const { tx, ty, tLen, tThick } = geom;
+   437→    const { min, max, valueMin, valueMax, orientation } = this.options;
+   438→    const horizontal = orientation === "horizontal";
+   439→    const span = Math.max(1e-9, max - min);
+   440→    const fMin = (valueMin - min) / span;
+   441→    const fMax = (valueMax - min) / span;
+   442→
+   443→    const ctx = this.ctx;
+   444→    const r = Math.min(tThick / 2, 6);
+   445→    ctx.save();
+   446→    ctx.beginPath();
+   447→    if (horizontal) {
+   448→      const x = tx + fMin * tLen;
+   449→      const w = Math.max(0, (fMax - fMin) * tLen);
+   450→      roundRect(ctx, x, ty, w, tThick, r);
+   451→    } else {
+   452→      // For vertical, valueMin sits at the BOTTOM and valueMax at the TOP.
+   453→      const y = ty + (1 - fMax) * tLen;
+   454→      const h = Math.max(0, (fMax - fMin) * tLen);
+   455→      roundRect(ctx, tx, y, tThick, h, r);
+   456→    }
+   457→    ctx.fillStyle = "#D9FF66";
+   458→    ctx.fill();
+   459→    ctx.restore();
+   460→  }
+   461→
+   462→  // ---- Rendering: markers ----
+   463→
+   464→  private renderMarkers(geom: Geometry): void {
+   465→    const { tx, ty, tLen, tThick } = geom;
+   466→    const { min, max, markerStep, orientation } = this.options;
+   467→    const horizontal = orientation === "horizontal";
+   468→    const span = max - min;
+   469→    if (span <= 0 || markerStep <= 0) return;
+   470→
+   471→    const ctx = this.ctx;
+   472→    ctx.save();
+   473→    ctx.font = "10px 'JetBrains Mono', ui-monospace, monospace";
+   474→    ctx.textBaseline = horizontal ? "top" : "middle";
+   475→    ctx.textAlign = horizontal ? "center" : "right";
+   476→    ctx.fillStyle = "rgba(255,255,255,0.55)";
+   477→    ctx.strokeStyle = "rgba(255,255,255,0.30)";
+   478→    ctx.lineWidth = 1;
+   479→
+   480→    // Determine which markers should show labels. If there are too many,
+   481→    // only label every Nth marker to avoid overlap.
+   482→    const markerCount = Math.floor(span / markerStep) + 1;
+   483→    const labelEvery = markerCount > 20 ? Math.ceil(markerCount / 20) : 1;
+   484→
+   485→    // Start exactly at min and step up. Use index-based accumulation to avoid
+   486→    // floating-point drift.
+   487→    let idx = 0;
+   488→    for (let v = min; v <= max + 1e-9; v += markerStep, idx++) {
+   489→      const f = (v - min) / span;
+   490→      const clampedV = Math.min(v, max);
+   491→      const label = formatMarkerLabel(clampedV);
+   492→      if (horizontal) {
+   493→        const x = tx + f * tLen;
+   494→        // Tick from the bottom of the track downward.
+   495→        ctx.beginPath();
+   496→        ctx.moveTo(x, ty + tThick);
+   497→        ctx.lineTo(x, ty + tThick + 4);
+   498→        ctx.stroke();
+   499→        if (idx % labelEvery === 0) {
+   500→          ctx.fillText(label, x, ty + tThick + 7);
+   501→        }
+   502→      } else {
+   503→        // Vertical: valueMax (high) at top, valueMin (low) at bottom.
+   504→        const y = ty + (1 - f) * tLen;
+   505→        // Tick from the left of the track leftward.
+   506→        ctx.beginPath();
+   507→        ctx.moveTo(tx, y);
+   508→        ctx.lineTo(tx - 4, y);
+   509→        ctx.stroke();
+   510→        if (idx % labelEvery === 0) {
+   511→          ctx.fillText(label, tx - 7, y);
+   512→        }
+   513→      }
+   514→    }
+   515→    ctx.restore();
+   516→  }
+   517→
+   518→  // ---- Rendering: thumbs ----
+   519→
+   520→  private renderThumb(geom: Geometry, which: "min" | "max"): void {
+   521→    const { tx, ty, tLen, tThick } = geom;
+   522→    const { orientation, thickness } = this.options;
+   523→    const horizontal = orientation === "horizontal";
+   524→    const ctx = this.ctx;
+   525→
+   526→    const pos = which === "min" ? this.options.valueMin : this.options.valueMax;
+   527→    const cx = this.valueToX(pos, geom);
+   528→    const cy = this.valueToY(pos, geom);
+   529→
+   530→    // Thumb is a rounded capsule. Horizontal: narrow width, tall height
+   531→    // (spans the track thickness + overhang). Vertical: swap.
+   532→    // The max thumb is slightly larger than the min thumb so the two are
+   533→    // visually distinguishable even before the inner accent is drawn.
+   534→    const thumbW = horizontal ? (which === "max" ? 14 : 12) : thickness + 10;
+   535→    const thumbH = horizontal ? thickness + 10 : (which === "max" ? 14 : 12);
+   536→    const thumbX = cx - thumbW / 2;
+   537→    const thumbY = cy - thumbH / 2;
+   538→    const radius = Math.min(thumbW, thumbH) / 2;
+   539→
+   540→    const isActive = this.activeThumb === which;
+   541→    const isDragging = this.pointerState?.thumb === which;
+   542→
+   543→    ctx.save();
+   544→
+   545→    // Soft drop shadow under the thumb.
+   546→    ctx.shadowColor = "rgba(0,0,0,0.45)";
+   547→    ctx.shadowBlur = isDragging ? 8 : 4;
+   548→    ctx.shadowOffsetY = isDragging ? 3 : 2;
+   549→
+   550→    // Base capsule — white fill for both thumbs.
+   551→    ctx.beginPath();
+   552→    roundRect(ctx, thumbX, thumbY, thumbW, thumbH, radius);
+   553→    ctx.fillStyle = "rgba(255,255,255,0.96)";
+   554→    ctx.fill();
+   555→
+   556→    // Reset shadow before drawing the border / accent so they aren't blurred.
+   557→    ctx.shadowColor = "transparent";
+   558→    ctx.shadowBlur = 0;
+   559→    ctx.shadowOffsetY = 0;
+   560→
+   561→    // Dark border (slightly thicker on the max thumb for emphasis).
+   562→    ctx.beginPath();
+   563→    roundRect(ctx, thumbX, thumbY, thumbW, thumbH, radius);
+   564→    ctx.strokeStyle = "rgba(8,8,12,0.85)";
+   565→    ctx.lineWidth = which === "max" ? 2 : 1.5;
+   566→    ctx.stroke();
+   567→
+   568→    // Inner accent — a clear visual marker that distinguishes min from max.
+   569→    //   min thumb  →  a horizontal bar (looks like "−")
+   570→    //   max thumb  →  a horizontal bar + a vertical bar (looks like "+")
+   571→    // The symbol is orientation-independent (always looks like "−" / "+").
+   572→    // Bar lengths are constrained by the smaller thumb dimension so they fit.
+   573→    const barLen = Math.min(thumbW, thumbH) - 5;
+   574→    const barThick = 1.8;
+   575→    if (barLen > 2) {
+   576→      ctx.fillStyle = "rgba(8,8,12,0.85)";
+   577→      // Horizontal bar (both thumbs).
+   578→      ctx.fillRect(cx - barLen / 2, cy - barThick / 2, barLen, barThick);
+   579→      if (which === "max") {
+   580→        // Vertical bar (max thumb only) → completes the "+".
+   581→        ctx.fillRect(cx - barThick / 2, cy - barLen / 2, barThick, barLen);
+   582→      }
+   583→    }
+   584→
+   585→    // Active / focus indicator: a thin lemon ring outside the thumb.
+   586→    if (isActive || isDragging) {
+   587→      ctx.beginPath();
+   588→      const focusPad = 3;
+   589→      roundRect(
+   590→        ctx,
+   591→        thumbX - focusPad,
+   592→        thumbY - focusPad,
+   593→        thumbW + focusPad * 2,
+   594→        thumbH + focusPad * 2,
+   595→        radius + focusPad,
+   596→      );
+   597→      ctx.strokeStyle = "rgba(217,255,102,0.65)";
+   598→      ctx.lineWidth = 1.5;
+   599→      ctx.stroke();
+   600→    }
+   601→
+   602→    ctx.restore();
+   603→  }
+   604→
+   605→  // ---- Value <-> pixel mapping ----
+   606→
+   607→  private valueToX(v: number, geom: Geometry): number {
+   608→    const { tx, tLen } = geom;
+   609→    const { min, max, orientation } = this.options;
+   610→    if (orientation !== "horizontal") return tx + geom.tThick / 2;
+   611→    const f = (v - min) / Math.max(1e-9, max - min);
+   612→    return tx + f * tLen;
+   613→  }
+   614→
+   615→  private valueToY(v: number, geom: Geometry): number {
+   616→    const { ty, tLen } = geom;
+   617→    const { min, max, orientation } = this.options;
+   618→    if (orientation === "horizontal") return ty + geom.tThick / 2;
+   619→    // Vertical: high values at the top, low at the bottom (conventional).
+   620→    const f = (v - min) / Math.max(1e-9, max - min);
+   621→    return ty + (1 - f) * tLen;
+   622→  }
+   623→
+   624→  /** Convert a canvas point to a value along the track axis. */
+   625→  private pointToValue(x: number, y: number, geom: Geometry): number {
+   626→    const { tx, ty, tLen } = geom;
+   627→    const { min, max, orientation } = this.options;
+   628→    const span = Math.max(1e-9, max - min);
+   629→    let f: number;
+   630→    if (orientation === "horizontal") {
+   631→      f = clamp((x - tx) / tLen, 0, 1);
+   632→      return min + f * span;
+   633→    } else {
+   634→      f = clamp(1 - (y - ty) / tLen, 0, 1);
+   635→      return min + f * span;
+   636→    }
+   637→  }
+   638→
+   639→  /** Apply step snapping to a value. step = 0 means no snapping. */
+   640→  private applyStep(v: number): number {
+   641→    const { step, min, max } = this.options;
+   642→    if (!step || step <= 0) return v;
+   643→    const snapped = Math.round((v - min) / step) * step + min;
+   644→    return clamp(snapped, min, max);
+   645→  }
+   646→
+   647→  private getValue(): PeriodicRangeValue {
+   648→    return { valueMin: this.options.valueMin, valueMax: this.options.valueMax };
+   649→  }
+   650→
+   651→  // ---- Pointer interaction ----
+   652→
+   653→  private getCanvasPoint(e: PointerEvent): { x: number; y: number } {
+   654→    const rect = this.canvas.getBoundingClientRect();
+   655→    const geom = this.getGeometry();
+   656→    const scaleX = geom.totalW / (rect.width || geom.totalW);
+   657→    const scaleY = geom.totalH / (rect.height || geom.totalH);
+   658→    return {
+   659→      x: (e.clientX - rect.left) * scaleX,
+   660→      y: (e.clientY - rect.top) * scaleY,
+   661→    };
+   662→  }
+   663→
+   664→  /** Determine which thumb a pointer event should grab. */
+   665→  private pickThumb(x: number, y: number, geom: Geometry): "min" | "max" {
+   666→    const minPos = this.options.valueMin;
+   667→    const maxPos = this.options.valueMax;
+   668→    const horizontal = this.options.orientation === "horizontal";
+   669→
+   670→    // Pixel coordinates of each thumb center along the track axis.
+   671→    const minPx = horizontal ? this.valueToX(minPos, geom) : this.valueToY(minPos, geom);
+   672→    const maxPx = horizontal ? this.valueToX(maxPos, geom) : this.valueToY(maxPos, geom);
+   673→    const p = horizontal ? x : y;
+   674→
+   675→    // Hit-test: if the pointer is within the thumb's hit radius, prefer it.
+   676→    const hitR = 14;
+   677→    const dMin = Math.abs(p - minPx);
+   678→    const dMax = Math.abs(p - maxPx);
+   679→    if (dMin <= hitR && dMax <= hitR) {
+   680→      // Both thumbs are within hit range (they're touching). Pick the closer.
+   681→      return dMin <= dMax ? "min" : "max";
+   682→    }
+   683→    if (dMin <= hitR) return "min";
+   684→    if (dMax <= hitR) return "max";
+   685→    // Otherwise, pick whichever thumb is closer to the click point.
+   686→    return dMin <= dMax ? "min" : "max";
+   687→  }
+   688→
+   689→  private onPointerDown(e: PointerEvent): void {
+   690→    if (this._destroyed) return;
+   691→    const { x, y } = this.getCanvasPoint(e);
+   692→    const geom = this.getGeometry();
+   693→    const thumb = this.pickThumb(x, y, geom);
+   694→    this.pointerState = { pointerId: e.pointerId, thumb };
+   695→    this.activeThumb = thumb;
+   696→    try {
+   697→      this.canvas.setPointerCapture(e.pointerId);
+   698→    } catch {
+   699→      /* ignore */
+   700→    }
+   701→    this.updateThumbFromPoint(x, y, geom, thumb);
+   702→    e.preventDefault();
+   703→  }
+   704→
+   705→  private onPointerMove(e: PointerEvent): void {
+   706→    if (!this.pointerState) return;
+   707→    const { x, y } = this.getCanvasPoint(e);
+   708→    const geom = this.getGeometry();
+   709→    this.updateThumbFromPoint(x, y, geom, this.pointerState.thumb);
+   710→    e.preventDefault();
+   711→  }
+   712→
+   713→  private onPointerUp(e: PointerEvent): void {
+   714→    if (!this.pointerState) return;
+   715→    try {
+   716→      this.canvas.releasePointerCapture(this.pointerState.pointerId);
+   717→    } catch {
+   718→      /* ignore */
+   719→    }
+   720→    const wasThumb = this.pointerState.thumb;
+   721→    this.pointerState = null;
+   722→    // Keep the released thumb as the active one for keyboard interaction.
+   723→    this.activeThumb = wasThumb;
+   724→    this.scheduleRender();
+   725→    this.emit("change", this.getValue());
+   726→  }
+   727→
+   728→  private updateThumbFromPoint(
+   729→    x: number,
+   730→    y: number,
+   731→    geom: Geometry,
+   732→    thumb: "min" | "max",
+   733→  ): void {
+   734→    const v = this.pointToValue(x, y, geom);
+   735→    if (thumb === "min") {
+   736→      this.options.valueMin = this.applyStep(clamp(v, this.options.min, this.options.valueMax));
+   737→    } else {
+   738→      this.options.valueMax = this.applyStep(clamp(v, this.options.valueMin, this.options.max));
+   739→    }
+   740→    this.updateAria();
+   741→    this.scheduleRender();
+   742→    this.emit("input", this.getValue());
+   743→  }
+   744→
+   745→  // ---- Keyboard ----
+   746→
+   747→  private onKeyDown(e: KeyboardEvent): void {
+   748→    if (this._destroyed) return;
+   749→    const { min, max, step } = this.options;
+   750→    const span = max - min;
+   751→    // Default keyboard step: the snap step, or 1% of the range, whichever is larger.
+   752→    const baseStep = step > 0 ? step : Math.max(1, span / 100);
+   753→    const largeStep = e.shiftKey ? baseStep * 10 : baseStep;
+   754→
+   755→    let handled = false;
+   756→    let nextMin = this.options.valueMin;
+   757→    let nextMax = this.options.valueMax;
+   758→
+   759→    switch (e.key) {
+   760→      case "ArrowLeft":
+   761→      case "ArrowDown":
+   762→        if (this.activeThumb === "min") {
+   763→          nextMin = this.applyStep(clamp(this.options.valueMin - baseStep, min, this.options.valueMax));
+   764→        } else {
+   765→          nextMax = this.applyStep(clamp(this.options.valueMax - baseStep, this.options.valueMin, max));
+   766→        }
+   767→        handled = true;
+   768→        break;
+   769→      case "ArrowRight":
+   770→      case "ArrowUp":
+   771→        if (this.activeThumb === "min") {
+   772→          nextMin = this.applyStep(clamp(this.options.valueMin + baseStep, min, this.options.valueMax));
+   773→        } else {
+   774→          nextMax = this.applyStep(clamp(this.options.valueMax + baseStep, this.options.valueMin, max));
+   775→        }
+   776→        handled = true;
+   777→        break;
+   778→      case "PageDown":
+   779→        if (this.activeThumb === "min") {
+   780→          nextMin = this.applyStep(clamp(this.options.valueMin - largeStep, min, this.options.valueMax));
+   781→        } else {
+   782→          nextMax = this.applyStep(clamp(this.options.valueMax - largeStep, this.options.valueMin, max));
+   783→        }
+   784→        handled = true;
+   785→        break;
+   786→      case "PageUp":
+   787→        if (this.activeThumb === "min") {
+   788→          nextMin = this.applyStep(clamp(this.options.valueMin + largeStep, min, this.options.valueMax));
+   789→        } else {
+   790→          nextMax = this.applyStep(clamp(this.options.valueMax + largeStep, this.options.valueMin, max));
+   791→        }
+   792→        handled = true;
+   793→        break;
+   794→      case "Home":
+   795→        if (this.activeThumb === "min") {
+   796→          nextMin = min;
+   797→        } else {
+   798→          nextMax = this.options.valueMin;
+   799→        }
+   800→        handled = true;
+   801→        break;
+   802→      case "End":
+   803→        if (this.activeThumb === "min") {
+   804→          nextMin = this.options.valueMax;
+   805→        } else {
+   806→          nextMax = max;
+   807→        }
+   808→        handled = true;
+   809→        break;
+   810→      case "Tab":
+   811→        // Cycle the active thumb between min and max.
+   812→        e.preventDefault();
+   813→        this.activeThumb = this.activeThumb === "min" ? "max" : "min";
+   814→        this.scheduleRender();
+   815→        return;
+   816→    }
+   817→
+   818→    if (handled) {
+   819→      e.preventDefault();
+   820→      let changed = false;
+   821→      if (!approxEqual(nextMin, this.options.valueMin)) {
+   822→        this.options.valueMin = nextMin;
+   823→        changed = true;
+   824→      }
+   825→      if (!approxEqual(nextMax, this.options.valueMax)) {
+   826→        this.options.valueMax = nextMax;
+   827→        changed = true;
+   828→      }
+   829→      if (changed) {
+   830→        this.updateAria();
+   831→        this.scheduleRender();
+   832→        this.emit("input", this.getValue());
+   833→        this.emit("change", this.getValue());
+   834→      }
+   835→    }
+   836→  }
+   837→
+   838→  // ---- ARIA ----
+   839→
+   840→  private updateAria(): void {
+   841→    const { valueMin, valueMax, min, max } = this.options;
+   842→    // Expose both values via aria-valuenow (the active thumb's value) and
+   843→    // aria-valuetext (a combined label showing both).
+   844→    const activeValue = this.activeThumb === "min" ? valueMin : valueMax;
+   845→    this.canvas.setAttribute("aria-valuemin", String(min));
+   846→    this.canvas.setAttribute("aria-valuemax", String(max));
+   847→    this.canvas.setAttribute("aria-valuenow", String(activeValue));
+   848→    this.canvas.setAttribute(
+   849→      "aria-valuetext",
+   850→      `min ${formatMarkerLabel(valueMin)}, max ${formatMarkerLabel(valueMax)}`,
+   851→    );
+   852→  }
+   853→
+   854→  // ---- Event helpers ----
+   855→
+   856→  private emit(event: string, v: PeriodicRangeValue): void {
+   857→    const set = this.listeners.get(event);
+   858→    if (!set) return;
+   859→    for (const h of Array.from(set)) {
+   860→      try {
+   861→        h(v);
+   862→      } catch (err) {
+   863→        console.error("PeriodicRange listener error:", err);
+   864→      }
+   865→    }
+   866→  }
+   867→}
+   868→
+   869→// ---- Module helpers ----
+   870→
+   871→function formatMarkerLabel(v: number): string {
+   872→  // Show up to 2 decimals, but trim trailing zeros.
+   873→  const rounded = Math.round(v * 100) / 100;
+   874→  if (Number.isInteger(rounded)) return String(rounded);
+   875→  return rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+   876→}
+   877→
+   878→/** Rounded-rectangle path helper. */
+   879→function roundRect(
+   880→  ctx: CanvasRenderingContext2D,
+   881→  x: number,
+   882→  y: number,
+   883→  w: number,
+   884→  h: number,
+   885→  r: number,
+   886→): void {
+   887→  const radius = Math.min(r, w / 2, h / 2);
+   888→  if (radius <= 0) {
+   889→    ctx.rect(x, y, w, h);
+   890→    return;
+   891→  }
+   892→  ctx.moveTo(x + radius, y);
+   893→  ctx.arcTo(x + w, y, x + w, y + h, radius);
+   894→  ctx.arcTo(x + w, y + h, x, y + h, radius);
+   895→  ctx.arcTo(x, y + h, x, y, radius);
+   896→  ctx.arcTo(x, y, x + w, y, radius);
+   897→  ctx.closePath();
+   898→}
+   899→

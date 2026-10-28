@@ -1,0 +1,769 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import * as React from "react";
+     4→     4→import {
+     5→     5→  RotateCcw,
+     6→     6→  Triangle,
+     7→     7→  Square,
+     8→     8→  Circle,
+     9→     9→  CircleSlash,
+    10→    10→  Check,
+    11→    11→  Copy,
+    12→    12→  Maximize2,
+    13→    13→} from "lucide-react";
+    14→    14→import { useNavigation } from "@/store/navigation";
+    15→    15→import { getComponent, components } from "@/lib/platform/content";
+    16→    16→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+    17→    17→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+    18→    18→import { ColorWheelPickerReact, type Shape, type ColorOutput } from "./color-wheel-picker-react";
+    19→    19→import { cn } from "@/lib/utils";
+    20→    20→import { toast } from "sonner";
+    21→    21→
+    22→    22→const SHAPES: { value: Shape; label: string; icon: React.ElementType }[] = [
+    23→    23→  { value: "triangle", label: "Triangle", icon: Triangle },
+    24→    24→  { value: "square", label: "Square", icon: Square },
+    25→    25→  { value: "disk", label: "Disk", icon: Circle },
+    26→    26→  { value: "none", label: "None", icon: CircleSlash },
+    27→    27→];
+    28→    28→
+    29→    29→interface PlaygroundState {
+    30→    30→  shape: Shape;
+    31→    31→  size: number;
+    32→    32→  wheelThickness: number;
+    33→    33→  wheelSpacing: number;
+    34→    34→  color: string;
+    35→    35→  rotateShape: boolean;
+    36→    36→}
+    37→    37→
+    38→    38→const DEFAULTS: PlaygroundState = {
+    39→    39→  shape: "triangle",
+    40→    40→  size: 180,
+    41→    41→  wheelThickness: 24,
+    42→    42→  wheelSpacing: 8,
+    43→    43→  color: "#4287f5",
+    44→    44→  rotateShape: false,
+    45→    45→};
+    46→    46→
+    47→    47→export function ColorWheelPlayground() {
+    48→    48→  const meta = getComponent("color-wheel")!;
+    49→    49→  const [state, setState] = React.useState<PlaygroundState>(DEFAULTS);
+    50→    50→  const [color, setColor] = React.useState<ColorOutput | null>(null);
+    51→    51→  const [activeTab, setActiveTab] = React.useState<"javascript" | "html" | "css" | "api">("javascript");
+    52→    52→  const [hexInput, setHexInput] = React.useState(DEFAULTS.color);
+    53→    53→  const [hexError, setHexError] = React.useState<string | null>(null);
+    54→    54→
+    55→    55→  const onInput = React.useCallback((c: ColorOutput) => {
+    56→    56→    setColor(c);
+    57→    57→    setHexInput(c.hex);
+    58→    58→    setHexError(null);
+    59→    59→  }, []);
+    60→    60→
+    61→    61→  const update = React.useCallback(
+    62→    62→    <K extends keyof PlaygroundState>(key: K, value: PlaygroundState[K]) => {
+    63→    63→      setState((s) => ({ ...s, [key]: value }));
+    64→    64→    },
+    65→    65→    []
+    66→    66→  );
+    67→    67→
+    68→    68→  const reset = React.useCallback(() => {
+    69→    69→    setState(DEFAULTS);
+    70→    70→    setHexInput(DEFAULTS.color);
+    71→    71→    setHexError(null);
+    72→    72→    toast.success("Reset to defaults");
+    73→    73→  }, []);
+    74→    74→
+    75→    75→  // Sync hex input field with component color
+    76→    76→  const applyHex = React.useCallback((value: string) => {
+    77→    77→    setHexInput(value);
+    78→    78→    try {
+    79→    79→      // Validate by attempting to set
+    80→    80→      if (!/^#?[0-9a-fA-F]{6}$/.test(value.replace(/^#/, ""))) {
+    81→    81→        setHexError("Enter a 6-digit hex color, e.g. #4287f5");
+    82→    82→        return;
+    83→    83→      }
+    84→    84→      setHexError(null);
+    85→    85→      update("color", value.startsWith("#") ? value : `#${value}`);
+    86→    86→    } catch {
+    87→    87→      setHexError("Invalid color value");
+    88→    88→    }
+    89→    89→  }, [update]);
+    90→    90→
+    91→    91→  const rgbStr = color ? `rgb(${color.rgb.r}, ${color.rgb.g}, ${color.rgb.b})` : "—";
+    92→    92→  const hsvStr = color
+    93→    93→    ? `${Math.round(color.hsv.h)}°, ${Math.round(color.hsv.s)}%, ${Math.round(color.hsv.v)}%`
+    94→    94→    : "—";
+    95→    95→  const hslStr = color
+    96→    96→    ? `${Math.round(color.hsl.h)}°, ${Math.round(color.hsl.s)}%, ${Math.round(color.hsl.l)}%`
+    97→    97→    : "—";
+    98→    98→
+    99→    99→  // Code generation — reflects current configuration
+   100→   100→  const jsCode = React.useMemo(() => generateJsCode(state), [state]);
+   101→   101→  const htmlCode = React.useMemo(() => generateHtmlCode(state), [state]);
+   102→   102→  const cssCode = React.useMemo(() => generateCssCode(), []);
+   103→   103→  const apiCode = React.useMemo(() => generateApiCode(), []);
+   104→   104→
+   105→   105→  return (
+   106→   106→    <div>
+   107→   107→      {/* Page header */}
+   108→   108→      <div className="border-b border-border bg-background">
+   109→   109→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   110→   110→          <Breadcrumbs />
+   111→   111→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   112→   112→            <div>
+   113→   113→              <PageOverline>Components / Color</PageOverline>
+   114→   114→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+   115→   115→                {meta.name}
+   116→   116→              </h1>
+   117→   117→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">
+   118→   118→                {meta.longDescription}
+   119→   119→              </p>
+   120→   120→            </div>
+   121→   121→            <div className="flex flex-wrap items-center gap-2">
+   122→   122→              {meta.tags.map((tag) => (
+   123→   123→                <span
+   124→   124→                  key={tag}
+   125→   125→                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground"
+   126→   126→                >
+   127→   127→                  {tag}
+   128→   128→                </span>
+   129→   129→              ))}
+   130→   130→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   131→   131→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />
+   132→   132→                {meta.status}
+   133→   133→              </span>
+   134→   134→            </div>
+   135→   135→          </div>
+   136→   136→        </div>
+   137→   137→      </div>
+   138→   138→
+   139→   139→      {/* Playground workspace */}
+   140→   140→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   141→   141→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+   142→   142→          {/* Live preview */}
+   143→   143→          <section
+   144→   144→            aria-label="Live preview"
+   145→   145→            className="panel relative flex min-h-[480px] flex-col"
+   146→   146→          >
+   147→   147→            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+   148→   148→              <div className="flex items-center gap-2">
+   149→   149→                <span className="h-2 w-2 rounded-full bg-brand-lemon animate-pulse" />
+   150→   150→                <span className="eyebrow">Live canvas</span>
+   151→   151→              </div>
+   152→   152→              <div className="flex items-center gap-1">
+   153→   153→                <button
+   154→   154→                  type="button"
+   155→   155→                  onClick={reset}
+   156→   156→                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   157→   157→                >
+   158→   158→                  <RotateCcw className="h-3 w-3" />
+   159→   159→                  Reset
+   160→   160→                </button>
+   161→   161→              </div>
+   162→   162→            </div>
+   163→   163→            <div className="flex flex-1 items-center justify-center bg-grid p-8">
+   164→   164→              {/* The actual vanilla JS component, mounted via React wrapper */}
+   165→   165→              <ColorWheelPickerReact
+   166→   166→                shape={state.shape}
+   167→   167→                size={state.size}
+   168→   168→                wheelThickness={state.wheelThickness}
+   169→   169→                wheelSpacing={state.wheelSpacing}
+   170→   170→                color={state.color}
+   171→   171→                rotateShape={state.rotateShape}
+   172→   172→                onInput={onInput}
+   173→   173→              />
+   174→   174→            </div>
+   175→   175→            {/* Output bar */}
+   176→   176→            <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-4">
+   177→   177→              <OutputCell label="HEX" value={color?.hex ?? "—"} />
+   178→   178→              <OutputCell label="RGB" value={rgbStr} />
+   179→   179→              <OutputCell label="HSV" value={hsvStr} />
+   180→   180→              <OutputCell label="HSL" value={hslStr} />
+   181→   181→            </div>
+   182→   182→          </section>
+   183→   183→
+   184→   184→          {/* Property inspector */}
+   185→   185→          <aside aria-label="Property inspector" className="panel flex flex-col">
+   186→   186→            <div className="border-b border-border px-4 py-2.5">
+   187→   187→              <span className="eyebrow">Properties</span>
+   188→   188→            </div>
+   189→   189→            <div className="flex flex-col gap-5 p-4">
+   190→   190→              {/* Inner shape */}
+   191→   191→              <PropertyField
+   192→   192→                label="Inner shape"
+   193→   193→                hint="The geometry of the inner selection area"
+   194→   194→              >
+   195→   195→                <div className="grid grid-cols-4 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   196→   196→                  {SHAPES.map((s) => {
+   197→   197→                    const Icon = s.icon;
+   198→   198→                    const active = state.shape === s.value;
+   199→   199→                    return (
+   200→   200→                      <button
+   201→   201→                        key={s.value}
+   202→   202→                        type="button"
+   203→   203→                        onClick={() => update("shape", s.value)}
+   204→   204→                        title={s.label}
+   205→   205→                        aria-pressed={active}
+   206→   206→                        className={cn(
+   207→   207→                          "flex flex-col items-center gap-1 rounded px-2 py-2 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   208→   208→                          active
+   209→   209→                            ? "bg-brand-purple-strong text-foreground"
+   210→   210→                            : "text-muted-foreground hover:text-foreground hover:bg-accent"
+   211→   211→                        )}
+   212→   212→                      >
+   213→   213→                        <Icon className="h-4 w-4" />
+   214→   214→                        {s.label}
+   215→   215→                      </button>
+   216→   216→                    );
+   217→   217→                  })}
+   218→   218→                </div>
+   219→   219→              </PropertyField>
+   220→   220→
+   221→   221→              {/* Inner size */}
+   222→   222→              <PropertyField
+   223→   223→                label="Inner size"
+   224→   224→                hint="Diameter of the inner shape (px)"
+   225→   225→                value={`${state.size} px`}
+   226→   226→              >
+   227→   227→                <RangeInput
+   228→   228→                  min={100}
+   229→   229→                  max={280}
+   230→   230→                  step={2}
+   231→   231→                  value={state.size}
+   232→   232→                  onChange={(v) => update("size", v)}
+   233→   233→                />
+   234→   234→              </PropertyField>
+   235→   235→
+   236→   236→              {/* Wheel thickness */}
+   237→   237→              <PropertyField
+   238→   238→                label="Wheel thickness"
+   239→   239→                hint="Radial thickness of the hue ring (px)"
+   240→   240→                value={`${state.wheelThickness} px`}
+   241→   241→              >
+   242→   242→                <RangeInput
+   243→   243→                  min={12}
+   244→   244→                  max={48}
+   245→   245→                  step={1}
+   246→   246→                  value={state.wheelThickness}
+   247→   247→                  onChange={(v) => update("wheelThickness", v)}
+   248→   248→                />
+   249→   249→              </PropertyField>
+   250→   250→
+   251→   251→              {/* Wheel spacing */}
+   252→   252→              <PropertyField
+   253→   253→                label="Wheel spacing"
+   254→   254→                hint="Gap between the shape and the wheel (px)"
+   255→   255→                value={`${state.wheelSpacing} px`}
+   256→   256→              >
+   257→   257→                <RangeInput
+   258→   258→                  min={0}
+   259→   259→                  max={24}
+   260→   260→                  step={1}
+   261→   261→                  value={state.wheelSpacing}
+   262→   262→                  onChange={(v) => update("wheelSpacing", v)}
+   263→   263→                />
+   264→   264→              </PropertyField>
+   265→   265→
+   266→   266→              {/* Color input */}
+   267→   267→              <PropertyField
+   268→   268→                label="Selected color"
+   269→   269→                hint="Enter a hex value to set the color"
+   270→   270→                error={hexError}
+   271→   271→              >
+   272→   272→                <div className="flex items-center gap-2">
+   273→   273→                  <div
+   274→   274→                    className="h-9 w-9 shrink-0 rounded-md border border-border"
+   275→   275→                    style={{ backgroundColor: color?.hex ?? state.color }}
+   276→   276→                    aria-hidden="true"
+   277→   277→                  />
+   278→   278→                  <input
+   279→   279→                    type="text"
+   280→   280→                    value={hexInput}
+   281→   281→                    onChange={(e) => applyHex(e.target.value)}
+   282→   282→                    spellCheck={false}
+   283→   283→                    className={cn(
+   284→   284→                      "h-9 flex-1 rounded-md border bg-background px-2.5 font-mono text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   285→   285→                      hexError ? "border-destructive" : "border-border"
+   286→   286→                    )}
+   287→   287→                    aria-invalid={!!hexError}
+   288→   288→                  />
+   289→   289→                </div>
+   290→   290→              </PropertyField>
+   291→   291→
+   292→   292→              {/* Rotate shape with hue */}
+   293→   293→              <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2.5">
+   294→   294→                <div className="min-w-0">
+   295→   295→                  <div className="text-[12px] font-medium text-foreground">
+   296→   296→                    Rotate shape with hue
+   297→   297→                  </div>
+   298→   298→                  <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+   299→   299→                    Triangle tracks the wheel&apos;s hue position
+   300→   300→                  </p>
+   301→   301→                </div>
+   302→   302→                <button
+   303→   303→                  type="button"
+   304→   304→                  role="switch"
+   305→   305→                  aria-checked={state.rotateShape}
+   306→   306→                  aria-label="Toggle rotate shape with hue"
+   307→   307→                  onClick={() => update("rotateShape", !state.rotateShape)}
+   308→   308→                  className={cn(
+   309→   309→                    "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   310→   310→                    state.rotateShape
+   311→   311→                      ? "bg-brand-lemon"
+   312→   312→                      : "bg-muted-foreground/30"
+   313→   313→                  )}
+   314→   314→                >
+   315→   315→                  <span
+   316→   316→                    className={cn(
+   317→   317→                      "inline-block h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform",
+   318→   318→                      state.rotateShape ? "translate-x-4" : "translate-x-0.5"
+   319→   319→                    )}
+   320→   320→                  />
+   321→   321→                </button>
+   322→   322→              </div>
+   323→   323→            </div>
+   324→   324→
+   325→   325→            {/* Color output values */}
+   326→   326→            <div className="mt-auto border-t border-border p-4">
+   327→   327→              <span className="eyebrow mb-2 block">Output</span>
+   328→   328→              <div className="space-y-1.5">
+   329→   329→                <CopyableValue label="HEX" value={color?.hex ?? "#4287f5"} />
+   330→   330→                <CopyableValue label="RGB" value={rgbStr} />
+   331→   331→                <CopyableValue label="HSV" value={hsvStr} />
+   332→   332→                <CopyableValue label="HSL" value={hslStr} />
+   333→   333→              </div>
+   334→   334→            </div>
+   335→   335→          </aside>
+   336→   336→        </div>
+   337→   337→
+   338→   338→        {/* Code panel */}
+   339→   339→        <section className="panel mt-6 overflow-hidden">
+   340→   340→          <div className="flex items-center justify-between border-b border-border px-2">
+   341→   341→            <div className="flex">
+   342→   342→              {(
+   343→   343→                [
+   344→   344→                  ["javascript", "JavaScript"],
+   345→   345→                  ["html", "HTML"],
+   346→   346→                  ["css", "CSS"],
+   347→   347→                  ["api", "API"],
+   348→   348→                ] as const
+   349→   349→              ).map(([key, label]) => (
+   350→   350→                <button
+   351→   351→                  key={key}
+   352→   352→                  type="button"
+   353→   353→                  onClick={() => setActiveTab(key)}
+   354→   354→                  className={cn(
+   355→   355→                    "relative h-9 px-3 text-[12px] font-medium transition-colors focus-visible:outline-none",
+   356→   356→                    activeTab === key
+   357→   357→                      ? "text-foreground"
+   358→   358→                      : "text-muted-foreground hover:text-foreground"
+   359→   359→                  )}
+   360→   360→                >
+   361→   361→                  {label}
+   362→   362→                  {activeTab === key && (
+   363→   363→                    <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />
+   364→   364→                  )}
+   365→   365→                </button>
+   366→   366→              ))}
+   367→   367→            </div>
+   368→   368→            <span className="pr-2 text-[11px] font-mono text-muted-foreground/70">
+   369→   369→              Synchronized with live configuration
+   370→   370→            </span>
+   371→   371→          </div>
+   372→   372→          <div className="p-4">
+   373→   373→            {activeTab === "javascript" && (
+   374→   374→              <CodeBlock code={jsCode} language="javascript" filename="init.js" />
+   375→   375→            )}
+   376→   376→            {activeTab === "html" && (
+   377→   377→              <CodeBlock code={htmlCode} language="html" filename="index.html" />
+   378→   378→            )}
+   379→   379→            {activeTab === "css" && (
+   380→   380→              <CodeBlock code={cssCode} language="css" filename="styles.css" />
+   381→   381→            )}
+   382→   382→            {activeTab === "api" && (
+   383→   383→              <CodeBlock code={apiCode} language="typescript" filename="api.ts" />
+   384→   384→            )}
+   385→   385→          </div>
+   386→   386→        </section>
+   387→   387→
+   388→   388→        {/* Documentation below the playground */}
+   389→   389→        <ComponentDocumentation />
+   390→   390→      </div>
+   391→   391→    </div>
+   392→   392→  );
+   393→   393→}
+   394→   394→
+   395→   395→function PropertyField({
+   396→   396→  label,
+   397→   397→  hint,
+   398→   398→  value,
+   399→   399→  error,
+   400→   400→  children,
+   401→   401→}: {
+   402→   402→  label: string;
+   403→   403→  hint?: string;
+   404→   404→  value?: string;
+   405→   405→  error?: string | null;
+   406→   406→  children: React.ReactNode;
+   407→   407→}) {
+   408→   408→  return (
+   409→   409→    <div>
+   410→   410→      <div className="mb-1.5 flex items-center justify-between">
+   411→   411→        <label className="text-[12px] font-medium text-foreground">{label}</label>
+   412→   412→        {value && (
+   413→   413→          <span className="font-mono text-[11px] text-brand-lemon">{value}</span>
+   414→   414→        )}
+   415→   415→      </div>
+   416→   416→      {children}
+   417→   417→      {error ? (
+   418→   418→        <p className="mt-1 text-[11px] text-destructive">{error}</p>
+   419→   419→      ) : hint ? (
+   420→   420→        <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p>
+   421→   421→      ) : null}
+   422→   422→    </div>
+   423→   423→  );
+   424→   424→}
+   425→   425→
+   426→   426→function RangeInput({
+   427→   427→  min,
+   428→   428→  max,
+   429→   429→  step,
+   430→   430→  value,
+   431→   431→  onChange,
+   432→   432→}: {
+   433→   433→  min: number;
+   434→   434→  max: number;
+   435→   435→  step: number;
+   436→   436→  value: number;
+   437→   437→  onChange: (v: number) => void;
+   438→   438→}) {
+   439→   439→  return (
+   440→   440→    <div className="flex items-center gap-2">
+   441→   441→      <input
+   442→   442→        type="range"
+   443→   443→        min={min}
+   444→   444→        max={max}
+   445→   445→        step={step}
+   446→   446→        value={value}
+   447→   447→        onChange={(e) => onChange(Number(e.target.value))}
+   448→   448→        className="flex-1 h-1.5 cursor-pointer appearance-none rounded-full bg-muted accent-brand-lemon"
+   449→   449→        style={{
+   450→   450→          background: `linear-gradient(to right, var(--brand-lemon) 0%, var(--brand-lemon) ${
+   451→   451→            ((value - min) / (max - min)) * 100
+   452→   452→          }%, var(--muted) ${((value - min) / (max - min)) * 100}%, var(--muted) 100%)`,
+   453→   453→        }}
+   454→   454→      />
+   455→   455→      <input
+   456→   456→        type="number"
+   457→   457→        min={min}
+   458→   458→        max={max}
+   459→   459→        value={value}
+   460→   460→        onChange={(e) => onChange(Number(e.target.value))}
+   461→   461→        className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center font-mono text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   462→   462→      />
+   463→   463→    </div>
+   464→   464→  );
+   465→   465→}
+   466→   466→
+   467→   467→function OutputCell({ label, value }: { label: string; value: string }) {
+   468→   468→  return (
+   469→   469→    <div className="bg-card px-3 py-2.5">
+   470→   470→      <div className="eyebrow mb-0.5">{label}</div>
+   471→   471→      <div className="truncate font-mono text-[12px] text-foreground">{value}</div>
+   472→   472→    </div>
+   473→   473→  );
+   474→   474→}
+   475→   475→
+   476→   476→// ---- Code generators ----
+   477→   477→
+   478→   478→function generateJsCode(state: PlaygroundState): string {
+   479→   479→  const rotateLine = state.rotateShape ? `  rotateShape: true,\n` : "";
+   480→   480→  return `import { ColorWheelPicker } from "@workshop/color-wheel";
+   481→   481→
+   482→   482→const container = document.querySelector("#color-picker");
+   483→   483→
+   484→   484→const picker = new ColorWheelPicker(container, {
+   485→   485→  shape: "${state.shape}",
+   486→   486→  size: ${state.size},
+   487→   487→  wheelThickness: ${state.wheelThickness},
+   488→   488→  wheelSpacing: ${state.wheelSpacing},
+   489→   489→  color: "${state.color}",
+   490→   490→${rotateLine}});
+   491→   491→
+   492→   492→picker.on("input", ({ hex, rgb, hsv }) => {
+   493→   493→  // Fires continuously while dragging
+   494→   494→  console.log("dragging:", hex, rgb, hsv);
+   495→   495→});
+   496→   496→
+   497→   497→picker.on("change", ({ hex, rgb, hsv, hsl }) => {
+   498→   498→  // Fires when the user commits a selection
+   499→   499→  console.log("committed:", hex, rgb, hsv, hsl);
+   500→   500→});
+   501→   501→
+   502→   502→// Programmatic control
+   503→   503→// picker.setColor("#ff6600");
+   504→   504→// picker.setShape("square");
+   505→   505→// picker.setSize(220);
+   506→   506→// picker.setWheelThickness(32);
+   507→   507→// picker.setRotateShape(true);
+   508→   508→// picker.destroy();`;
+   509→   509→}
+   510→   510→
+   511→   511→function generateHtmlCode(state: PlaygroundState): string {
+   512→   512→  return `<!DOCTYPE html>
+   513→   513→<html>
+   514→   514→  <head>
+   515→   515→    <link rel="stylesheet" href="color-wheel-picker.css" />
+   516→   516→  </head>
+   517→   517→  <body>
+   518→   518→    <!-- The picker mounts into this container -->
+   519→   519→    <div id="color-picker"></div>
+   520→   520→
+   521→   521→    <script type="module" src="init.js"></script>
+   522→   522→  </body>
+   523→   523→</html>
+   524→   524→
+   525→   525→<!-- Default configuration used above:
+   526→   526→  shape:          "${state.shape}"
+   527→   527→  size:           ${state.size}px
+   528→   528→  wheelThickness: ${state.wheelThickness}px
+   529→   529→  wheelSpacing:   ${state.wheelSpacing}px
+   530→   530→  color:          "${state.color}"
+   531→   531→-->`;
+   532→   532→}
+   533→   533→
+   534→   534→function generateCssCode(): string {
+   535→   535→  return `/* The component ships with safe defaults.
+   536→   536→   Override these CSS custom properties to theme it. */
+   537→   537→
+   538→   538→:root {
+   539→   539→  --color-picker-marker-border: #ffffff;
+   540→   540→  --color-picker-marker-size: 14px;
+   541→   541→  --color-picker-ring-width: 2px;
+   542→   542→  --color-picker-cursor: crosshair;
+   543→   543→  --color-picker-focus-ring: var(--brand-lemon, #d9ff66);
+   544→   544→}
+   545→   545→
+   546→   546→/* The canvas fills its container. Size the container to control
+   547→   547→   the component size, or use the \`size\` option. */
+   548→   548→.color-picker-host {
+   549→   549→  display: inline-block;
+   550→   550→  touch-action: none;
+   551→   551→}
+   552→   552→
+   553→   553→.color-picker-host canvas {
+   554→   554→  display: block;
+   555→   555→  border-radius: 50%;
+   556→   556→  outline: none;
+   557→   557→}
+   558→   558→
+   559→   559→.color-picker-host canvas:focus-visible {
+   560→   560→  box-shadow: 0 0 0 3px var(--color-picker-focus-ring);
+   561→   561→}`;
+   562→   562→}
+   563→   563→
+   564→   564→function generateApiCode(): string {
+   565→   565→  return `// Public API
+   566→   566→
+   567→   567→type Shape = "triangle" | "square" | "disk" | "none";
+   568→   568→
+   569→   569→interface ColorOutput {
+   570→   570→  hex: string;                              // #RRGGBB
+   571→   571→  rgb: { r: number; g: number; b: number }; // 0-255
+   572→   572→  hsv: { h: number; s: number; v: number }; // h:0-360, s/v:0-100
+   573→   573→  hsl: { h: number; s: number; l: number }; // h:0-360, s/l:0-100
+   574→   574→}
+   575→   575→
+   576→   576→interface ColorPickerOptions {
+   577→   577→  shape?: Shape;           // default "triangle"
+   578→   578→  size?: number;           // default 180
+   579→   579→  wheelThickness?: number; // default 24
+   580→   580→  wheelSpacing?: number;   // default 8
+   581→   581→  hue?: number;            // default 210 (0-360)
+   582→   582→  color?: string;          // default "#4287f5" (overrides hue)
+   583→   583→  rotateShape?: boolean;   // default false
+   584→   584→}
+   585→   585→
+   586→   586→class ColorWheelPicker {
+   587→   587→  constructor(container: HTMLElement, options?: ColorPickerOptions);
+   588→   588→  setColor(color: string): void;
+   589→   589→  getColor(): ColorOutput;
+   590→   590→  setShape(shape: Shape): void;
+   591→   591→  setSize(size: number): void;
+   592→   592→  setWheelThickness(thickness: number): void;
+   593→   593→  setWheelSpacing(spacing: number): void;
+   594→   594→  setHue(hue: number): void;
+   595→   595→  setRotateShape(rotate: boolean): void;
+   596→   596→  on(event: "input" | "change", handler: (c: ColorOutput) => void): void;
+   597→   597→  off(event: string, handler: Function): void;
+   598→   598→  destroy(): void;
+   599→   599→}
+   600→   600→
+   601→   601→// Events
+   602→   602→//   "input"  — fires continuously during pointer drag
+   603→   603→//   "change" — fires when the selection is committed (pointer up)`;
+   604→   604→}
+   605→   605→
+   606→   606→// ---- Documentation section ----
+   607→   607→
+   608→   608→function ComponentDocumentation() {
+   609→   609→  const meta = getComponent("color-wheel")!;
+   610→   610→  return (
+   611→   611→    <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_200px]">
+   612→   612→      <div className="min-w-0 max-w-[760px]">
+   613→   613→        <h2 className="text-2xl font-semibold tracking-tight">Documentation</h2>
+   614→   614→        <p className="mt-2 text-sm text-muted-foreground">
+   615→   615→          The Color Wheel Picker is a framework-independent vanilla JavaScript
+   616→   616→          component. The examples above show the actual public API — no React
+   617→   617→          or Next.js required.
+   618→   618→        </p>
+   619→   619→
+   620→   620→        <section className="mt-8">
+   621→   621→          <h3 className="text-lg font-semibold">Overview</h3>
+   622→   622→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   623→   623→            {meta.longDescription} The hue wheel represents the hue dimension,
+   624→   624→            while the inner area controls saturation and value (or their
+   625→   625→            shape-specific equivalents).
+   626→   626→          </p>
+   627→   627→        </section>
+   628→   628→
+   629→   629→        <section className="mt-8">
+   630→   630→          <h3 className="text-lg font-semibold">When to use it</h3>
+   631→   631→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   632→   632→            {meta.whenToUse.map((item) => (
+   633→   633→              <li key={item} className="flex gap-2">
+   634→   634→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   635→   635→                {item}
+   636→   636→              </li>
+   637→   637→            ))}
+   638→   638→          </ul>
+   639→   639→        </section>
+   640→   640→
+   641→   641→        <section className="mt-8">
+   642→   642→          <h3 className="text-lg font-semibold">When not to use it</h3>
+   643→   643→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   644→   644→            {meta.whenNotToUse.map((item) => (
+   645→   645→              <li key={item} className="flex gap-2">
+   646→   646→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
+   647→   647→                {item}
+   648→   648→              </li>
+   649→   649→            ))}
+   650→   650→          </ul>
+   651→   651→        </section>
+   652→   652→
+   653→   653→        <section className="mt-8">
+   654→   654→          <h3 className="text-lg font-semibold">Properties and defaults</h3>
+   655→   655→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   656→   656→            <table className="w-full text-left text-[13px]">
+   657→   657→              <thead className="bg-muted/30">
+   658→   658→                <tr>
+   659→   659→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Property</th>
+   660→   660→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Type</th>
+   661→   661→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Default</th>
+   662→   662→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Description</th>
+   663→   663→                </tr>
+   664→   664→              </thead>
+   665→   665→              <tbody className="divide-y divide-border">
+   666→   666→                {meta.properties.map((p) => (
+   667→   667→                  <tr key={p.name}>
+   668→   668→                    <td className="px-3 py-2 font-mono text-brand-lemon">{p.name}</td>
+   669→   669→                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.type}</td>
+   670→   670→                    <td className="px-3 py-2 font-mono text-foreground">{p.default}</td>
+   671→   671→                    <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
+   672→   672→                  </tr>
+   673→   673→                ))}
+   674→   674→              </tbody>
+   675→   675→            </table>
+   676→   676→          </div>
+   677→   677→        </section>
+   678→   678→
+   679→   679→        <section className="mt-8">
+   680→   680→          <h3 className="text-lg font-semibold">Methods</h3>
+   681→   681→          <div className="mt-3 space-y-2">
+   682→   682→            {meta.methods.map((m) => (
+   683→   683→              <div key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   684→   684→                <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   685→   685→                <p className="mt-1 text-[13px] text-muted-foreground">{m.description}</p>
+   686→   686→                {m.returns && (
+   687→   687→                  <p className="mt-0.5 text-[11px] font-mono text-muted-foreground/70">
+   688→   688→                    returns: {m.returns}
+   689→   689→                  </p>
+   690→   690→                )}
+   691→   691→              </div>
+   692→   692→            ))}
+   693→   693→          </div>
+   694→   694→        </section>
+   695→   695→
+   696→   696→        <section className="mt-8">
+   697→   697→          <h3 className="text-lg font-semibold">Events</h3>
+   698→   698→          <div className="mt-3 space-y-2">
+   699→   699→            {meta.events.map((e) => (
+   700→   700→              <div key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   701→   701→                <div className="flex items-center gap-3">
+   702→   702→                  <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   703→   703→                  <code className="font-mono text-[11px] text-muted-foreground">{e.payload}</code>
+   704→   704→                </div>
+   705→   705→                <p className="mt-1 text-[13px] text-muted-foreground">{e.description}</p>
+   706→   706→              </div>
+   707→   707→            ))}
+   708→   708→          </div>
+   709→   709→        </section>
+   710→   710→
+   711→   711→        <section className="mt-8">
+   712→   712→          <h3 className="text-lg font-semibold">Accessibility</h3>
+   713→   713→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   714→   714→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />The canvas is keyboard-focusable and supports arrow-key adjustment.</li>
+   715→   715→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Arrow Left/Right adjust hue (Shift = 10° steps).</li>
+   716→   716→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Arrow Up/Down adjust value (Shift = 10 steps).</li>
+   717→   717→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Selection indicators use a contrasting border so they remain perceivable on any color.</li>
+   718→   718→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Reduced-motion preferences are respected.</li>
+   719→   719→          </ul>
+   720→   720→        </section>
+   721→   721→
+   722→   722→        <section className="mt-8">
+   723→   723→          <h3 className="text-lg font-semibold">Styling and customization</h3>
+   724→   724→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   725→   725→            The component is self-contained and ships with safe defaults. Host
+   726→   726→            applications can override its CSS custom properties (prefixed with
+   727→   727→            <code className="mx-1 font-mono text-brand-lemon">--color-picker-</code>)
+   728→   728→            to adjust marker appearance, cursor, and focus ring without
+   729→   729→            modifying behavior.
+   730→   730→          </p>
+   731→   731→        </section>
+   732→   732→
+   733→   733→        <section className="mt-8">
+   734→   734→          <h3 className="text-lg font-semibold">Troubleshooting</h3>
+   735→   735→          <div className="mt-3 space-y-3">
+   736→   736→            <div>
+   737→   737→              <p className="text-[13px] font-medium text-foreground">The picker doesn&apos;t render</p>
+   738→   738→              <p className="text-[13px] text-muted-foreground">Ensure the container element exists and has non-zero size before constructing the picker. The component sizes its canvas to the container&apos;s content box.</p>
+   739→   739→            </div>
+   740→   740→            <div>
+   741→   741→              <p className="text-[13px] font-medium text-foreground">Colors look wrong on a light background</p>
+   742→   742→              <p className="text-[13px] text-muted-foreground">The wheel and inner gradients are drawn on a transparent canvas. Place the picker on a surface with sufficient contrast, or wrap it in a panel.</p>
+   743→   743→            </div>
+   744→   744→          </div>
+   745→   745→        </section>
+   746→   746→      </div>
+   747→   747→
+   748→   748→      {/* Right-hand TOC */}
+   749→   749→      <aside className="hidden lg:block">
+   750→   750→        <div className="sticky top-20">
+   751→   751→          <span className="eyebrow mb-2 block">On this page</span>
+   752→   752→          <nav className="space-y-1 text-[12px]">
+   753→   753→            {["Overview", "When to use it", "When not to use it", "Properties and defaults", "Methods", "Events", "Accessibility", "Styling and customization", "Troubleshooting"].map((s) => (
+   754→   754→              <a
+   755→   755→                key={s}
+   756→   756→                href="#"
+   757→   757→                onClick={(e) => e.preventDefault()}
+   758→   758→                className="block rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+   759→   759→              >
+   760→   760→                {s}
+   761→   761→              </a>
+   762→   762→            ))}
+   763→   763→          </nav>
+   764→   764→        </div>
+   765→   765→      </aside>
+   766→   766→    </div>
+   767→   767→  );
+   768→   768→}
+   769→   769→

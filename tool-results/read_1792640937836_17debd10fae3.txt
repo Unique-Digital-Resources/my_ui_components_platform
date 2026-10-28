@@ -1,0 +1,1408 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  Circle,
+     6→  Square,
+     7→  Triangle,
+     8→  Trash2,
+     9→  Maximize2,
+    10→  Scan,
+    11→  AlignStartVertical,
+    12→  AlignCenterHorizontal,
+    13→  AlignEndVertical,
+    14→  AlignStartHorizontal,
+    15→  AlignCenterVertical,
+    16→  AlignEndHorizontal,
+    17→  AlignHorizontalDistributeCenter,
+    18→  AlignVerticalDistributeCenter,
+    19→  RotateCcw,
+    20→  Keyboard,
+    21→} from "lucide-react";
+    22→import { getComponent } from "@/lib/platform/content";
+    23→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+    24→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+    25→import { AgentSkillTabs } from "@/components/platform/agent-skill-tabs";
+    26→import { BoardReact, type BoardItem, type BoardView, type GridMode, type TransformMode, type LatticeDisplay, type PivotPosition } from "@/components/board/board-react";
+    27→import type { AlignType, DistributeType, ShapeType } from "@/lib/components/board";
+    28→import {
+    29→  registerBuiltinCommands,
+    30→  commandRegistry,
+    31→  ShortcutHandler,
+    32→  formatShortcut,
+    33→} from "@/lib/commands";
+    34→import { Slider } from "@/components/ui/slider";
+    35→import { Switch } from "@/components/ui/switch";
+    36→import { cn } from "@/lib/utils";
+    37→import { toast } from "sonner";
+    38→
+    39→// ---- Constants ----------------------------------------------------------
+    40→
+    41→/** Shape color palette — none are indigo/blue. */
+    42→const SHAPE_COLORS = ["#D9FF66", "#B9A0FF", "#FF858B", "#8FE3A5", "#FFD36B"];
+    43→const DEFAULT_SHAPE_SIZE = 90;
+    44→
+    45→interface PlaygroundState {
+    46→  gridMode: GridMode;
+    47→  gridSize: number;
+    48→  subGridDivisions: number;
+    49→  snapToGrid: boolean;
+    50→  snapToItems: boolean;
+    51→  transformMode: TransformMode;
+    52→  latticeDisplay: LatticeDisplay;
+    53→  selectionPivot: PivotPosition;
+    54→}
+    55→
+    56→const DEFAULTS: PlaygroundState = {
+    57→  gridMode: "dots",
+    58→  gridSize: 40,
+    59→  subGridDivisions: 4,
+    60→  snapToGrid: false,
+    61→  snapToItems: false,
+    62→  transformMode: "global",
+    63→  latticeDisplay: "local",
+    64→  selectionPivot: "center",
+    65→};
+    66→
+    67→/** The Board command IDs that the playground wires up. */
+    68→const BOARD_COMMAND_IDS = [
+    69→  "board.align-left",
+    70→  "board.align-center-h",
+    71→  "board.align-right",
+    72→  "board.align-top",
+    73→  "board.align-center-v",
+    74→  "board.align-bottom",
+    75→  "board.distribute-h",
+    76→  "board.distribute-v",
+    77→  "board.fit-all",
+    78→  "board.fit-selection",
+    79→  "board.add-circle",
+    80→  "board.add-rect",
+    81→  "board.add-triangle",
+    82→  "board.delete-selected",
+    83→] as const;
+    84→
+    85→const ALIGN_BUTTONS: { type: AlignType; label: string; icon: typeof AlignStartVertical; cmdId: string }[] = [
+    86→  { type: "left", label: "Align Left", icon: AlignStartVertical, cmdId: "board.align-left" },
+    87→  { type: "center-h", label: "Align Center Horizontal", icon: AlignCenterHorizontal, cmdId: "board.align-center-h" },
+    88→  { type: "right", label: "Align Right", icon: AlignEndVertical, cmdId: "board.align-right" },
+    89→  { type: "top", label: "Align Top", icon: AlignStartHorizontal, cmdId: "board.align-top" },
+    90→  { type: "center-v", label: "Align Middle Vertical", icon: AlignCenterVertical, cmdId: "board.align-center-v" },
+    91→  { type: "bottom", label: "Align Bottom", icon: AlignEndHorizontal, cmdId: "board.align-bottom" },
+    92→];
+    93→
+    94→const DISTRIBUTE_BUTTONS: { type: DistributeType; label: string; icon: typeof AlignHorizontalDistributeCenter; cmdId: string }[] = [
+    95→  { type: "horizontal", label: "Distribute Horizontally", icon: AlignHorizontalDistributeCenter, cmdId: "board.distribute-h" },
+    96→  { type: "vertical", label: "Distribute Vertically", icon: AlignVerticalDistributeCenter, cmdId: "board.distribute-v" },
+    97→];
+    98→
+    99→const GRID_MODE_OPTIONS: { value: GridMode; label: string }[] = [
+   100→  { value: "none", label: "None" },
+   101→  { value: "dots", label: "Dots" },
+   102→  { value: "lines", label: "Lines" },
+   103→];
+   104→
+   105→const LATTICE_DISPLAY_OPTIONS: { value: LatticeDisplay; label: string }[] = [
+   106→  { value: "local", label: "Local" },
+   107→  { value: "global", label: "Global" },
+   108→  { value: "both", label: "Both" },
+   109→];
+   110→
+   111→const TRANSFORM_MODE_OPTIONS: { value: TransformMode; label: string }[] = [
+   112→  { value: "global", label: "Global" },
+   113→  { value: "local", label: "Local" },
+   114→];
+   115→
+   116→const PIVOT_POSITIONS: { value: PivotPosition; row: number; col: number; label: string }[] = [
+   117→  { value: "top-left", row: 0, col: 0, label: "Top-left" },
+   118→  { value: "top-center", row: 0, col: 1, label: "Top-center" },
+   119→  { value: "top-right", row: 0, col: 2, label: "Top-right" },
+   120→  { value: "middle-left", row: 1, col: 0, label: "Middle-left" },
+   121→  { value: "center", row: 1, col: 1, label: "Center" },
+   122→  { value: "middle-right", row: 1, col: 2, label: "Middle-right" },
+   123→  { value: "bottom-left", row: 2, col: 0, label: "Bottom-left" },
+   124→  { value: "bottom-center", row: 2, col: 1, label: "Bottom-center" },
+   125→  { value: "bottom-right", row: 2, col: 2, label: "Bottom-right" },
+   126→];
+   127→
+   128→// ---- Playground ---------------------------------------------------------
+   129→
+   130→export function BoardPlayground() {
+   131→  const meta = getComponent("board")!;
+   132→  const [state, setState] = React.useState<PlaygroundState>(DEFAULTS);
+   133→  const [items, setItems] = React.useState<BoardItem[]>([]);
+   134→  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+   135→  const [view, setView] = React.useState<BoardView>({ panX: 0, panY: 0, zoom: 1 });
+   136→  const [activeTab, setActiveTab] = React.useState<"javascript" | "html" | "css" | "api">("javascript");
+   137→  const [registryVersion, setRegistryVersion] = React.useState(0);
+   138→  const [rotationValue, setRotationValue] = React.useState(0);
+   139→
+   140→  const boardRef = React.useRef<import("@/lib/components/board").Board | null>(null);
+   141→  const liveAreaRef = React.useRef<HTMLDivElement>(null);
+   142→  const handlerRef = React.useRef<ShortcutHandler | null>(null);
+   143→
+   144→  // Register the built-in commands on mount.
+   145→  React.useEffect(() => {
+   146→    registerBuiltinCommands();
+   147→    setRegistryVersion((v) => v + 1);
+   148→  }, []);
+   149→
+   150→  // Seed a few starter items once the board is created so the canvas isn't empty.
+   151→  React.useEffect(() => {
+   152→    const board = boardRef.current;
+   153→    if (!board) return;
+   154→    // Only seed if there are no items yet.
+   155→    if (board.getItems().length > 0) return;
+   156→    board.addItem("rect", -120, -40, 120, 90, 0, "#D9FF66");
+   157→    board.addItem("circle", 60, -60, 100, 100, 0, "#B9A0FF");
+   158→    board.addItem("triangle", -40, 80, 110, 100, 0, "#FF858B");
+   159→    setItems(board.getItems());
+   160→    // Intentionally empty deps — runs once after the board mounts.
+   161→  }, []);
+   162→
+   163→  // ---- Action handlers ----
+   164→  //
+   165→  // All actions read from refs (boardRef, liveAreaRef) and call stable
+   166→  // setState setters, so their behavior is independent of render scope.
+   167→  // We store the latest versions in an actionsRef (updated via a render-
+   168→  // scoped effect to satisfy the React Compiler's "no ref writes during
+   169→  // render" rule) so the ShortcutHandler — created once on mount — always
+   170→  // dispatches to the freshest implementation.
+   171→
+   172→  const actionsRef = React.useRef<{
+   173→    addShape: (type: ShapeType) => void;
+   174→    deleteSelected: () => void;
+   175→    fitAll: () => void;
+   176→    fitSelection: () => void;
+   177→    align: (type: AlignType) => void;
+   178→    distribute: (type: DistributeType) => void;
+   179→  }>({
+   180→    addShape: () => {},
+   181→    deleteSelected: () => {},
+   182→    fitAll: () => {},
+   183→    fitSelection: () => {},
+   184→    align: () => {},
+   185→    distribute: () => {},
+   186→  });
+   187→
+   188→  const addShape = (type: ShapeType) => actionsRef.current.addShape(type);
+   189→  const deleteSelected = () => actionsRef.current.deleteSelected();
+   190→  const fitAll = () => actionsRef.current.fitAll();
+   191→  const fitSelection = () => actionsRef.current.fitSelection();
+   192→  const align = (type: AlignType) => actionsRef.current.align(type);
+   193→  const distribute = (type: DistributeType) => actionsRef.current.distribute(type);
+   194→
+   195→  // Keep the actions ref fresh after every render.
+   196→  React.useEffect(() => {
+   197→    actionsRef.current.addShape = (type: ShapeType) => {
+   198→      const board = boardRef.current;
+   199→      const liveArea = liveAreaRef.current;
+   200→      if (!board) return;
+   201→      let cx = 0;
+   202→      let cy = 0;
+   203→      if (liveArea) {
+   204→        const v = board.getView();
+   205→        const w = liveArea.clientWidth;
+   206→        const h = liveArea.clientHeight;
+   207→        cx = (w / 2 - v.panX) / v.zoom;
+   208→        cy = (h / 2 - v.panY) / v.zoom;
+   209→      }
+   210→      // Random offset near the center.
+   211→      const offX = (Math.random() - 0.5) * 140;
+   212→      const offY = (Math.random() - 0.5) * 140;
+   213→      const color = SHAPE_COLORS[Math.floor(Math.random() * SHAPE_COLORS.length)];
+   214→      const id = board.addItem(type, cx + offX, cy + offY, DEFAULT_SHAPE_SIZE, DEFAULT_SHAPE_SIZE, 0, color);
+   215→      board.selectItem(id, false);
+   216→      setItems(board.getItems());
+   217→      setSelectedIds(board.getSelectedIds());
+   218→    };
+   219→    actionsRef.current.deleteSelected = () => {
+   220→      const board = boardRef.current;
+   221→      if (!board) return;
+   222→      const ids = board.getSelectedIds();
+   223→      if (ids.length === 0) return;
+   224→      for (const id of ids) board.removeItem(id);
+   225→      setItems(board.getItems());
+   226→      setSelectedIds(board.getSelectedIds());
+   227→    };
+   228→    actionsRef.current.fitAll = () => {
+   229→      boardRef.current?.zoomToFit();
+   230→    };
+   231→    actionsRef.current.fitSelection = () => {
+   232→      boardRef.current?.zoomToFitSelection();
+   233→    };
+   234→    actionsRef.current.align = (type: AlignType) => {
+   235→      const board = boardRef.current;
+   236→      if (!board) return;
+   237→      if (board.getSelectedIds().length < 2) {
+   238→        toast.message("Select 2+ items to align");
+   239→        return;
+   240→      }
+   241→      board.align(type);
+   242→      setItems(board.getItems());
+   243→    };
+   244→    actionsRef.current.distribute = (type: DistributeType) => {
+   245→      const board = boardRef.current;
+   246→      if (!board) return;
+   247→      if (board.getSelectedIds().length < 3) {
+   248→        toast.message("Select 3+ items to distribute");
+   249→        return;
+   250→      }
+   251→      board.distribute(type);
+   252→      setItems(board.getItems());
+   253→    };
+   254→  });
+   255→
+   256→  // ---- Shortcut handler (scoped to board command IDs) ----
+   257→
+   258→  React.useEffect(() => {
+   259→    const handler = new ShortcutHandler([...BOARD_COMMAND_IDS]);
+   260→    handler.on("board.add-circle", () => actionsRef.current.addShape("circle"));
+   261→    handler.on("board.add-rect", () => actionsRef.current.addShape("rect"));
+   262→    handler.on("board.add-triangle", () => actionsRef.current.addShape("triangle"));
+   263→    handler.on("board.delete-selected", () => actionsRef.current.deleteSelected());
+   264→    handler.on("board.fit-all", () => actionsRef.current.fitAll());
+   265→    handler.on("board.fit-selection", () => actionsRef.current.fitSelection());
+   266→    handler.on("board.align-left", () => actionsRef.current.align("left"));
+   267→    handler.on("board.align-center-h", () => actionsRef.current.align("center-h"));
+   268→    handler.on("board.align-right", () => actionsRef.current.align("right"));
+   269→    handler.on("board.align-top", () => actionsRef.current.align("top"));
+   270→    handler.on("board.align-center-v", () => actionsRef.current.align("center-v"));
+   271→    handler.on("board.align-bottom", () => actionsRef.current.align("bottom"));
+   272→    handler.on("board.distribute-h", () => actionsRef.current.distribute("horizontal"));
+   273→    handler.on("board.distribute-v", () => actionsRef.current.distribute("vertical"));
+   274→    handler.attach();
+   275→    handlerRef.current = handler;
+   276→    return () => {
+   277→      handler.destroy();
+   278→      handlerRef.current = null;
+   279→    };
+   280→    // Intentionally empty deps — the handler reads through actionsRef so
+   281→    // it always dispatches to the latest implementation without re-attaching.
+   282→  }, []);
+   283→
+   284→  // ---- State updaters ----
+   285→
+   286→  const update = React.useCallback(
+   287→    <K extends keyof PlaygroundState>(key: K, value: PlaygroundState[K]) => {
+   288→      setState((s) => ({ ...s, [key]: value }));
+   289→    },
+   290→    [],
+   291→  );
+   292→
+   293→  // Sync the rotation input with the first selected item's rotation whenever the selection changes.
+   294→  React.useEffect(() => {
+   295→    if (selectedIds.length === 0) return;
+   296→    const board = boardRef.current;
+   297→    if (!board) return;
+   298→    const first = board.getItems().find((i) => i.id === selectedIds[0]);
+   299→    if (first) setRotationValue(first.rotation);
+   300→  }, [selectedIds]);
+   301→
+   302→  // Apply a rotation delta to all selected items and update the rotation input.
+   303→  const applyRotation = (newRotation: number) => {
+   304→    const board = boardRef.current;
+   305→    if (!board || selectedIds.length === 0) return;
+   306→    const first = board.getItems().find((i) => i.id === selectedIds[0]);
+   307→    if (!first) return;
+   308→    const delta = newRotation - first.rotation;
+   309→    if (Math.abs(delta) < 0.01) return;
+   310→    board.rotateSelected(delta);
+   311→    setRotationValue(newRotation);
+   312→    setItems(board.getItems());
+   313→  };
+   314→
+   315→  const reset = () => {
+   316→    setState(DEFAULTS);
+   317→    const board = boardRef.current;
+   318→    if (board) {
+   319→      // Remove all items, then re-seed.
+   320→      for (const it of board.getItems()) board.removeItem(it.id);
+   321→      board.addItem("rect", -120, -40, 120, 90, 0, "#D9FF66");
+   322→      board.addItem("circle", 60, -60, 100, 100, 0, "#B9A0FF");
+   323→      board.addItem("triangle", -40, 80, 110, 100, 0, "#FF858B");
+   324→      board.clearSelection();
+   325→      board.setView(0, 0, 1);
+   326→      setItems(board.getItems());
+   327→      setSelectedIds([]);
+   328→      setView(board.getView());
+   329→      setRotationValue(0);
+   330→    }
+   331→    toast.success("Reset to defaults");
+   332→  };
+   333→
+   334→  // ---- Code generation ----
+   335→
+   336→  const jsCode = React.useMemo(() => generateJsCode(state), [state]);
+   337→  const htmlCode = React.useMemo(() => generateHtmlCode(), []);
+   338→  const cssCode = React.useMemo(() => generateCssCode(), []);
+   339→  const apiCode = React.useMemo(() => generateApiCode(), []);
+   340→
+   341→  const boardCommands = React.useMemo(
+   342→    () => commandRegistry.byIds([...BOARD_COMMAND_IDS]),
+   343→    [registryVersion],
+   344→  );
+   345→
+   346→  // ---- Render ----
+   347→
+   348→  return (
+   349→    <div>
+   350→      {/* Page header */}
+   351→      <div className="border-b border-border bg-background">
+   352→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   353→          <Breadcrumbs />
+   354→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   355→            <div>
+   356→              <PageOverline>Components / Layout</PageOverline>
+   357→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+   358→                {meta.name}
+   359→              </h1>
+   360→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">
+   361→                {meta.longDescription}
+   362→              </p>
+   363→            </div>
+   364→            <div className="flex flex-wrap items-center gap-2">
+   365→              {meta.tags.map((tag) => (
+   366→                <span
+   367→                  key={tag}
+   368→                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground"
+   369→                >
+   370→                  {tag}
+   371→                </span>
+   372→              ))}
+   373→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   374→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />
+   375→                {meta.status}
+   376→              </span>
+   377→            </div>
+   378→          </div>
+   379→        </div>
+   380→      </div>
+   381→
+   382→      {/* Playground workspace */}
+   383→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   384→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px] lg:items-start">
+   385→          {/* Live canvas panel */}
+   386→          <section aria-label="Board live canvas" className="panel relative flex h-[600px] flex-col overflow-hidden">
+   387→            {/* Toolbar */}
+   388→            <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5">
+   389→              <div className="flex flex-wrap items-center gap-1.5">
+   390→                <ToolbarButton onClick={() => addShape("circle")} title="Add Circle (1)" variant="primary">
+   391→                  <Circle className="h-3.5 w-3.5" />
+   392→                  <span>Circle</span>
+   393→                </ToolbarButton>
+   394→                <ToolbarButton onClick={() => addShape("rect")} title="Add Rectangle (2)" variant="primary">
+   395→                  <Square className="h-3.5 w-3.5" />
+   396→                  <span>Rect</span>
+   397→                </ToolbarButton>
+   398→                <ToolbarButton onClick={() => addShape("triangle")} title="Add Triangle (3)" variant="primary">
+   399→                  <Triangle className="h-3.5 w-3.5" />
+   400→                  <span>Triangle</span>
+   401→                </ToolbarButton>
+   402→                <ToolbarDivider />
+   403→                <ToolbarButton onClick={deleteSelected} title="Delete Selected (Delete)" variant="danger">
+   404→                  <Trash2 className="h-3.5 w-3.5" />
+   405→                  <span>Delete</span>
+   406→                </ToolbarButton>
+   407→                <ToolbarDivider />
+   408→                <ToolbarButton onClick={fitAll} title="Zoom to Fit All (Cmd+0)">
+   409→                  <Maximize2 className="h-3.5 w-3.5" />
+   410→                  <span>Fit All</span>
+   411→                </ToolbarButton>
+   412→                <ToolbarButton onClick={fitSelection} title="Zoom to Fit Selection (Shift+Cmd+0)">
+   413→                  <Scan className="h-3.5 w-3.5" />
+   414→                  <span>Fit Selection</span>
+   415→                </ToolbarButton>
+   416→                <div className="ml-auto flex items-center gap-1">
+   417→                  <ToolbarButton onClick={reset} title="Reset to defaults">
+   418→                    <RotateCcw className="h-3.5 w-3.5" />
+   419→                    <span>Reset</span>
+   420→                  </ToolbarButton>
+   421→                </div>
+   422→              </div>
+   423→              {/* Align + Distribute row */}
+   424→              <div className="flex flex-wrap items-center gap-1.5">
+   425→                <span className="eyebrow mr-1">Align</span>
+   426→                {ALIGN_BUTTONS.map((b) => {
+   427→                  const Icon = b.icon;
+   428→                  return (
+   429→                    <IconButton
+   430→                      key={b.type}
+   431→                      onClick={() => align(b.type)}
+   432→                      title={`${b.label} (${formatShortcut(commandRegistry.get(b.cmdId)?.shortcut ?? { keys: "" })})`}
+   433→                      aria-label={b.label}
+   434→                    >
+   435→                      <Icon className="h-3.5 w-3.5" />
+   436→                    </IconButton>
+   437→                  );
+   438→                })}
+   439→                <ToolbarDivider />
+   440→                <span className="eyebrow mr-1">Distribute</span>
+   441→                {DISTRIBUTE_BUTTONS.map((b) => {
+   442→                  const Icon = b.icon;
+   443→                  return (
+   444→                    <IconButton
+   445→                      key={b.type}
+   446→                      onClick={() => distribute(b.type)}
+   447→                      title={`${b.label} (${formatShortcut(commandRegistry.get(b.cmdId)?.shortcut ?? { keys: "" })})`}
+   448→                      aria-label={b.label}
+   449→                    >
+   450→                      <Icon className="h-3.5 w-3.5" />
+   451→                    </IconButton>
+   452→                  );
+   453→                })}
+   454→              </div>
+   455→            </div>
+   456→
+   457→            {/* Live Board canvas — expands to fill the remaining panel space */}
+   458→            <div ref={liveAreaRef} className="relative flex-1 w-full">
+   459→              <BoardReact
+   460→                className="absolute inset-0"
+   461→                gridMode={state.gridMode}
+   462→                gridSize={state.gridSize}
+   463→                subGridDivisions={state.subGridDivisions}
+   464→                snapToGrid={state.snapToGrid}
+   465→                snapToItems={state.snapToItems}
+   466→                transformMode={state.transformMode}
+   467→                latticeDisplay={state.latticeDisplay}
+   468→                selectionPivot={state.selectionPivot}
+   469→                onSelection={(e) => setSelectedIds(e.ids)}
+   470→                onChange={() => setItems(boardRef.current?.getItems() ?? [])}
+   471→                onView={(v) => setView(v)}
+   472→                instanceRef={boardRef}
+   473→              />
+   474→              <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-background/70 px-3 py-1 text-[10px] text-muted-foreground backdrop-blur">
+   475→                Click to select. Shift-click for multi. Drag empty space for rubber-band. Space-drag to pan. Cmd+scroll to zoom. Drag the lemon rotation handle above the selection to rotate; drag a white square handle to resize.
+   476→              </div>
+   477→            </div>
+   478→
+   479→            {/* Output — item list */}
+   480→            <div className="border-t border-border p-4">
+   481→              <div className="mb-3 flex items-center justify-between">
+   482→                <span className="eyebrow">Output — items</span>
+   483→                <span className="font-mono text-[11px] text-muted-foreground">
+   484→                  {items.length} item{items.length === 1 ? "" : "s"} · {selectedIds.length} selected
+   485→                </span>
+   486→              </div>
+   487→              {items.length === 0 ? (
+   488→                <p className="text-[12px] text-muted-foreground/70">
+   489→                  No items on the board. Click <span className="text-brand-lemon">Circle</span>,{" "}
+   490→                  <span className="text-brand-lemon">Rect</span>, or{" "}
+   491→                  <span className="text-brand-lemon">Triangle</span> above, or press 1 / 2 / 3.
+   492→                </p>
+   493→              ) : (
+   494→                <div className="max-h-56 overflow-y-auto rounded-md border border-border">
+   495→                  <table className="w-full text-left text-[12px]">
+   496→                    <thead className="sticky top-0 bg-muted/40 backdrop-blur">
+   497→                      <tr>
+   498→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">id</th>
+   499→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">type</th>
+   500→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">x, y</th>
+   501→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">w × h</th>
+   502→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">rot</th>
+   503→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">pivot</th>
+   504→                        <th className="px-2.5 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">color</th>
+   505→                      </tr>
+   506→                    </thead>
+   507→                    <tbody className="divide-y divide-border">
+   508→                      {items.map((item) => {
+   509→                        const isSel = selectedIds.includes(item.id);
+   510→                        return (
+   511→                          <tr
+   512→                            key={item.id}
+   513→                            className={cn(
+   514→                              "transition-colors",
+   515→                              isSel ? "bg-brand-lemon/10" : "hover:bg-muted/20",
+   516→                            )}
+   517→                          >
+   518→                            <td className="px-2.5 py-1.5 font-mono text-brand-lemon">{item.id}</td>
+   519→                            <td className="px-2.5 py-1.5 text-foreground">{item.type}</td>
+   520→                            <td className="px-2.5 py-1.5 font-mono text-muted-foreground">
+   521→                              {Math.round(item.x)}, {Math.round(item.y)}
+   522→                            </td>
+   523→                            <td className="px-2.5 py-1.5 font-mono text-muted-foreground">
+   524→                              {Math.round(item.width)} × {Math.round(item.height)}
+   525→                            </td>
+   526→                            <td className="px-2.5 py-1.5 font-mono text-muted-foreground">
+   527→                              {Math.round(item.rotation)}°
+   528→                            </td>
+   529→                            <td className="px-2.5 py-1.5 font-mono text-muted-foreground">
+   530→                              {item.pivotX.toFixed(2)},{item.pivotY.toFixed(2)}
+   531→                            </td>
+   532→                            <td className="px-2.5 py-1.5">
+   533→                              <span className="inline-flex items-center gap-1.5">
+   534→                                <span
+   535→                                  className="inline-block h-3 w-3 rounded-sm border border-border"
+   536→                                  style={{ background: item.color }}
+   537→                                  aria-hidden="true"
+   538→                                />
+   539→                                <span className="font-mono text-[10px] text-muted-foreground">{item.color}</span>
+   540→                              </span>
+   541→                            </td>
+   542→                          </tr>
+   543→                        );
+   544→                      })}
+   545→                    </tbody>
+   546→                  </table>
+   547→                </div>
+   548→              )}
+   549→            </div>
+   550→          </section>
+   551→
+   552→          {/* Property inspector */}
+   553→          <AgentSkillTabs
+   554→            agentPath="/docs/components/board-AGENT.md"
+   555→            skillPath="/docs/components/board-SKILL.md"
+   556→          >
+   557→              {/* Grid mode segmented control */}
+   558→              <div>
+   559→                <label className="mb-1.5 block text-[12px] font-medium text-foreground">Grid mode</label>
+   560→                <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   561→                  {GRID_MODE_OPTIONS.map((o) => {
+   562→                    const active = state.gridMode === o.value;
+   563→                    return (
+   564→                      <button
+   565→                        key={o.value}
+   566→                        type="button"
+   567→                        onClick={() => update("gridMode", o.value)}
+   568→                        aria-pressed={active}
+   569→                        className={cn(
+   570→                          "rounded px-1 py-1.5 text-[11px] font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   571→                          active
+   572→                            ? "bg-brand-purple-strong text-foreground"
+   573→                            : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   574→                        )}
+   575→                      >
+   576→                        {o.label}
+   577→                      </button>
+   578→                    );
+   579→                  })}
+   580→                </div>
+   581→              </div>
+   582→
+   583→              {/* Grid size slider */}
+   584→              <div>
+   585→                <div className="mb-1.5 flex items-center justify-between">
+   586→                  <label className="text-[12px] font-medium text-foreground">Grid size</label>
+   587→                  <span className="font-mono text-[11px] text-muted-foreground">{state.gridSize}px</span>
+   588→                </div>
+   589→                <Slider
+   590→                  value={[state.gridSize]}
+   591→                  min={10}
+   592→                  max={100}
+   593→                  step={2}
+   594→                  onValueChange={(v) => update("gridSize", v[0] ?? state.gridSize)}
+   595→                />
+   596→                <p className="mt-1 text-[11px] text-muted-foreground/70">
+   597→                  Base grid size in board units. Sub-cells are placed every gridSize / subGridDivisions units.
+   598→                </p>
+   599→              </div>
+   600→
+   601→              {/* Sub-grid divisions slider */}
+   602→              <div>
+   603→                <div className="mb-1.5 flex items-center justify-between">
+   604→                  <label className="text-[12px] font-medium text-foreground">Sub-grid divisions</label>
+   605→                  <span className="font-mono text-[11px] text-muted-foreground">{state.subGridDivisions}</span>
+   606→                </div>
+   607→                <Slider
+   608→                  value={[state.subGridDivisions]}
+   609→                  min={1}
+   610→                  max={8}
+   611→                  step={1}
+   612→                  onValueChange={(v) => update("subGridDivisions", v[0] ?? state.subGridDivisions)}
+   613→                />
+   614→                <p className="mt-1 text-[11px] text-muted-foreground/70">
+   615→                  Number of sub-cells per main grid cell.
+   616→                </p>
+   617→              </div>
+   618→
+   619→              {/* Snap toggles */}
+   620→              <div className="space-y-3">
+   621→                <ToggleRow
+   622→                  label="Snap to grid"
+   623→                  description="Dragged items snap to the nearest grid intersection."
+   624→                  checked={state.snapToGrid}
+   625→                  onCheckedChange={(v) => update("snapToGrid", v)}
+   626→                />
+   627→                <ToggleRow
+   628→                  label="Snap to items"
+   629→                  description="Dragged items snap to other items' edges and centers (within 8px)."
+   630→                  checked={state.snapToItems}
+   631→                  onCheckedChange={(v) => update("snapToItems", v)}
+   632→                />
+   633→              </div>
+   634→
+   635→              <div className="h-px bg-border" />
+   636→
+   637→              {/* Transform section */}
+   638→              <div>
+   639→                <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   640→                  Transform
+   641→                </h3>
+   642→
+   643→                {/* Lattice display: 3-way toggle */}
+   644→                <div className="mb-4">
+   645→                  <label className="mb-1.5 block text-[12px] font-medium text-foreground">Lattice display</label>
+   646→                  <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   647→                    {LATTICE_DISPLAY_OPTIONS.map((o) => {
+   648→                      const active = state.latticeDisplay === o.value;
+   649→                      return (
+   650→                        <button
+   651→                          key={o.value}
+   652→                          type="button"
+   653→                          onClick={() => update("latticeDisplay", o.value)}
+   654→                          aria-pressed={active}
+   655→                          className={cn(
+   656→                            "rounded px-1 py-1.5 text-[11px] font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   657→                            active
+   658→                              ? "bg-brand-purple-strong text-foreground"
+   659→                              : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   660→                          )}
+   661→                        >
+   662→                          {o.label}
+   663→                        </button>
+   664→                      );
+   665→                    })}
+   666→                  </div>
+   667→                  <p className="mt-1 text-[11px] text-muted-foreground/70">
+   668→                    Local shows the rotated bounding box with handles. Global shows only the AABB.
+   669→                  </p>
+   670→                </div>
+   671→
+   672→                {/* Transform mode: 2-way toggle */}
+   673→                <div className="mb-4">
+   674→                  <label className="mb-1.5 block text-[12px] font-medium text-foreground">Transform mode</label>
+   675→                  <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   676→                    {TRANSFORM_MODE_OPTIONS.map((o) => {
+   677→                      const active = state.transformMode === o.value;
+   678→                      return (
+   679→                        <button
+   680→                          key={o.value}
+   681→                          type="button"
+   682→                          onClick={() => update("transformMode", o.value)}
+   683→                          aria-pressed={active}
+   684→                          className={cn(
+   685→                            "rounded px-1 py-1.5 text-[11px] font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   686→                            active
+   687→                              ? "bg-brand-purple-strong text-foreground"
+   688→                              : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   689→                          )}
+   690→                        >
+   691→                          {o.label}
+   692→                        </button>
+   693→                      );
+   694→                    })}
+   695→                  </div>
+   696→                  <p className="mt-1 text-[11px] text-muted-foreground/70">
+   697→                    Global transforms the selection as a whole from the selection pivot. Local transforms each item from its own pivot.
+   698→                  </p>
+   699→                </div>
+   700→
+   701→                {/* Selection pivot: 3x3 grid */}
+   702→                <div className="mb-4">
+   703→                  <label className="mb-1.5 block text-[12px] font-medium text-foreground">
+   704→                    Selection pivot {state.transformMode === "local" && <span className="text-muted-foreground/60">(global mode only)</span>}
+   705→                  </label>
+   706→                  <div className="grid grid-cols-3 gap-1">
+   707→                    {PIVOT_POSITIONS.map((p) => {
+   708→                      const active = state.selectionPivot === p.value;
+   709→                      const disabled = state.transformMode === "local";
+   710→                      return (
+   711→                        <button
+   712→                          key={p.value}
+   713→                          type="button"
+   714→                          onClick={() => update("selectionPivot", p.value)}
+   715→                          disabled={disabled}
+   716→                          title={p.label}
+   717→                          aria-label={p.label}
+   718→                          aria-pressed={active}
+   719→                          className={cn(
+   720→                            "flex h-8 items-center justify-center rounded border text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   721→                            active
+   722→                              ? "border-brand-lemon/60 bg-brand-lemon/20 text-brand-lemon"
+   723→                              : "border-border bg-muted/20 text-muted-foreground hover:border-brand-lemon/40 hover:text-foreground",
+   724→                            disabled && "cursor-not-allowed opacity-40 hover:border-border hover:text-muted-foreground",
+   725→                          )}
+   726→                        >
+   727→                          <span className="h-2 w-2 rounded-full" style={{ background: active ? "currentColor" : "rgba(255,255,255,0.25)" }} />
+   728→                        </button>
+   729→                      );
+   730→                    })}
+   731→                  </div>
+   732→                  <p className="mt-1 text-[11px] text-muted-foreground/70">
+   733→                    The point of the selection bounding box used as the pivot for global transforms.
+   734→                  </p>
+   735→                </div>
+   736→
+   737→                {/* Rotation: slider + numeric input */}
+   738→                <div>
+   739→                  <div className="mb-1.5 flex items-center justify-between">
+   740→                    <label className="text-[12px] font-medium text-foreground">
+   741→                      Rotation {selectedIds.length === 0 && <span className="text-muted-foreground/60">(no selection)</span>}
+   742→                    </label>
+   743→                    <div className="flex items-center gap-1.5">
+   744→                      <input
+   745→                        type="number"
+   746→                        value={Math.round(rotationValue)}
+   747→                        min={-360}
+   748→                        max={360}
+   749→                        step={1}
+   750→                        onChange={(e) => {
+   751→                          const v = Number(e.target.value);
+   752→                          if (!Number.isNaN(v)) applyRotation(v);
+   753→                        }}
+   754→                        disabled={selectedIds.length === 0}
+   755→                        className="h-7 w-16 rounded border border-border bg-muted/30 px-1.5 text-right font-mono text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+   756→                      />
+   757→                      <span className="font-mono text-[11px] text-muted-foreground">deg</span>
+   758→                    </div>
+   759→                  </div>
+   760→                  <Slider
+   761→                    value={[rotationValue]}
+   762→                    min={-180}
+   763→                    max={180}
+   764→                    step={1}
+   765→                    onValueChange={(v) => applyRotation(v[0] ?? rotationValue)}
+   766→                    disabled={selectedIds.length === 0}
+   767→                  />
+   768→                  <p className="mt-1 text-[11px] text-muted-foreground/70">
+   769→                    Sets the rotation of the first selected item; all selected items rotate by the same delta. Drag the lemon handle above the selection to rotate interactively.
+   770→                  </p>
+   771→                </div>
+   772→              </div>
+   773→
+   774→              <div className="h-px bg-border" />
+   775→
+   776→              {/* Selection info */}
+   777→              <div>
+   778→                <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   779→                  Selection
+   780→                </h3>
+   781→                <div className="rounded-md border border-border bg-muted/10 p-3">
+   782→                  <div className="flex items-baseline justify-between">
+   783→                    <span className="text-[11px] text-muted-foreground">Selected items</span>
+   784→                    <span className="font-mono text-2xl font-semibold text-brand-lemon">
+   785→                      {selectedIds.length}
+   786→                    </span>
+   787→                  </div>
+   788→                  {selectedIds.length > 0 && (
+   789→                    <div className="mt-2 flex flex-wrap gap-1">
+   790→                      {selectedIds.map((id) => (
+   791→                        <CopyableValue key={id} value={id} className="h-7 px-2 text-[11px]" />
+   792→                      ))}
+   793→                    </div>
+   794→                  )}
+   795→                  {selectedIds.length > 0 && (
+   796→                    <div className="mt-3 space-y-1 border-t border-border pt-2">
+   797→                      <div className="flex items-center justify-between text-[11px]">
+   798→                        <span className="text-muted-foreground">Selection pivot</span>
+   799→                        <span className="font-mono text-brand-lemon">{state.selectionPivot}</span>
+   800→                      </div>
+   801→                      <div className="flex items-center justify-between text-[11px]">
+   802→                        <span className="text-muted-foreground">Transform mode</span>
+   803→                        <span className="font-mono text-foreground">{state.transformMode}</span>
+   804→                      </div>
+   805→                      {(() => {
+   806→                        const first = items.find((i) => i.id === selectedIds[0]);
+   807→                        if (!first) return null;
+   808→                        return (
+   809→                          <div className="flex items-center justify-between text-[11px]">
+   810→                            <span className="text-muted-foreground">Item pivot (first)</span>
+   811→                            <span className="font-mono text-muted-foreground">
+   812→                              ({first.pivotX.toFixed(2)}, {first.pivotY.toFixed(2)})
+   813→                            </span>
+   814→                          </div>
+   815→                        );
+   816→                      })()}
+   817→                    </div>
+   818→                  )}
+   819→                </div>
+   820→              </div>
+   821→
+   822→              {/* View info */}
+   823→              <div>
+   824→                <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   825→                  View
+   826→                </h3>
+   827→                <div className="grid grid-cols-3 gap-2 rounded-md border border-border bg-muted/10 p-3 text-center">
+   828→                  <ViewStat label="zoom" value={view.zoom.toFixed(2) + "×"} />
+   829→                  <ViewStat label="panX" value={Math.round(view.panX).toString()} />
+   830→                  <ViewStat label="panY" value={Math.round(view.panY).toString()} />
+   831→                </div>
+   832→                <p className="mt-1 text-[11px] text-muted-foreground/70">
+   833→                  Updates live as you pan (space-drag) and zoom (Cmd+scroll).
+   834→                </p>
+   835→              </div>
+   836→
+   837→              {/* Keyboard shortcuts help */}
+   838→              <div>
+   839→                <h3 className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   840→                  <Keyboard className="h-3.5 w-3.5" />
+   841→                  Shortcuts
+   842→                </h3>
+   843→                <ul className="space-y-1 rounded-md border border-border bg-muted/10 p-2">
+   844→                  {boardCommands.map((cmd) => (
+   845→                    <li
+   846→                      key={cmd.id}
+   847→                      className="flex items-center justify-between gap-2 px-1 py-0.5 text-[11px]"
+   848→                    >
+   849→                      <span className="text-muted-foreground">{cmd.label}</span>
+   850→                      {cmd.shortcut && (
+   851→                        <kbd className="inline-flex items-center gap-0.5 rounded border border-brand-lemon/30 bg-brand-lemon/10 px-1 py-0.5 font-mono text-[10px] text-brand-lemon">
+   852→                          {formatShortcut(cmd.shortcut)}
+   853→                        </kbd>
+   854→                      )}
+   855→                    </li>
+   856→                  ))}
+   857→                </ul>
+   858→              </div>
+   859→          </AgentSkillTabs>
+   860→        </div>
+   861→
+   862→        {/* Code panel */}
+   863→        <section className="panel mt-6 overflow-hidden">
+   864→          <div className="flex items-center justify-between border-b border-border px-2">
+   865→            <div className="flex">
+   866→              {([["javascript", "JavaScript"], ["html", "HTML"], ["css", "CSS"], ["api", "API"]] as const).map(([key, label]) => (
+   867→                <button
+   868→                  key={key}
+   869→                  type="button"
+   870→                  onClick={() => setActiveTab(key)}
+   871→                  className={cn(
+   872→                    "relative h-9 px-3 text-[12px] font-medium transition-colors focus-visible:outline-none",
+   873→                    activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+   874→                  )}
+   875→                >
+   876→                  {label}
+   877→                  {activeTab === key && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   878→                </button>
+   879→              ))}
+   880→            </div>
+   881→            <span className="pr-2 text-[11px] font-mono text-muted-foreground/70">
+   882→              Synchronized with live configuration
+   883→            </span>
+   884→          </div>
+   885→          <div className="p-4">
+   886→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   887→            {activeTab === "html" && <CodeBlock code={htmlCode} language="html" filename="index.html" />}
+   888→            {activeTab === "css" && <CodeBlock code={cssCode} language="css" filename="styles.css" />}
+   889→            {activeTab === "api" && <CodeBlock code={apiCode} language="typescript" filename="api.ts" />}
+   890→          </div>
+   891→        </section>
+   892→
+   893→        {/* Documentation */}
+   894→        <ComponentDocumentation />
+   895→      </div>
+   896→    </div>
+   897→  );
+   898→}
+   899→
+   900→// ---- Sub-components -----------------------------------------------------
+   901→
+   902→function ToolbarButton({
+   903→  children,
+   904→  onClick,
+   905→  title,
+   906→  variant = "default",
+   907→}: {
+   908→  children: React.ReactNode;
+   909→  onClick: () => void;
+   910→  title?: string;
+   911→  variant?: "default" | "primary" | "danger";
+   912→}) {
+   913→  return (
+   914→    <button
+   915→      type="button"
+   916→      onClick={onClick}
+   917→      title={title}
+   918→      className={cn(
+   919→        "inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   920→        variant === "primary" &&
+   921→          "border-brand-lemon/40 bg-brand-lemon/10 text-brand-lemon hover:bg-brand-lemon/20",
+   922→        variant === "danger" &&
+   923→          "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20",
+   924→        variant === "default" &&
+   925→          "border-border bg-card text-foreground hover:border-brand-lemon/40 hover:text-brand-lemon",
+   926→      )}
+   927→    >
+   928→      {children}
+   929→    </button>
+   930→  );
+   931→}
+   932→
+   933→function IconButton({
+   934→  children,
+   935→  onClick,
+   936→  title,
+   937→  "aria-label": ariaLabel,
+   938→}: {
+   939→  children: React.ReactNode;
+   940→  onClick: () => void;
+   941→  title?: string;
+   942→  "aria-label"?: string;
+   943→}) {
+   944→  return (
+   945→    <button
+   946→      type="button"
+   947→      onClick={onClick}
+   948→      title={title}
+   949→      aria-label={ariaLabel}
+   950→      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-brand-lemon/40 hover:text-brand-lemon focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   951→    >
+   952→      {children}
+   953→    </button>
+   954→  );
+   955→}
+   956→
+   957→function ToolbarDivider() {
+   958→  return <span className="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />;
+   959→}
+   960→
+   961→function ToggleRow({
+   962→  label,
+   963→  description,
+   964→  checked,
+   965→  onCheckedChange,
+   966→}: {
+   967→  label: string;
+   968→  description: string;
+   969→  checked: boolean;
+   970→  onCheckedChange: (v: boolean) => void;
+   971→}) {
+   972→  return (
+   973→    <div className="flex items-start justify-between gap-3">
+   974→      <div className="min-w-0">
+   975→        <p className="text-[12px] font-medium text-foreground">{label}</p>
+   976→        <p className="mt-0.5 text-[11px] text-muted-foreground/70">{description}</p>
+   977→      </div>
+   978→      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
+   979→    </div>
+   980→  );
+   981→}
+   982→
+   983→function ViewStat({ label, value }: { label: string; value: string }) {
+   984→  return (
+   985→    <div className="flex flex-col items-center">
+   986→      <span className="font-mono text-[10px] uppercase text-muted-foreground">{label}</span>
+   987→      <span className="font-mono text-[13px] text-foreground">{value}</span>
+   988→    </div>
+   989→  );
+   990→}
+   991→
+   992→// ---- Documentation ------------------------------------------------------
+   993→
+   994→function ComponentDocumentation() {
+   995→  const meta = getComponent("board")!;
+   996→  const boardCommands = commandRegistry.byIds([...BOARD_COMMAND_IDS]);
+   997→
+   998→  return (
+   999→    <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_200px]">
+  1000→      <div className="min-w-0 max-w-[760px]">
+  1001→        <h2 className="text-2xl font-semibold tracking-tight">Documentation</h2>
+  1002→        <p className="mt-2 text-sm text-muted-foreground">
+  1003→          The Board is a framework-independent vanilla JavaScript component — no React or Next.js required.
+  1004→          It renders an infinite canvas with pan/zoom, a configurable grid, multi-select, and alignment
+  1005→          commands.
+  1006→        </p>
+  1007→
+  1008→        <section className="mt-8">
+  1009→          <h3 className="text-lg font-semibold">Overview</h3>
+  1010→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+  1011→            {meta.longDescription} The Board renders to a single <code className="font-mono text-brand-lemon">&lt;canvas&gt;</code>{" "}
+  1012→            element inside the container you pass to the constructor. Pan via space-drag, middle-click, or
+  1013→            two-finger scroll; zoom toward the cursor via Ctrl/Cmd + wheel. Click to select an item,
+  1014→            shift-click for additive selection, drag empty space for rubber-band selection, and drag an item
+  1015→            to move it (with optional snapping to grid lines or to other items&apos; edges and centers).
+  1016→          </p>
+  1017→        </section>
+  1018→
+  1019→        <section className="mt-8">
+  1020→          <h3 className="text-lg font-semibold">When to use it</h3>
+  1021→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+  1022→            {meta.whenToUse.map((item) => (
+  1023→              <li key={item} className="flex gap-2">
+  1024→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+  1025→                {item}
+  1026→              </li>
+  1027→            ))}
+  1028→          </ul>
+  1029→        </section>
+  1030→
+  1031→        <section className="mt-8">
+  1032→          <h3 className="text-lg font-semibold">When not to use it</h3>
+  1033→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+  1034→            {meta.whenNotToUse.map((item) => (
+  1035→              <li key={item} className="flex gap-2">
+  1036→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
+  1037→                {item}
+  1038→              </li>
+  1039→            ))}
+  1040→          </ul>
+  1041→        </section>
+  1042→
+  1043→        <section className="mt-8">
+  1044→          <h3 className="text-lg font-semibold">Properties and defaults</h3>
+  1045→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+  1046→            <table className="w-full text-left text-[13px]">
+  1047→              <thead className="bg-muted/30">
+  1048→                <tr>
+  1049→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Property</th>
+  1050→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Type</th>
+  1051→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Default</th>
+  1052→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Description</th>
+  1053→                </tr>
+  1054→              </thead>
+  1055→              <tbody className="divide-y divide-border">
+  1056→                {meta.properties.map((p) => (
+  1057→                  <tr key={p.name}>
+  1058→                    <td className="px-3 py-2 font-mono text-brand-lemon">{p.name}</td>
+  1059→                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.type}</td>
+  1060→                    <td className="px-3 py-2 font-mono text-foreground">{p.default}</td>
+  1061→                    <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
+  1062→                  </tr>
+  1063→                ))}
+  1064→              </tbody>
+  1065→            </table>
+  1066→          </div>
+  1067→        </section>
+  1068→
+  1069→        <section className="mt-8">
+  1070→          <h3 className="text-lg font-semibold">Methods</h3>
+  1071→          <div className="mt-3 space-y-2">
+  1072→            {meta.methods.map((m) => (
+  1073→              <div key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+  1074→                <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+  1075→                <p className="mt-1 text-[13px] text-muted-foreground">{m.description}</p>
+  1076→                {m.returns && (
+  1077→                  <p className="mt-0.5 text-[11px] font-mono text-muted-foreground/70">
+  1078→                    returns: {m.returns}
+  1079→                  </p>
+  1080→                )}
+  1081→              </div>
+  1082→            ))}
+  1083→          </div>
+  1084→        </section>
+  1085→
+  1086→        <section className="mt-8">
+  1087→          <h3 className="text-lg font-semibold">Events</h3>
+  1088→          <div className="mt-3 space-y-2">
+  1089→            {meta.events.map((e) => (
+  1090→              <div key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+  1091→                <div className="flex items-center gap-3">
+  1092→                  <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+  1093→                  <code className="font-mono text-[11px] text-muted-foreground">{e.payload}</code>
+  1094→                </div>
+  1095→                <p className="mt-1 text-[13px] text-muted-foreground">{e.description}</p>
+  1096→              </div>
+  1097→            ))}
+  1098→          </div>
+  1099→        </section>
+  1100→
+  1101→        <section className="mt-8">
+  1102→          <h3 className="text-lg font-semibold">Keyboard shortcuts</h3>
+  1103→          <p className="mt-2 text-sm text-muted-foreground">
+  1104→            The playground wires a <code className="font-mono text-brand-lemon">ShortcutHandler</code> scoped
+  1105→            to the Board command IDs. These shortcuts are registered with the shared command registry via{" "}
+  1106→            <code className="font-mono text-brand-lemon">registerBuiltinCommands()</code> and fire the
+  1107→            corresponding Board method.
+  1108→          </p>
+  1109→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+  1110→            <table className="w-full text-left text-[13px]">
+  1111→              <thead className="bg-muted/30">
+  1112→                <tr>
+  1113→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Command</th>
+  1114→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Shortcut</th>
+  1115→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Action</th>
+  1116→                </tr>
+  1117→              </thead>
+  1118→              <tbody className="divide-y divide-border">
+  1119→                {boardCommands.map((cmd) => (
+  1120→                  <tr key={cmd.id}>
+  1121→                    <td className="px-3 py-2 font-mono text-brand-lemon">{cmd.id}</td>
+  1122→                    <td className="px-3 py-2 font-mono text-muted-foreground">
+  1123→                      {cmd.shortcut ? formatShortcut(cmd.shortcut) : "—"}
+  1124→                    </td>
+  1125→                    <td className="px-3 py-2 text-muted-foreground">{cmd.label}</td>
+  1126→                  </tr>
+  1127→                ))}
+  1128→              </tbody>
+  1129→            </table>
+  1130→          </div>
+  1131→          <p className="mt-2 text-[11px] text-muted-foreground/70">
+  1132→            Note: the Board also handles Delete / Backspace, Escape, and Arrow keys internally when the canvas
+  1133→            has focus. The shortcuts above are global (window-level) and fire even when the canvas is not
+  1134→            focused.
+  1135→          </p>
+  1136→        </section>
+  1137→
+  1138→        <section className="mt-8">
+  1139→          <h3 className="text-lg font-semibold">Local vs global lattices</h3>
+  1140→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+  1141→            Each item has two lattices. The <strong className="text-foreground">local lattice</strong> is the
+  1142→            item&apos;s bounding box rotated with the item — for an unrotated rectangle, it&apos;s just the
+  1143→            rect. The <strong className="text-foreground">global lattice</strong> is the axis-aligned bounding
+  1144→            box (AABB) of the rotated rect, which for a rotated item is larger than the local lattice.
+  1145→            Alignment and distribution commands operate on the global lattices so the visual edges line up
+  1146→            regardless of rotation. Use <code className="font-mono text-brand-lemon">latticeDisplay</code> to
+  1147→            control which lattices are drawn: <code className="font-mono text-brand-lemon">&quot;local&quot;</code>{" "}
+  1148→            (default, rotated box with handles), <code className="font-mono text-brand-lemon">&quot;global&quot;</code>{" "}
+  1149→            (AABB only), or <code className="font-mono text-brand-lemon">&quot;both&quot;</code>.
+  1150→          </p>
+  1151→        </section>
+  1152→
+  1153→        <section className="mt-8">
+  1154→          <h3 className="text-lg font-semibold">Transform: pivots, rotation, and resize</h3>
+  1155→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+  1156→            Each item carries a <code className="font-mono text-brand-lemon">pivotX</code> /{" "}
+  1157→            <code className="font-mono text-brand-lemon">pivotY</code> pair (0–1, relative to its bounding box).
+  1158→            The pivot is the point that stays fixed during resize and the center of rotation for local
+  1159→            transforms. In <strong className="text-foreground">global</strong> transform mode (default), rotate
+  1160→            and resize apply to the whole selection from a single{" "}
+  1161→            <code className="font-mono text-brand-lemon">selectionPivot</code> — one of nine positions on the
+  1162→            selection bounding box. In <strong className="text-foreground">local</strong> mode, each item
+  1163→            rotates and resizes around its own pivot independently.
+  1164→          </p>
+  1165→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+  1166→            When the local lattice is displayed, the Board draws eight white resize handles on the lattice
+  1167→            edges and corners plus a lemon rotation handle above the top edge (connected by a line). Drag a
+  1168→            resize handle to scale from the pivot; drag the rotation handle to rotate around the pivot. A
+  1169→            small lemon crosshair marks the active pivot position. The programmatic API mirrors these
+  1170→            gestures: <code className="font-mono text-brand-lemon">rotateSelected(degrees)</code> applies a
+  1171→            delta rotation and <code className="font-mono text-brand-lemon">resizeSelected(sx, sy)</code>{" "}
+  1172→            applies scale factors.
+  1173→          </p>
+  1174→        </section>
+  1175→
+  1176→        <section className="mt-8">
+  1177→          <h3 className="text-lg font-semibold">Accessibility</h3>
+  1178→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+  1179→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />The canvas has <code className="font-mono text-brand-lemon">role=&quot;application&quot;</code>, a descriptive <code className="font-mono text-brand-lemon">aria-label</code>, and <code className="font-mono text-brand-lemon">tabindex=&quot;0&quot;</code> so it can receive keyboard focus.</li>
+  1180→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />A focus-visible ring is drawn inside the canvas via <code className="font-mono text-brand-lemon">box-shadow: inset 0 0 0 2px rgba(217,255,102,0.55)</code>.</li>
+  1181→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />When focused, Delete / Backspace removes the selection, Escape clears it, and Arrow keys nudge by 1 board unit (Shift = 10 units).</li>
+  1182→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Pointer interactions use <code className="font-mono text-brand-lemon">pointer capture</code> so drags don&apos;t lose tracking when the cursor exits the canvas.</li>
+  1183→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />All toolbar buttons in this playground have <code className="font-mono text-brand-lemon">title</code> attributes and <code className="font-mono text-brand-lemon">aria-label</code>s on icon-only buttons.</li>
+  1184→          </ul>
+  1185→        </section>
+  1186→      </div>
+  1187→
+  1188→      <aside className="hidden lg:block">
+  1189→        <div className="sticky top-20">
+  1190→          <span className="eyebrow mb-2 block">On this page</span>
+  1191→          <nav className="space-y-1 text-[12px]">
+  1192→            {["Overview", "When to use it", "When not to use it", "Properties and defaults", "Methods", "Events", "Keyboard shortcuts", "Local vs global lattices", "Transform: pivots, rotation, and resize", "Accessibility"].map((s) => (
+  1193→              <a
+  1194→                key={s}
+  1195→                href="#"
+  1196→                onClick={(e) => e.preventDefault()}
+  1197→                className="block rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+  1198→              >
+  1199→                {s}
+  1200→              </a>
+  1201→            ))}
+  1202→          </nav>
+  1203→        </div>
+  1204→      </aside>
+  1205→    </div>
+  1206→  );
+  1207→}
+  1208→
+  1209→// ---- Code generators ----------------------------------------------------
+  1210→
+  1211→function generateJsCode(state: PlaygroundState): string {
+  1212→  return `import { Board } from "@workshop/board";
+  1213→import { registerBuiltinCommands, ShortcutHandler, commandRegistry } from "@/lib/commands";
+  1214→
+  1215→// Register the platform commands once on app init.
+  1216→registerBuiltinCommands();
+  1217→
+  1218→const container = document.querySelector("#board");
+  1219→const board = new Board(container, {
+  1220→  gridMode: ${JSON.stringify(state.gridMode)},
+  1221→  gridSize: ${state.gridSize},
+  1222→  subGridDivisions: ${state.subGridDivisions},
+  1223→  snapToGrid: ${state.snapToGrid},
+  1224→  snapToItems: ${state.snapToItems},
+  1225→  transformMode: ${JSON.stringify(state.transformMode)},
+  1226→  latticeDisplay: ${JSON.stringify(state.latticeDisplay)},
+  1227→  selectionPivot: ${JSON.stringify(state.selectionPivot)},
+  1228→});
+  1229→
+  1230→// Add a shape near the center of the current view.
+  1231→function addShape(type) {
+  1232→  const v = board.getView();
+  1233→  const cx = (container.clientWidth / 2 - v.panX) / v.zoom;
+  1234→  const cy = (container.clientHeight / 2 - v.panY) / v.zoom;
+  1235→  const x = cx + (Math.random() - 0.5) * 140;
+  1236→  const y = cy + (Math.random() - 0.5) * 140;
+  1237→  const id = board.addItem(type, x, y, 90, 90, 0, "#D9FF66");
+  1238→  board.selectItem(id, false);
+  1239→}
+  1240→
+  1241→// Wire the keyboard shortcuts to the board.
+  1242→const handler = new ShortcutHandler([
+  1243→  "board.align-left", "board.align-center-h", "board.align-right",
+  1244→  "board.align-top", "board.align-center-v", "board.align-bottom",
+  1245→  "board.distribute-h", "board.distribute-v",
+  1246→  "board.fit-all", "board.fit-selection",
+  1247→  "board.add-circle", "board.add-rect", "board.add-triangle",
+  1248→  "board.delete-selected",
+  1249→]);
+  1250→handler.on("board.add-circle", () => addShape("circle"));
+  1251→handler.on("board.add-rect", () => addShape("rect"));
+  1252→handler.on("board.add-triangle", () => addShape("triangle"));
+  1253→handler.on("board.delete-selected", () => {
+  1254→  board.getSelectedIds().forEach((id) => board.removeItem(id));
+  1255→});
+  1256→handler.on("board.fit-all", () => board.zoomToFit());
+  1257→handler.on("board.fit-selection", () => board.zoomToFitSelection());
+  1258→handler.on("board.align-left", () => board.align("left"));
+  1259→handler.on("board.align-center-h", () => board.align("center-h"));
+  1260→handler.on("board.align-right", () => board.align("right"));
+  1261→handler.on("board.align-top", () => board.align("top"));
+  1262→handler.on("board.align-center-v", () => board.align("center-v"));
+  1263→handler.on("board.align-bottom", () => board.align("bottom"));
+  1264→handler.on("board.distribute-h", () => board.distribute("horizontal"));
+  1265→handler.on("board.distribute-v", () => board.distribute("vertical"));
+  1266→handler.attach();
+  1267→
+  1268→// Subscribe to events.
+  1269→board.on("selection", ({ ids }) => console.log("selected:", ids));
+  1270→board.on("change", (e) => console.log("change:", e));
+  1271→board.on("view", (v) => console.log("view:", v));
+  1272→
+  1273→// Cleanup.
+  1274→// handler.destroy();
+  1275→// board.destroy();`;
+  1276→}
+  1277→
+  1278→function generateHtmlCode(): string {
+  1279→  return `<!DOCTYPE html>
+  1280→<html>
+  1281→  <head><link rel="stylesheet" href="board.css" /></head>
+  1282→  <body>
+  1283→    <!-- The container MUST have a fixed height, or the canvas will be 0px tall. -->
+  1284→    <div id="board" style="width: 100%; height: 520px;"></div>
+  1285→    <script type="module" src="init.js"></script>
+  1286→  </body>
+  1287→</html>`;
+  1288→}
+  1289→
+  1290→function generateCssCode(): string {
+  1291→  return `/* The Board ships its own minimal scoped styles (.board-root, .board-canvas).
+  1292→   The canvas background is set via the \`background\` option in the constructor,
+  1293→   not via CSS — pass \`new Board(container, { background: "#1A1422" })\` to
+  1294→   customize it. */
+  1295→
+  1296→:root {
+  1297→  --brand-lemon: #D9FF66;
+  1298→  --brand-purple: #211A30;
+  1299→}
+  1300→
+  1301→/* The container element. The Board class adds .board-root automatically,
+  1302→   which sets position: relative, overflow: hidden, and touch-action: none.
+  1303→   You only need to set the size. */
+  1304→#board {
+  1305→  width: 100%;
+  1306→  height: 520px;
+  1307→  /* Optional: rounded corners + border to match the panel chrome. */
+  1308→  border-radius: 12px;
+  1309→  border: 1px solid var(--border, #383343);
+  1310→}
+  1311→
+  1312→/* The canvas focus ring is drawn inside the canvas via box-shadow.
+  1313→   Override the color here if you want a different accent. */
+  1314→.board-root canvas:focus-visible {
+  1315→  box-shadow: inset 0 0 0 2px rgba(217, 255, 102, 0.55);
+  1316→}`;
+  1317→}
+  1318→
+  1319→function generateApiCode(): string {
+  1320→  return `type ShapeType = "circle" | "rect" | "triangle";
+  1321→type GridMode = "dots" | "lines" | "none";
+  1322→type AlignType = "left" | "center-h" | "right" | "top" | "center-v" | "bottom";
+  1323→type DistributeType = "horizontal" | "vertical";
+  1324→type PivotPosition =
+  1325→  | "center" | "top-left" | "top-center" | "top-right"
+  1326→  | "middle-left" | "middle-right" | "bottom-left" | "bottom-center" | "bottom-right";
+  1327→type TransformMode = "global" | "local";
+  1328→type LatticeDisplay = "local" | "global" | "both";
+  1329→
+  1330→interface BoardItem {
+  1331→  id: string;
+  1332→  type: ShapeType;
+  1333→  x: number;        // center X in board coordinates
+  1334→  y: number;        // center Y in board coordinates
+  1335→  width: number;
+  1336→  height: number;
+  1337→  rotation: number; // degrees
+  1338→  color: string;
+  1339→  selected: boolean;
+  1340→  pivotX: number;   // 0–1, relative to bounding box left. Default 0.5
+  1341→  pivotY: number;   // 0–1, relative to bounding box top. Default 0.5
+  1342→}
+  1343→
+  1344→interface BoardView {
+  1345→  panX: number;
+  1346→  panY: number;
+  1347→  zoom: number;
+  1348→}
+  1349→
+  1350→interface BoardOptions {
+  1351→  gridMode?: GridMode;           // default "dots"
+  1352→  gridSize?: number;             // default 40, minimum 4
+  1353→  subGridDivisions?: number;     // default 4, minimum 1
+  1354→  snapToGrid?: boolean;          // default false
+  1355→  snapToItems?: boolean;         // default false
+  1356→  background?: string;           // default "#15151a"
+  1357→  transformMode?: TransformMode;   // default "global"
+  1358→  selectionPivot?: PivotPosition;  // default "center"
+  1359→  latticeDisplay?: LatticeDisplay; // default "local"
+  1360→}
+  1361→
+  1362→class Board {
+  1363→  constructor(container: HTMLElement, options?: BoardOptions);
+  1364→
+  1365→  // Items
+  1366→  addItem(type: ShapeType, x: number, y: number, w: number, h: number, rotation?: number, color?: string): string;
+  1367→  removeItem(id: string): void;
+  1368→  getItems(): BoardItem[];
+  1369→  getSelectedIds(): string[];
+  1370→  getSelectedItems(): BoardItem[];
+  1371→  selectItem(id: string, additive?: boolean): void;
+  1372→  clearSelection(): void;
+  1373→
+  1374→  // View
+  1375→  setGridMode(mode: GridMode): void;
+  1376→  setGridSize(n: number): void;
+  1377→  setSubGridDivisions(n: number): void;
+  1378→  setSnapToGrid(on: boolean): void;
+  1379→  setSnapToItems(on: boolean): void;
+  1380→  getView(): BoardView;
+  1381→  setView(panX: number, panY: number, zoom: number): void;
+  1382→  zoomToFit(): void;
+  1383→  zoomToFitSelection(): void;
+  1384→
+  1385→  // Commands
+  1386→  align(type: AlignType): void;       // requires >= 2 selected
+  1387→  distribute(type: DistributeType): void;  // requires >= 3 selected
+  1388→
+  1389→  // Transform
+  1390→  setTransformMode(mode: TransformMode): void;
+  1391→  setLatticeDisplay(mode: LatticeDisplay): void;
+  1392→  setSelectionPivot(pivot: PivotPosition): void;
+  1393→  rotateSelected(degrees: number): void;          // rotate by delta degrees
+  1394→  resizeSelected(scaleX: number, scaleY: number): void;  // scale by factors
+  1395→
+  1396→  // Lattices
+  1397→  getLocalLattice(item: BoardItem): { x: number; y: number; w: number; h: number; rotation: number };
+  1398→  getGlobalLattice(item: BoardItem): { x: number; y: number; w: number; h: number; rotation: number };
+  1399→
+  1400→  // Events
+  1401→  on(event: "selection" | "change" | "view", handler: (data: any) => void): void;
+  1402→  off(event: string, handler: (data: any) => void): void;
+  1403→
+  1404→  // Lifecycle
+  1405→  destroy(): void;
+  1406→}`;
+  1407→}
+  1408→

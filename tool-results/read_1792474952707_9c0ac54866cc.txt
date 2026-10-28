@@ -1,0 +1,1313 @@
+     1→/**
+     2→ * ColorWheelPicker — a vanilla TypeScript color picker component.
+     3→ *
+     4→ * Renders a hue wheel surrounding a configurable inner selection shape
+     5→ * (triangle / square / disk / none). Canvas-based, pointer + keyboard
+     6→ * interaction, framework-independent. No React or other UI framework.
+     7→ *
+     8→ * ----------------------------------------------------------------------------
+     9→ * GEOMETRY
+    10→ * ----------------------------------------------------------------------------
+    11→ *   `size`            — diameter (px) of the inner shape's bounding circle.
+    12→ *   `wheelSpacing`    — gap (px) between the inner shape and the wheel's
+    13→ *                       inner edge.
+    14→ *   `wheelThickness`  — radial thickness (px) of the hue ring.
+    15→ *
+    16→ *   innerR       = size / 2
+    17→ *   wheelInnerR  = innerR + wheelSpacing
+    18→ *   wheelOuterR  = wheelInnerR + wheelThickness
+    19→ *   total        = wheelOuterR * 2  (full component size in CSS pixels)
+    20→ *   cx = cy      = total / 2         (wheel is centered on the inner shape)
+    21→ *
+    22→ * ----------------------------------------------------------------------------
+    23→ * HUE MAPPING
+    24→ * ----------------------------------------------------------------------------
+    25→ *   Hue 0° (red) is at the top (12 o'clock), increasing clockwise.
+    26→ *   Canvas y-axis is inverted (+y is down) so "clockwise" on screen equals
+    27→ *   increasing canvas angle.
+    28→ *
+    29→ *     angle(hue)  = -π/2 + hue * π/180            (canvas radians)
+    30→ *     hue(angle)  = ((angle + π/2) * 180/π) mod 360
+    31→ *
+    32→ *   Equivalently, using atan2 from the "up" vector:
+    33→ *     theta = atan2(dx, -dy)   (in radians, 0 = top, increasing clockwise)
+    34→ *
+    35→ * ----------------------------------------------------------------------------
+    36→ * INNER SHAPE COLOR MAPPINGS (hue from the wheel, fixed)
+    37→ * ----------------------------------------------------------------------------
+    38→ *   triangle — Vertices: A = top (S=0, V=1, white), B = bottom-right
+    39→ *              (S=1, V=1, pure hue), C = bottom-left (V=0, black).
+    40→ *              For any interior point P = α·A + β·B + γ·C with α+β+γ=1:
+    41→ *                 V = α + β
+    42→ *                 S = β / V   (when V > 0; S is undefined at the black vertex)
+    43→ *              Inverse:
+    44→ *                 α = V·(1 − S),  β = S·V,  γ = 1 − V
+    45→ *
+    46→ *   square   — Inscribed square (side = innerR · √2) inside the inner circle.
+    47→ *              x → saturation (0..1, left → right)
+    48→ *              y → value      (1..0, top → bottom)
+    49→ *
+    50→ *   disk     — r → saturation (0..1, center → edge)
+    51→ *              θ → value, mapped via V = (1 + cos θ) / 2.
+    52→ *              This is a smooth, seam-free mapping. The top of the disk is
+    53→ *              V = 1 (bright), the bottom is V = 0 (black); left/right at
+    54→ *              V = 0.5 are mirror images. Because two θ values can produce
+    55→ *              the same V, the component tracks the user's last angular
+    56→ *              position (`diskTheta`) so the inner marker stays where the
+    57→ *              user dragged it.
+    58→ *
+    59→ *   none     — Only the wheel renders; the inner area shows the current
+    60→ *              solid color and is not interactive.
+    61→ *
+    62→ * ----------------------------------------------------------------------------
+    63→ * RENDERING STRATEGY
+    64→ * ----------------------------------------------------------------------------
+    65→ *   A single <canvas> renders the whole component:
+    66→ *     1. Hue wheel   — drawn as 360 one-degree arc segments (cached).
+    67→ *     2. Inner shape — drawn pixel-by-pixel (triangle/disk) or with three
+    68→ *                      canvas gradients (square). Cached per (shape, size, hue).
+    69→ *     3. Markers     — hue marker on the wheel ring; inner marker on the
+    70→ *                      selected (S, V) position. Re-drawn every frame (cheap).
+    71→ *
+    72→ *   Caching keeps drag interactions smooth: SV drags only redraw markers,
+    73→ *   and hue drags only re-render the inner shape (not the wheel).
+    74→ */
+    75→
+    76→import {
+    77→  type HSV,
+    78→  type ColorOutput,
+    79→  parseColor,
+    80→  toColorOutput,
+    81→  hsvToRgb,
+    82→  clamp,
+    83→  clampHue,
+    84→} from "./color-utils";
+    85→
+    86→export type Shape = "triangle" | "square" | "disk" | "none";
+    87→
+    88→export interface ColorPickerOptions {
+    89→  /** Inner selection shape. Default "triangle". */
+    90→  shape?: Shape;
+    91→  /** Inner shape diameter in CSS pixels. Default 180. */
+    92→  size?: number;
+    93→  /** Hue wheel radial thickness in pixels. Default 24. */
+    94→  wheelThickness?: number;
+    95→  /** Gap between inner shape and wheel in pixels. Default 8. */
+    96→  wheelSpacing?: number;
+    97→  /** Initial hue (0-360). Ignored if `color` is provided. Default 210. */
+    98→  hue?: number;
+    99→  /** Initial color (any parseable string). Overrides `hue` when provided. */
+   100→  color?: string;
+   101→  /**
+   102→   * When true, the inner shape rotates so its "pure hue" vertex tracks the
+   103→   * current hue position on the wheel (PRD §4.4). Only affects the triangle
+   104→   * shape; square and disk are rotationally symmetric or visually invariant.
+   105→   * Default false.
+   106→   */
+   107→  rotateShape?: boolean;
+   108→}
+   109→
+   110→interface Geometry {
+   111→  /** Inner shape bounding radius (= size / 2). */
+   112→  innerR: number;
+   113→  /** Inner edge of the hue wheel. */
+   114→  wheelInnerR: number;
+   115→  /** Outer edge of the hue wheel. */
+   116→  wheelOuterR: number;
+   117→  /** Total component size in CSS pixels. */
+   118→  total: number;
+   119→  /** Center x in CSS pixels. */
+   120→  cx: number;
+   121→  /** Center y in CSS pixels. */
+   122→  cy: number;
+   123→}
+   124→
+   125→const DEFAULTS: Required<ColorPickerOptions> = {
+   126→  shape: "triangle",
+   127→  size: 180,
+   128→  wheelThickness: 24,
+   129→  wheelSpacing: 8,
+   130→  hue: 210,
+   131→  color: "#4287f5",
+   132→  rotateShape: false,
+   133→};
+   134→
+   135→const STYLE_ID = "color-wheel-picker-styles";
+   136→
+   137→/**
+   138→ * Rotate a point `(p.x, p.y)` around the center `(cx, cy)` by `angle`
+   139→ * radians (0 = top / 12 o'clock, increasing clockwise).
+   140→ */
+   141→function rotatePoint(
+   142→  p: { x: number; y: number },
+   143→  cx: number,
+   144→  cy: number,
+   145→  angle: number,
+   146→): { x: number; y: number } {
+   147→  if (angle === 0) return p;
+   148→  const cos = Math.cos(angle);
+   149→  const sin = Math.sin(angle);
+   150→  const dx = p.x - cx;
+   151→  const dy = p.y - cy;
+   152→  // Standard 2D rotation. In canvas coordinates (y-down), a positive angle
+   153→  // rotates clockwise when using this matrix.
+   154→  return {
+   155→    x: cx + dx * cos - dy * sin,
+   156→    y: cy + dx * sin + dy * cos,
+   157→  };
+   158→}
+   159→
+   160→/** Scoped CSS injected once per document. Host apps can override via the
+   161→ *  `--color-picker-*` custom properties. */
+   162→function injectStyles(): void {
+   163→  if (typeof document === "undefined") return;
+   164→  if (document.getElementById(STYLE_ID)) return;
+   165→  const style = document.createElement("style");
+   166→  style.id = STYLE_ID;
+   167→  style.textContent = `
+   168→.color-wheel-picker {
+   169→  display: inline-block;
+   170→  position: relative;
+   171→  font-family: inherit;
+   172→  --color-picker-marker-border: rgba(255, 255, 255, 0.95);
+   173→  --color-picker-marker-border-dark: rgba(0, 0, 0, 0.7);
+   174→  --color-picker-focus-ring: rgba(217, 255, 102, 0.55);
+   175→  --color-picker-bg: transparent;
+   176→}
+   177→.color-wheel-picker canvas {
+   178→  display: block;
+   179→  touch-action: none;
+   180→  outline: none;
+   181→  cursor: pointer;
+   182→  background: var(--color-picker-bg);
+   183→  border-radius: 50%;
+   184→}
+   185→.color-wheel-picker canvas:focus-visible {
+   186→  box-shadow: 0 0 0 3px var(--color-picker-focus-ring);
+   187→}
+   188→`;
+   189→  document.head.appendChild(style);
+   190→}
+   191→
+   192→type ColorHandler = (color: ColorOutput) => void;
+   193→
+   194→export class ColorWheelPicker {
+   195→  private readonly container: HTMLElement;
+   196→  private readonly canvas: HTMLCanvasElement;
+   197→  private readonly ctx: CanvasRenderingContext2D;
+   198→
+   199→  private options: Required<ColorPickerOptions>;
+   200→  private hsv: HSV;
+   201→  /** Tracked disk angle (radians, 0 = top, clockwise) for marker placement. */
+   202→  private diskTheta: number;
+   203→
+   204→  private readonly listeners: Map<string, Set<ColorHandler>> = new Map();
+   205→  private pointerState: {
+   206→    type: "wheel" | "inner";
+   207→    pointerId: number;
+   208→  } | null = null;
+   209→
+   210→  private resizeObserver: ResizeObserver | null = null;
+   211→  private _renderScheduled = false;
+   212→  private _destroyed = false;
+   213→
+   214→  /** Cached hue wheel canvas (only depends on geometry). */
+   215→  private wheelCache: HTMLCanvasElement | null = null;
+   216→  private wheelCacheCtx: CanvasRenderingContext2D | null = null;
+   217→  private wheelCacheKey = "";
+   218→
+   219→  /** Cached inner-shape canvas (depends on shape, size, hue). */
+   220→  private innerCache: HTMLCanvasElement | null = null;
+   221→  private innerCacheCtx: CanvasRenderingContext2D | null = null;
+   222→  private innerCacheKey = "";
+   223→
+   224→  /** Bound handlers (so removeEventListener works). */
+   225→  private readonly _onPointerDown: (e: PointerEvent) => void;
+   226→  private readonly _onPointerMove: (e: PointerEvent) => void;
+   227→  private readonly _onPointerUp: (e: PointerEvent) => void;
+   228→  private readonly _onKeyDown: (e: KeyboardEvent) => void;
+   229→  private readonly _onResize: () => void;
+   230→
+   231→  constructor(container: HTMLElement, options: ColorPickerOptions = {}) {
+   232→    if (!container) {
+   233→      throw new Error("ColorWheelPicker: container is required");
+   234→    }
+   235→    this.container = container;
+   236→
+   237→    // Resolve options (per-option defaults; `color` overrides `hue`).
+   238→    this.options = {
+   239→      shape: (options.shape as Shape) ?? DEFAULTS.shape,
+   240→      size: Math.max(40, options.size ?? DEFAULTS.size),
+   241→      wheelThickness: Math.max(4, options.wheelThickness ?? DEFAULTS.wheelThickness),
+   242→      wheelSpacing: Math.max(0, options.wheelSpacing ?? DEFAULTS.wheelSpacing),
+   243→      hue: clampHue(options.hue ?? DEFAULTS.hue),
+   244→      color: options.color ?? DEFAULTS.color,
+   245→      rotateShape: options.rotateShape ?? DEFAULTS.rotateShape,
+   246→    };
+   247→
+   248→    // Resolve initial color: `color` wins over `hue`.
+   249→    if (options.color != null) {
+   250→      this.hsv = parseColor(options.color);
+   251→    } else {
+   252→      const h = options.hue != null ? clampHue(options.hue) : DEFAULTS.hue;
+   253→      this.hsv = { h, s: 100, v: 100 };
+   254→    }
+   255→    this.diskTheta = Math.acos(clamp((this.hsv.v / 100) * 2 - 1, -1, 1));
+   256→
+   257→    injectStyles();
+   258→
+   259→    // Build canvas.
+   260→    this.canvas = document.createElement("canvas");
+   261→    this.canvas.className = "color-wheel-picker-canvas";
+   262→    this.canvas.setAttribute("role", "application");
+   263→    this.canvas.setAttribute(
+   264→      "aria-label",
+   265→      "Color wheel picker. Use arrow keys to adjust hue, saturation, and value.",
+   266→    );
+   267→    this.canvas.tabIndex = 0;
+   268→
+   269→    const ctx = this.canvas.getContext("2d");
+   270→    if (!ctx) {
+   271→      throw new Error("ColorWheelPicker: 2D canvas context unavailable");
+   272→    }
+   273→    this.ctx = ctx;
+   274→
+   275→    this.container.classList.add("color-wheel-picker");
+   276→    this.container.appendChild(this.canvas);
+   277→
+   278→    // Bind handlers.
+   279→    this._onPointerDown = this.onPointerDown.bind(this);
+   280→    this._onPointerMove = this.onPointerMove.bind(this);
+   281→    this._onPointerUp = this.onPointerUp.bind(this);
+   282→    this._onKeyDown = this.onKeyDown.bind(this);
+   283→    this._onResize = this.handleResize.bind(this);
+   284→
+   285→    this.canvas.addEventListener("pointerdown", this._onPointerDown);
+   286→    this.canvas.addEventListener("pointermove", this._onPointerMove);
+   287→    this.canvas.addEventListener("pointerup", this._onPointerUp);
+   288→    this.canvas.addEventListener("pointercancel", this._onPointerUp);
+   289→    this.canvas.addEventListener("keydown", this._onKeyDown);
+   290→
+   291→    if (typeof ResizeObserver !== "undefined") {
+   292→      this.resizeObserver = new ResizeObserver(this._onResize);
+   293→      this.resizeObserver.observe(this.canvas);
+   294→    }
+   295→
+   296→    this.updateCanvasSize();
+   297→    this.render();
+   298→    this.updateAria();
+   299→  }
+   300→
+   301→  // --------------------------------------------------------------------------
+   302→  // Public API
+   303→  // --------------------------------------------------------------------------
+   304→
+   305→  /** Set the color from any parseable input. Fires `input` + `change`. */
+   306→  setColor(color: string): void {
+   307→    this.hsv = parseColor(color);
+   308→    this.options.hue = this.hsv.h;
+   309→    this.diskTheta = Math.acos(
+   310→      clamp((this.hsv.v / 100) * 2 - 1, -1, 1),
+   311→    );
+   312→    this.invalidateInnerCache();
+   313→    this.scheduleRender();
+   314→    this.updateAria();
+   315→    const out = this.getColor();
+   316→    this.emit("input", out);
+   317→    this.emit("change", out);
+   318→  }
+   319→
+   320→  /** Get the current color as a full ColorOutput. */
+   321→  getColor(): ColorOutput {
+   322→    return toColorOutput(this.hsv);
+   323→  }
+   324→
+   325→  /** Change the inner selection shape. Preserves the current color. */
+   326→  setShape(shape: Shape): void {
+   327→    if (this.options.shape === shape) return;
+   328→    this.options.shape = shape;
+   329→    this.invalidateInnerCache();
+   330→    this.scheduleRender();
+   331→  }
+   332→
+   333→  /** Change the inner shape diameter in CSS pixels. Preserves the color. */
+   334→  setSize(size: number): void {
+   335→    const s = Math.max(40, Math.round(size));
+   336→    if (this.options.size === s) return;
+   337→    this.options.size = s;
+   338→    this.updateCanvasSize();
+   339→    this.invalidateWheelCache();
+   340→    this.invalidateInnerCache();
+   341→    this.scheduleRender();
+   342→  }
+   343→
+   344→  /** Change the hue (0-360). Preserves S and V. Fires `input` + `change`. */
+   345→  setHue(hue: number): void {
+   346→    this.hsv = { ...this.hsv, h: clampHue(hue) };
+   347→    this.options.hue = this.hsv.h;
+   348→    this.invalidateInnerCache();
+   349→    this.scheduleRender();
+   350→    this.updateAria();
+   351→    const out = this.getColor();
+   352→    this.emit("input", out);
+   353→    this.emit("change", out);
+   354→  }
+   355→
+   356→  /** Change the hue wheel radial thickness in pixels. */
+   357→  setWheelThickness(thickness: number): void {
+   358→    const t = Math.max(4, Math.round(thickness));
+   359→    if (this.options.wheelThickness === t) return;
+   360→    this.options.wheelThickness = t;
+   361→    this.updateCanvasSize();
+   362→    this.invalidateWheelCache();
+   363→    this.invalidateInnerCache();
+   364→    this.scheduleRender();
+   365→  }
+   366→
+   367→  /** Change the gap between the inner shape and the wheel in pixels. */
+   368→  setWheelSpacing(spacing: number): void {
+   369→    const s = Math.max(0, Math.round(spacing));
+   370→    if (this.options.wheelSpacing === s) return;
+   371→    this.options.wheelSpacing = s;
+   372→    this.updateCanvasSize();
+   373→    this.invalidateWheelCache();
+   374→    this.invalidateInnerCache();
+   375→    this.scheduleRender();
+   376→  }
+   377→
+   378→  /**
+   379→   * When enabled, the inner triangle rotates so its pure-hue vertex tracks
+   380→   * the current hue position on the wheel (PRD §4.4 "Rotating hue
+   381→   * representation"). Only affects the triangle shape.
+   382→   */
+   383→  setRotateShape(rotate: boolean): void {
+   384→    if (this.options.rotateShape === rotate) return;
+   385→    this.options.rotateShape = rotate;
+   386→    this.invalidateInnerCache();
+   387→    this.scheduleRender();
+   388→  }
+   389→
+   390→  /** Subscribe to a picker event. */
+   391→  on(event: "input" | "change", handler: ColorHandler): void;
+   392→
+   393→  /** Subscribe to a picker event (escape hatch for arbitrary event names). */
+   394→  on(event: string, handler: ColorHandler): void;
+   395→
+   396→  on(event: string, handler: ColorHandler): void {
+   397→    let set = this.listeners.get(event);
+   398→    if (!set) {
+   399→      set = new Set<ColorHandler>();
+   400→      this.listeners.set(event, set);
+   401→    }
+   402→    set.add(handler);
+   403→  }
+   404→
+   405→  /** Unsubscribe from a picker event. */
+   406→  off(event: string, handler: ColorHandler): void {
+   407→    const set = this.listeners.get(event);
+   408→    if (set) {
+   409→      set.delete(handler);
+   410→    }
+   411→  }
+   412→
+   413→  /** Tear down: remove listeners, observers, and DOM. Idempotent. */
+   414→  destroy(): void {
+   415→    if (this._destroyed) return;
+   416→    this._destroyed = true;
+   417→
+   418→    this.canvas.removeEventListener("pointerdown", this._onPointerDown);
+   419→    this.canvas.removeEventListener("pointermove", this._onPointerMove);
+   420→    this.canvas.removeEventListener("pointerup", this._onPointerUp);
+   421→    this.canvas.removeEventListener("pointercancel", this._onPointerUp);
+   422→    this.canvas.removeEventListener("keydown", this._onKeyDown);
+   423→
+   424→    if (this.pointerState) {
+   425→      try {
+   426→        this.canvas.releasePointerCapture(this.pointerState.pointerId);
+   427→      } catch {
+   428→        /* ignore */
+   429→      }
+   430→      this.pointerState = null;
+   431→    }
+   432→
+   433→    if (this.resizeObserver) {
+   434→      this.resizeObserver.disconnect();
+   435→      this.resizeObserver = null;
+   436→    }
+   437→
+   438→    this.listeners.clear();
+   439→
+   440→    if (this.canvas.parentNode) {
+   441→      this.canvas.parentNode.removeChild(this.canvas);
+   442→    }
+   443→    this.container.classList.remove("color-wheel-picker");
+   444→
+   445→    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+   446→    this.wheelCache = null;
+   447→    this.wheelCacheCtx = null;
+   448→    this.innerCache = null;
+   449→    this.innerCacheCtx = null;
+   450→  }
+   451→
+   452→  // --------------------------------------------------------------------------
+   453→  // Geometry
+   454→  // --------------------------------------------------------------------------
+   455→
+   456→  private getGeometry(): Geometry {
+   457→    const { size, wheelThickness, wheelSpacing } = this.options;
+   458→    const innerR = size / 2;
+   459→    const wheelInnerR = innerR + wheelSpacing;
+   460→    const wheelOuterR = wheelInnerR + wheelThickness;
+   461→    const total = wheelOuterR * 2;
+   462→    return {
+   463→      innerR,
+   464→      wheelInnerR,
+   465→      wheelOuterR,
+   466→      total,
+   467→      cx: total / 2,
+   468→      cy: total / 2,
+   469→    };
+   470→  }
+   471→
+   472→  // --------------------------------------------------------------------------
+   473→  // Rendering
+   474→  // --------------------------------------------------------------------------
+   475→
+   476→  private updateCanvasSize(): void {
+   477→    const geom = this.getGeometry();
+   478→    const dpr =
+   479→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   480→    this.canvas.style.width = `${geom.total}px`;
+   481→    this.canvas.style.height = `${geom.total}px`;
+   482→    this.canvas.width = Math.round(geom.total * dpr);
+   483→    this.canvas.height = Math.round(geom.total * dpr);
+   484→    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   485→  }
+   486→
+   487→  private handleResize(): void {
+   488→    if (this._destroyed) return;
+   489→    // The canvas's CSS size may have changed (host CSS) or the device pixel
+   490→    // ratio may have changed (window moved between monitors). Refresh the
+   491→    // backing store and re-render.
+   492→    const dpr =
+   493→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   494→    const geom = this.getGeometry();
+   495→    const expectedW = Math.round(geom.total * dpr);
+   496→    if (this.canvas.width !== expectedW) {
+   497→      this.updateCanvasSize();
+   498→      this.invalidateWheelCache();
+   499→      this.invalidateInnerCache();
+   500→    }
+   501→    this.scheduleRender();
+   502→  }
+   503→
+   504→  private scheduleRender(): void {
+   505→    if (this._destroyed) return;
+   506→    if (this._renderScheduled) return;
+   507→    this._renderScheduled = true;
+   508→    requestAnimationFrame(() => {
+   509→      this._renderScheduled = false;
+   510→      if (!this._destroyed) this.render();
+   511→    });
+   512→  }
+   513→
+   514→  private invalidateWheelCache(): void {
+   515→    this.wheelCacheKey = "";
+   516→  }
+   517→
+   518→  private invalidateInnerCache(): void {
+   519→    this.innerCacheKey = "";
+   520→  }
+   521→
+   522→  private render(): void {
+   523→    const geom = this.getGeometry();
+   524→    const { ctx } = this;
+   525→    ctx.clearRect(0, 0, geom.total, geom.total);
+   526→    this.renderWheel(geom);
+   527→    this.renderInner(geom);
+   528→    this.renderMarkers(geom);
+   529→  }
+   530→
+   531→  // ---- Hue wheel ----------------------------------------------------------
+   532→
+   533→  private renderWheel(geom: Geometry): void {
+   534→    const dpr =
+   535→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   536→    const key = `wheel-${geom.total}-${dpr}`;
+   537→    if (key !== this.wheelCacheKey || !this.wheelCache || !this.wheelCacheCtx) {
+   538→      if (!this.wheelCache) {
+   539→        this.wheelCache = document.createElement("canvas");
+   540→        this.wheelCacheCtx = this.wheelCache.getContext("2d");
+   541→      }
+   542→      const cache = this.wheelCache;
+   543→      const cacheCtx = this.wheelCacheCtx!;
+   544→      const backing = Math.round(geom.total * dpr);
+   545→      if (cache.width !== backing) {
+   546→        cache.width = backing;
+   547→        cache.height = backing;
+   548→      }
+   549→      cacheCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   550→      cacheCtx.clearRect(0, 0, geom.total, geom.total);
+   551→      this.drawWheelTo(cacheCtx, geom);
+   552→      this.wheelCacheKey = key;
+   553→    }
+   554→    this.ctx.drawImage(this.wheelCache, 0, 0, geom.total, geom.total);
+   555→  }
+   556→
+   557→  /**
+   558→   * Draw the hue wheel directly into a target context. The wheel is composed
+   559→   * of 360 one-degree segments, each filled with the HSL color of its hue.
+   560→   */
+   561→  private drawWheelTo(ctx: CanvasRenderingContext2D, geom: Geometry): void {
+   562→    const { cx, cy, wheelInnerR, wheelOuterR } = geom;
+   563→    const segments = 360;
+   564→    const inner = Math.max(0.5, wheelInnerR);
+   565→    const outer = Math.max(inner + 0.5, wheelOuterR);
+   566→
+   567→    for (let i = 0; i < segments; i++) {
+   568→      // Start at the top (-π/2) and go clockwise (increasing angle).
+   569→      const a0 = -Math.PI / 2 + (i / segments) * Math.PI * 2;
+   570→      const a1 = -Math.PI / 2 + ((i + 1) / segments) * Math.PI * 2;
+   571→      ctx.beginPath();
+   572→      ctx.arc(cx, cy, outer, a0, a1);
+   573→      ctx.arc(cx, cy, inner, a1, a0, true);
+   574→      ctx.closePath();
+   575→      ctx.fillStyle = `hsl(${i}, 100%, 50%)`;
+   576→      ctx.fill();
+   577→    }
+   578→  }
+   579→
+   580→  // ---- Inner shape --------------------------------------------------------
+   581→
+   582→  private renderInner(geom: Geometry): void {
+   583→    const { shape } = this.options;
+   584→    if (shape === "none") {
+   585→      this.renderNone(geom);
+   586→      return;
+   587→    }
+   588→
+   589→    const dpr =
+   590→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   591→    const rotation = this.getShapeRotation();
+   592→    const key = `inner-${shape}-${geom.total}-${dpr}-${this.hsv.h}-${rotation}`;
+   593→    if (key !== this.innerCacheKey || !this.innerCache || !this.innerCacheCtx) {
+   594→      if (!this.innerCache) {
+   595→        this.innerCache = document.createElement("canvas");
+   596→        this.innerCacheCtx = this.innerCache.getContext("2d");
+   597→      }
+   598→      const cache = this.innerCache;
+   599→      const cacheCtx = this.innerCacheCtx!;
+   600→      const backing = Math.round(geom.total * dpr);
+   601→      if (cache.width !== backing) {
+   602→        cache.width = backing;
+   603→        cache.height = backing;
+   604→      }
+   605→      cacheCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   606→      cacheCtx.clearRect(0, 0, geom.total, geom.total);
+   607→
+   608→      if (shape === "triangle") this.drawTriangleTo(cacheCtx, geom, rotation);
+   609→      else if (shape === "square") this.drawSquareTo(cacheCtx, geom);
+   610→      else if (shape === "disk") this.drawDiskTo(cacheCtx, geom);
+   611→
+   612→      this.innerCacheKey = key;
+   613→    }
+   614→
+   615→    this.ctx.drawImage(this.innerCache, 0, 0, geom.total, geom.total);
+   616→  }
+   617→
+   618→  /**
+   619→   * Returns the rotation angle (radians, 0 = top, clockwise) applied to the
+   620→   * inner shape. When `rotateShape` is enabled, the triangle's pure-hue
+   621→   * vertex tracks the current hue. For other shapes, always 0.
+   622→   */
+   623→  private getShapeRotation(): number {
+   624→    if (!this.options.rotateShape) return 0;
+   625→    if (this.options.shape !== "triangle") return 0;
+   626→    // The triangle's pure-hue vertex (B) sits at 120° clockwise from top in
+   627→    // its default orientation. Rotate so that vertex aligns with the hue.
+   628→    const hueRad = (this.hsv.h * Math.PI) / 180;
+   629→    const bAngleRad = (120 * Math.PI) / 180;
+   630→    return hueRad - bAngleRad;
+   631→  }
+   632→
+   633→  /** None mode: solid filled inner circle in the current color. */
+   634→  private renderNone(geom: Geometry): void {
+   635→    const { cx, cy, innerR } = geom;
+   636→    const { ctx, hsv } = this;
+   637→    const rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+   638→    ctx.beginPath();
+   639→    ctx.arc(cx, cy, Math.max(0.5, innerR), 0, Math.PI * 2);
+   640→    ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+   641→    ctx.fill();
+   642→  }
+   643→
+   644→  /**
+   645→   * Square inner shape: inscribed square (side = innerR · √2) with three
+   646→   * stacked layers — pure hue → white-to-transparent (S) → transparent-to-
+   647→   * black (V).
+   648→   */
+   649→  private drawSquareTo(ctx: CanvasRenderingContext2D, geom: Geometry): void {
+   650→    const { cx, cy, innerR } = geom;
+   651→    const { hsv } = this;
+   652→    const side = innerR * Math.SQRT2;
+   653→    const half = side / 2;
+   654→    const left = cx - half;
+   655→    const top = cy - half;
+   656→
+   657→    ctx.save();
+   658→    // Clip to the square so corners don't bleed into the wheel gap.
+   659→    ctx.beginPath();
+   660→    ctx.rect(left, top, side, side);
+   661→    ctx.clip();
+   662→
+   663→    // 1) Pure hue base.
+   664→    ctx.fillStyle = `hsl(${hsv.h}, 100%, 50%)`;
+   665→    ctx.fillRect(left, top, side, side);
+   666→
+   667→    // 2) White → transparent (saturation, left → right).
+   668→    const gSat = ctx.createLinearGradient(left, 0, left + side, 0);
+   669→    gSat.addColorStop(0, "rgba(255, 255, 255, 1)");
+   670→    gSat.addColorStop(1, "rgba(255, 255, 255, 0)");
+   671→    ctx.fillStyle = gSat;
+   672→    ctx.fillRect(left, top, side, side);
+   673→
+   674→    // 3) Transparent → black (value, top → bottom).
+   675→    const gVal = ctx.createLinearGradient(0, top, 0, top + side);
+   676→    gVal.addColorStop(0, "rgba(0, 0, 0, 0)");
+   677→    gVal.addColorStop(1, "rgba(0, 0, 0, 1)");
+   678→    ctx.fillStyle = gVal;
+   679→    ctx.fillRect(left, top, side, side);
+   680→
+   681→    ctx.restore();
+   682→  }
+   683→
+   684→  /**
+   685→   * Triangle inner shape: equilateral triangle inscribed in the inner circle.
+   686→   *   A = top             (S = 0, V = 1)  — white
+   687→   *   B = bottom-right    (S = 1, V = 1)  — pure hue
+   688→   *   C = bottom-left     (S = *, V = 0)  — black
+   689→   *
+   690→   * When `rotation` is non-zero, all three vertices are rotated around the
+   691→   * center by that angle (radians, 0 = top, clockwise) — used by the
+   692→   * `rotateShape` option so the pure-hue vertex tracks the wheel hue.
+   693→   *
+   694→   * Rendered per-pixel via barycentric coordinates with 2×2 supersampling
+   695→   * for smooth anti-aliased edges. A temp offscreen canvas is used because
+   696→   * `putImageData` ignores the context transform (dpr scaling).
+   697→   */
+   698→  private drawTriangleTo(
+   699→    ctx: CanvasRenderingContext2D,
+   700→    geom: Geometry,
+   701→    rotation: number,
+   702→  ): void {
+   703→    const { cx, cy, innerR } = geom;
+   704→    const r = Math.max(1, innerR);
+   705→
+   706→    // Base vertices (rotation = 0): A at top, B at bottom-right, C at bottom-left.
+   707→    const baseA = { x: cx, y: cy - r };
+   708→    const baseB = { x: cx + (r * Math.sqrt(3)) / 2, y: cy + r / 2 };
+   709→    const baseC = { x: cx - (r * Math.sqrt(3)) / 2, y: cy + r / 2 };
+   710→
+   711→    const verts = [baseA, baseB, baseC].map((p) =>
+   712→      rotatePoint(p, cx, cy, rotation),
+   713→    );
+   714→
+   715→    this.drawBarycentric(ctx, verts);
+   716→  }
+   717→
+   718→  /**
+   719→   * Per-pixel triangle renderer using barycentric coordinates with 2×2
+   720→   * supersampling. Renders at device resolution into a temp canvas, then
+   721→   * composites via `drawImage` (which respects the dpr transform) —
+   722→   * `putImageData` would ignore the transform and misplace the image on
+   723→   * high-DPI displays.
+   724→   *
+   725→   * For a point P with barycentric (α, β, γ) w.r.t. (A, B, C):
+   726→   *   P = α·A + β·B + γ·C,   α + β + γ = 1
+   727→   *   V = α + β       (white + pure-hue weights)
+   728→   *   S = β / V       (pure-hue share of the non-black weights)
+   729→   */
+   730→  private drawBarycentric(
+   731→    ctx: CanvasRenderingContext2D,
+   732→    verts: { x: number; y: number }[],
+   733→  ): void {
+   734→    const { hsv } = this;
+   735→    const [A, B, C] = verts;
+   736→
+   737→    // CSS-pixel bounding box.
+   738→    const minX = Math.floor(Math.min(A.x, B.x, C.x));
+   739→    const maxX = Math.ceil(Math.max(A.x, B.x, C.x));
+   740→    const minY = Math.floor(Math.min(A.y, B.y, C.y));
+   741→    const maxY = Math.ceil(Math.max(A.y, B.y, C.y));
+   742→    const cssW = maxX - minX;
+   743→    const cssH = maxY - minY;
+   744→    if (cssW <= 0 || cssH <= 0) return;
+   745→
+   746→    // Device-pixel dimensions for crisp rendering on high-DPI displays.
+   747→    const dpr =
+   748→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   749→    const dw = Math.max(1, Math.round(cssW * dpr));
+   750→    const dh = Math.max(1, Math.round(cssH * dpr));
+   751→
+   752→    // Barycentric determinant and inverse (computed in CSS-pixel space).
+   753→    const det = (B.y - C.y) * (A.x - C.x) + (C.x - B.x) * (A.y - C.y);
+   754→    if (Math.abs(det) < 1e-9) return;
+   755→    const invDet = 1 / det;
+   756→
+   757→    const hue = hsv.h;
+   758→
+   759→    // Build the ImageData at device resolution.
+   760→    const img = ctx.createImageData(dw, dh);
+   761→    const data = img.data;
+   762→
+   763→    for (let py = 0; py < dh; py++) {
+   764→      for (let px = 0; px < dw; px++) {
+   765→        // Convert device pixel to CSS-pixel sample point (pixel center).
+   766→        const cssPx = minX + (px + 0.5) / dpr;
+   767→        const cssPy = minY + (py + 0.5) / dpr;
+   768→
+   769→        // 2×2 supersampling: sample 4 sub-pixels for smooth edges.
+   770→        let rSum = 0,
+   771→          gSum = 0,
+   772→          bSum = 0,
+   773→          count = 0;
+   774→        for (let sy = 0; sy < 2; sy++) {
+   775→          for (let sx = 0; sx < 2; sx++) {
+   776→            const subPx = cssPx + ((sx - 0.5) * 0.5) / dpr;
+   777→            const subPy = cssPy + ((sy - 0.5) * 0.5) / dpr;
+   778→            const a =
+   779→              ((B.y - C.y) * (subPx - C.x) + (C.x - B.x) * (subPy - C.y)) *
+   780→              invDet;
+   781→            const b =
+   782→              ((C.y - A.y) * (subPx - C.x) + (A.x - C.x) * (subPy - C.y)) *
+   783→              invDet;
+   784→            const g = 1 - a - b;
+   785→            if (a >= 0 && b >= 0 && g >= 0) {
+   786→              const V = a + b;
+   787→              const S = V > 0 ? b / V : 0;
+   788→              const rgb = hsvToRgb(hue, S * 100, V * 100);
+   789→              rSum += rgb.r;
+   790→              gSum += rgb.g;
+   791→              bSum += rgb.b;
+   792→              count++;
+   793→            }
+   794→          }
+   795→        }
+   796→        if (count === 0) continue;
+   797→        const aa = count / 4;
+   798→        const i = (py * dw + px) * 4;
+   799→        data[i] = Math.round(rSum / count);
+   800→        data[i + 1] = Math.round(gSum / count);
+   801→        data[i + 2] = Math.round(bSum / count);
+   802→        data[i + 3] = Math.round(aa * 255);
+   803→      }
+   804→    }
+   805→
+   806→    // Composite via a temp canvas + drawImage so the dpr transform is
+   807→    // respected. putImageData would ignore it and misplace the image.
+   808→    const temp = document.createElement("canvas");
+   809→    temp.width = dw;
+   810→    temp.height = dh;
+   811→    const tctx = temp.getContext("2d");
+   812→    if (!tctx) return;
+   813→    tctx.putImageData(img, 0, 0);
+   814→    // drawImage respects the ctx transform — (minX, minY) are CSS coords.
+   815→    ctx.drawImage(temp, minX, minY);
+   816→  }
+   817→
+   818→  /**
+   819→   * Disk inner shape: polar mapping
+   820→   *   r → saturation (0 at center, 1 at edge)
+   821→   *   θ → value via V = (1 + cos θ) / 2
+   822→   *
+   823→   * Smooth and seam-free. Center maps to S = 0; angle at center is undefined
+   824→   * so V defaults to 1 (bright white center). Renders at device resolution
+   825→   * into a temp canvas, then composites via `drawImage` so the dpr transform
+   826→   * is respected (`putImageData` would ignore it).
+   827→   */
+   828→  private drawDiskTo(ctx: CanvasRenderingContext2D, geom: Geometry): void {
+   829→    const { cx, cy, innerR } = geom;
+   830→    const { hsv } = this;
+   831→    const r = Math.max(1, innerR);
+   832→
+   833→    const minX = Math.floor(cx - r);
+   834→    const minY = Math.floor(cy - r);
+   835→    const cssW = Math.ceil(2 * r);
+   836→    const cssH = cssW;
+   837→    if (cssW <= 0 || cssH <= 0) return;
+   838→
+   839→    const dpr =
+   840→      (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+   841→    const dw = Math.max(1, Math.round(cssW * dpr));
+   842→    const dh = Math.max(1, Math.round(cssH * dpr));
+   843→
+   844→    const img = ctx.createImageData(dw, dh);
+   845→    const data = img.data;
+   846→
+   847→    const hue = hsv.h;
+   848→
+   849→    for (let py = 0; py < dh; py++) {
+   850→      for (let px = 0; px < dw; px++) {
+   851→        // Device pixel → CSS-pixel sample point.
+   852→        const cssPx = minX + (px + 0.5) / dpr;
+   853→        const cssPy = minY + (py + 0.5) / dpr;
+   854→        const dx = cssPx - cx;
+   855→        const dy = cssPy - cy;
+   856→        const dist = Math.sqrt(dx * dx + dy * dy);
+   857→        if (dist > r + 0.5) continue;
+   858→        // Anti-aliased edge.
+   859→        const aa = Math.max(0, Math.min(1, r - dist + 0.5));
+   860→        if (aa === 0) continue;
+   861→
+   862→        const S = Math.min(1, dist / r);
+   863→        let V: number;
+   864→        if (dist < 0.5) {
+   865→          V = 1; // center: angle is undefined
+   866→        } else {
+   867→          // atan2(dx, -dy) = angle from +up axis, increasing clockwise.
+   868→          const theta = Math.atan2(dx, -dy);
+   869→          V = (1 + Math.cos(theta)) / 2;
+   870→        }
+   871→        const rgb = hsvToRgb(hue, S * 100, V * 100);
+   872→
+   873→        const i = (py * dw + px) * 4;
+   874→        data[i] = rgb.r;
+   875→        data[i + 1] = rgb.g;
+   876→        data[i + 2] = rgb.b;
+   877→        data[i + 3] = Math.round(aa * 255);
+   878→      }
+   879→    }
+   880→
+   881→    // Composite via temp canvas + drawImage (respects dpr transform).
+   882→    const temp = document.createElement("canvas");
+   883→    temp.width = dw;
+   884→    temp.height = dh;
+   885→    const tctx = temp.getContext("2d");
+   886→    if (!tctx) return;
+   887→    tctx.putImageData(img, 0, 0);
+   888→    ctx.drawImage(temp, minX, minY);
+   889→  }
+   890→
+   891→  // ---- Markers ------------------------------------------------------------
+   892→
+   893→  private renderMarkers(geom: Geometry): void {
+   894→    this.renderHueMarker(geom);
+   895→    if (this.options.shape !== "none") {
+   896→      this.renderInnerMarker(geom);
+   897→    }
+   898→  }
+   899→
+   900→  /**
+   901→   * Hue marker — a small disc sitting on the wheel ring at the angular
+   902→   * position of the current hue. White outer halo + dark inner ring + a
+   903→   * center dot in the pure-hue color guarantees visibility on any hue.
+   904→   */
+   905→  private renderHueMarker(geom: Geometry): void {
+   906→    const { cx, cy, wheelInnerR, wheelOuterR } = geom;
+   907→    const { ctx, hsv } = this;
+   908→    const midR = (wheelInnerR + wheelOuterR) / 2;
+   909→    const angle = -Math.PI / 2 + (hsv.h * Math.PI) / 180;
+   910→    const x = cx + midR * Math.cos(angle);
+   911→    const y = cy + midR * Math.sin(angle);
+   912→
+   913→    const thickness = wheelOuterR - wheelInnerR;
+   914→    const markerR = clamp(thickness / 2 - 1, 4, 9);
+   915→    const ringR = markerR + 1.5;
+   916→
+   917→    // White halo.
+   918→    ctx.beginPath();
+   919→    ctx.arc(x, y, ringR, 0, Math.PI * 2);
+   920→    ctx.lineWidth = 2.5;
+   921→    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+   922→    ctx.stroke();
+   923→
+   924→    // Dark inner ring.
+   925→    ctx.beginPath();
+   926→    ctx.arc(x, y, ringR, 0, Math.PI * 2);
+   927→    ctx.lineWidth = 1;
+   928→    ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+   929→    ctx.stroke();
+   930→
+   931→    // Pure-hue center dot.
+   932→    const rgb = hsvToRgb(hsv.h, 100, 100);
+   933→    ctx.beginPath();
+   934→    ctx.arc(x, y, Math.max(1, markerR - 1.5), 0, Math.PI * 2);
+   935→    ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+   936→    ctx.fill();
+   937→  }
+   938→
+   939→  /**
+   940→   * Inner marker — a small ring at the selected (S, V) position inside the
+   941→   * current shape. White halo + dark inner ring + center dot in the actual
+   942→   * selected color so it remains perceivable against any background.
+   943→   */
+   944→  private renderInnerMarker(geom: Geometry): void {
+   945→    const pos = this.getInnerMarkerPosition(geom);
+   946→    if (!pos) return;
+   947→    const { ctx, hsv } = this;
+   948→    const rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
+   949→
+   950→    const markerR = 7;
+   951→    // White halo.
+   952→    ctx.beginPath();
+   953→    ctx.arc(pos.x, pos.y, markerR, 0, Math.PI * 2);
+   954→    ctx.lineWidth = 3;
+   955→    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+   956→    ctx.stroke();
+   957→    // Dark inner ring.
+   958→    ctx.beginPath();
+   959→    ctx.arc(pos.x, pos.y, markerR, 0, Math.PI * 2);
+   960→    ctx.lineWidth = 1.5;
+   961→    ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+   962→    ctx.stroke();
+   963→    // Selected color dot.
+   964→    ctx.beginPath();
+   965→    ctx.arc(pos.x, pos.y, Math.max(1, markerR - 3.5), 0, Math.PI * 2);
+   966→    ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+   967→    ctx.fill();
+   968→  }
+   969→
+   970→  /** Compute the inner marker position from the current HSV state. */
+   971→  private getInnerMarkerPosition(
+   972→    geom: Geometry,
+   973→  ): { x: number; y: number } | null {
+   974→    const { shape } = this.options;
+   975→    const { cx, cy, innerR } = geom;
+   976→    const s = this.hsv.s / 100;
+   977→    const v = this.hsv.v / 100;
+   978→
+   979→    if (shape === "square") {
+   980→      const side = innerR * Math.SQRT2;
+   981→      const half = side / 2;
+   982→      const left = cx - half;
+   983→      const top = cy - half;
+   984→      return { x: left + s * side, y: top + (1 - v) * side };
+   985→    }
+   986→
+   987→    if (shape === "disk") {
+   988→      const r = s * innerR;
+   989→      // Use the tracked disk angle so the marker stays where the user put it.
+   990→      const theta = this.diskTheta;
+   991→      return {
+   992→        x: cx + r * Math.sin(theta),
+   993→        y: cy - r * Math.cos(theta),
+   994→      };
+   995→    }
+   996→
+   997→    if (shape === "triangle") {
+   998→      const r = innerR;
+   999→      const rotation = this.getShapeRotation();
+  1000→      // Base (unrotated) vertices, then apply rotation.
+  1001→      const A = rotatePoint({ x: cx, y: cy - r }, cx, cy, rotation);
+  1002→      const B = rotatePoint(
+  1003→        { x: cx + (r * Math.sqrt(3)) / 2, y: cy + r / 2 },
+  1004→        cx,
+  1005→        cy,
+  1006→        rotation,
+  1007→      );
+  1008→      const C = rotatePoint(
+  1009→        { x: cx - (r * Math.sqrt(3)) / 2, y: cy + r / 2 },
+  1010→        cx,
+  1011→        cy,
+  1012→        rotation,
+  1013→      );
+  1014→      const alpha = v * (1 - s);
+  1015→      const beta = s * v;
+  1016→      const gamma = 1 - v;
+  1017→      return {
+  1018→        x: alpha * A.x + beta * B.x + gamma * C.x,
+  1019→        y: alpha * A.y + beta * B.y + gamma * C.y,
+  1020→      };
+  1021→    }
+  1022→
+  1023→    return null;
+  1024→  }
+  1025→
+  1026→  // --------------------------------------------------------------------------
+  1027→  // Pointer interaction
+  1028→  // --------------------------------------------------------------------------
+  1029→
+  1030→  private getCanvasPoint(e: PointerEvent): { x: number; y: number } {
+  1031→    const rect = this.canvas.getBoundingClientRect();
+  1032→    // Use rect.width to scale in case the canvas has been resized via CSS.
+  1033→    const geom = this.getGeometry();
+  1034→    const scaleX = geom.total / (rect.width || geom.total);
+  1035→    const scaleY = geom.total / (rect.height || geom.total);
+  1036→    return {
+  1037→      x: (e.clientX - rect.left) * scaleX,
+  1038→      y: (e.clientY - rect.top) * scaleY,
+  1039→    };
+  1040→  }
+  1041→
+  1042→  private onPointerDown(e: PointerEvent): void {
+  1043→    if (this._destroyed) return;
+  1044→    const { x, y } = this.getCanvasPoint(e);
+  1045→    const geom = this.getGeometry();
+  1046→    const dx = x - geom.cx;
+  1047→    const dy = y - geom.cy;
+  1048→    const dist = Math.sqrt(dx * dx + dy * dy);
+  1049→
+  1050→    const onWheel =
+  1051→      dist >= geom.wheelInnerR - 1 && dist <= geom.wheelOuterR + 1;
+  1052→    const inInner = dist <= geom.innerR;
+  1053→
+  1054→    if (onWheel) {
+  1055→      this.pointerState = { type: "wheel", pointerId: e.pointerId };
+  1056→      try {
+  1057→        this.canvas.setPointerCapture(e.pointerId);
+  1058→      } catch {
+  1059→        /* ignore */
+  1060→      }
+  1061→      this.updateHueFromPoint(x, y, geom);
+  1062→      e.preventDefault();
+  1063→    } else if (inInner && this.options.shape !== "none") {
+  1064→      this.pointerState = { type: "inner", pointerId: e.pointerId };
+  1065→      try {
+  1066→        this.canvas.setPointerCapture(e.pointerId);
+  1067→      } catch {
+  1068→        /* ignore */
+  1069→      }
+  1070→      this.updateInnerFromPoint(x, y, geom);
+  1071→      e.preventDefault();
+  1072→    }
+  1073→  }
+  1074→
+  1075→  private onPointerMove(e: PointerEvent): void {
+  1076→    if (!this.pointerState) return;
+  1077→    const { x, y } = this.getCanvasPoint(e);
+  1078→    const geom = this.getGeometry();
+  1079→    if (this.pointerState.type === "wheel") {
+  1080→      this.updateHueFromPoint(x, y, geom);
+  1081→    } else {
+  1082→      this.updateInnerFromPoint(x, y, geom);
+  1083→    }
+  1084→    e.preventDefault();
+  1085→  }
+  1086→
+  1087→  private onPointerUp(e: PointerEvent): void {
+  1088→    if (!this.pointerState) return;
+  1089→    const id = this.pointerState.pointerId;
+  1090→    try {
+  1091→      this.canvas.releasePointerCapture(id);
+  1092→    } catch {
+  1093→      /* ignore */
+  1094→    }
+  1095→    this.pointerState = null;
+  1096→    this.emit("change", this.getColor());
+  1097→  }
+  1098→
+  1099→  private updateHueFromPoint(
+  1100→    x: number,
+  1101→    y: number,
+  1102→    geom: Geometry,
+  1103→  ): void {
+  1104→    const dx = x - geom.cx;
+  1105→    const dy = y - geom.cy;
+  1106→    // Angle from "up" vector, increasing clockwise (matches wheel layout).
+  1107→    let theta = (Math.atan2(dx, -dy) * 180) / Math.PI;
+  1108→    if (theta < 0) theta += 360;
+  1109→    this.hsv = { ...this.hsv, h: clampHue(theta) };
+  1110→    this.options.hue = this.hsv.h;
+  1111→    this.invalidateInnerCache();
+  1112→    this.updateAria();
+  1113→    this.scheduleRender();
+  1114→    this.emit("input", this.getColor());
+  1115→  }
+  1116→
+  1117→  private updateInnerFromPoint(
+  1118→    x: number,
+  1119→    y: number,
+  1120→    geom: Geometry,
+  1121→  ): void {
+  1122→    const { shape } = this.options;
+  1123→    const { cx, cy, innerR } = geom;
+  1124→    let newHsv: HSV | null = null;
+  1125→
+  1126→    if (shape === "square") {
+  1127→      const side = innerR * Math.SQRT2;
+  1128→      const half = side / 2;
+  1129→      const left = cx - half;
+  1130→      const top = cy - half;
+  1131→      const s = clamp((x - left) / side, 0, 1);
+  1132→      const v = clamp(1 - (y - top) / side, 0, 1);
+  1133→      newHsv = { ...this.hsv, s: s * 100, v: v * 100 };
+  1134→    } else if (shape === "disk") {
+  1135→      const dx = x - cx;
+  1136→      const dy = y - cy;
+  1137→      const dist = Math.sqrt(dx * dx + dy * dy);
+  1138→      const s = clamp(dist / innerR, 0, 1);
+  1139→      let v: number;
+  1140→      if (dist < 0.5) {
+  1141→        v = this.hsv.v / 100; // keep current V at the very center
+  1142→      } else {
+  1143→        const theta = Math.atan2(dx, -dy);
+  1144→        v = (1 + Math.cos(theta)) / 2;
+  1145→        this.diskTheta = theta;
+  1146→      }
+  1147→      newHsv = { ...this.hsv, s: s * 100, v: v * 100 };
+  1148→    } else if (shape === "triangle") {
+  1149→      const r = innerR;
+  1150→      // When rotateShape is enabled, the triangle is drawn rotated. Un-rotate
+  1151→      // the pointer point into the triangle's local coordinate space before
+  1152→      // computing barycentric coordinates.
+  1153→      const rotation = this.getShapeRotation();
+  1154→      const local = rotatePoint({ x, y }, cx, cy, -rotation);
+  1155→      const lx = local.x;
+  1156→      const ly = local.y;
+  1157→
+  1158→      const Ax = cx;
+  1159→      const Ay = cy - r;
+  1160→      const Bx = cx + (r * Math.sqrt(3)) / 2;
+  1161→      const By = cy + r / 2;
+  1162→      const Cx = cx - (r * Math.sqrt(3)) / 2;
+  1163→      const Cy = cy + r / 2;
+  1164→
+  1165→      const det = (By - Cy) * (Ax - Cx) + (Cx - Bx) * (Ay - Cy);
+  1166→      if (Math.abs(det) < 1e-9) return;
+  1167→      const invDet = 1 / det;
+  1168→      const alpha = ((By - Cy) * (lx - Cx) + (Cx - Bx) * (ly - Cy)) * invDet;
+  1169→      const beta = ((Cy - Ay) * (lx - Cx) + (Ax - Cx) * (ly - Cy)) * invDet;
+  1170→      const gamma = 1 - alpha - beta;
+  1171→
+  1172→      // Clamp to the triangle (project to nearest edge if outside).
+  1173→      let a = alpha < 0 ? 0 : alpha;
+  1174→      let b = beta < 0 ? 0 : beta;
+  1175→      let g = gamma < 0 ? 0 : gamma;
+  1176→      const sum = a + b + g;
+  1177→      if (sum <= 0) return;
+  1178→      a /= sum;
+  1179→      b /= sum;
+  1180→      g /= sum;
+  1181→
+  1182→      const V = a + b;
+  1183→      const S = V > 0 ? b / V : 0;
+  1184→      newHsv = { ...this.hsv, s: S * 100, v: V * 100 };
+  1185→    }
+  1186→
+  1187→    if (!newHsv) return;
+  1188→    this.hsv = newHsv;
+  1189→    this.scheduleRender();
+  1190→    this.emit("input", this.getColor());
+  1191→  }
+  1192→
+  1193→  // --------------------------------------------------------------------------
+  1194→  // Keyboard interaction
+  1195→  // --------------------------------------------------------------------------
+  1196→
+  1197→  private onKeyDown(e: KeyboardEvent): void {
+  1198→    if (this._destroyed) return;
+  1199→    const step = e.shiftKey ? 10 : 1;
+  1200→    const hasInner = this.options.shape !== "none";
+  1201→    let handled = false;
+  1202→
+  1203→    switch (e.key) {
+  1204→      case "ArrowLeft":
+  1205→        if ((e.ctrlKey || e.metaKey) && hasInner) {
+  1206→          this.adjustSaturation(-step);
+  1207→        } else {
+  1208→          this.adjustHue(-step);
+  1209→        }
+  1210→        handled = true;
+  1211→        break;
+  1212→      case "ArrowRight":
+  1213→        if ((e.ctrlKey || e.metaKey) && hasInner) {
+  1214→          this.adjustSaturation(step);
+  1215→        } else {
+  1216→          this.adjustHue(step);
+  1217→        }
+  1218→        handled = true;
+  1219→        break;
+  1220→      case "ArrowUp":
+  1221→        if (hasInner) {
+  1222→          this.adjustValue(step);
+  1223→        } else {
+  1224→          this.adjustHue(step);
+  1225→        }
+  1226→        handled = true;
+  1227→        break;
+  1228→      case "ArrowDown":
+  1229→        if (hasInner) {
+  1230→          this.adjustValue(-step);
+  1231→        } else {
+  1232→          this.adjustHue(-step);
+  1233→        }
+  1234→        handled = true;
+  1235→        break;
+  1236→      case "Home":
+  1237→        this.adjustHue(-360);
+  1238→        handled = true;
+  1239→        break;
+  1240→      case "End":
+  1241→        this.adjustHue(360);
+  1242→        handled = true;
+  1243→        break;
+  1244→      default:
+  1245→        break;
+  1246→    }
+  1247→
+  1248→    if (handled) {
+  1249→      e.preventDefault();
+  1250→      e.stopPropagation();
+  1251→    }
+  1252→  }
+  1253→
+  1254→  private adjustHue(delta: number): void {
+  1255→    this.hsv = { ...this.hsv, h: clampHue(this.hsv.h + delta) };
+  1256→    this.options.hue = this.hsv.h;
+  1257→    this.invalidateInnerCache();
+  1258→    this.updateAria();
+  1259→    this.scheduleRender();
+  1260→    const out = this.getColor();
+  1261→    this.emit("input", out);
+  1262→    this.emit("change", out);
+  1263→  }
+  1264→
+  1265→  private adjustSaturation(delta: number): void {
+  1266→    this.hsv = { ...this.hsv, s: clamp(this.hsv.s + delta, 0, 100) };
+  1267→    this.scheduleRender();
+  1268→    const out = this.getColor();
+  1269→    this.emit("input", out);
+  1270→    this.emit("change", out);
+  1271→  }
+  1272→
+  1273→  private adjustValue(delta: number): void {
+  1274→    this.hsv = { ...this.hsv, v: clamp(this.hsv.v + delta, 0, 100) };
+  1275→    this.scheduleRender();
+  1276→    const out = this.getColor();
+  1277→    this.emit("input", out);
+  1278→    this.emit("change", out);
+  1279→  }
+  1280→
+  1281→  // --------------------------------------------------------------------------
+  1282→  // ARIA
+  1283→  // --------------------------------------------------------------------------
+  1284→
+  1285→  private updateAria(): void {
+  1286→    const out = this.getColor();
+  1287→    this.canvas.setAttribute(
+  1288→      "aria-valuetext",
+  1289→      `Hue ${Math.round(this.hsv.h)}°, ${out.hex}`,
+  1290→    );
+  1291→  }
+  1292→
+  1293→  // --------------------------------------------------------------------------
+  1294→  // Event emitter
+  1295→  // --------------------------------------------------------------------------
+  1296→
+  1297→  private emit(event: string, color: ColorOutput): void {
+  1298→    const set = this.listeners.get(event);
+  1299→    if (!set) return;
+  1300→    // Clone to a plain array so a handler unsubscribing during iteration
+  1301→    // doesn't skip subsequent handlers.
+  1302→    const handlers = Array.from(set);
+  1303→    for (const h of handlers) {
+  1304→      try {
+  1305→        h(color);
+  1306→      } catch (err) {
+  1307→        // Never let a listener error take down the picker.
+  1308→        console.error("ColorWheelPicker listener error:", err);
+  1309→      }
+  1310→    }
+  1311→  }
+  1312→}
+  1313→

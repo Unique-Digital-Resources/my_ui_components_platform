@@ -1,0 +1,688 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  RotateCcw,
+     6→  ArrowUp,
+     7→  ArrowDown,
+     8→  ArrowLeft,
+     9→  ArrowRight,
+    10→} from "lucide-react";
+    11→import { getComponent } from "@/lib/platform/content";
+    12→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+    13→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+    14→import { SmartTooltip } from "@/lib/components/smart-tooltip";
+    15→import type { SmartTooltipPosition } from "@/lib/components/smart-tooltip";
+    16→import { registerBuiltinCommands, commandRegistry } from "@/lib/commands";
+    17→import { cn } from "@/lib/utils";
+    18→import { toast } from "sonner";
+    19→
+    20→interface PlaygroundState {
+    21→  commandId: string;
+    22→  position: SmartTooltipPosition;
+    23→}
+    24→
+    25→const DEFAULTS: PlaygroundState = {
+    26→  commandId: "color-wheel.reset",
+    27→  position: "top",
+    28→};
+    29→
+    30→interface HoverTarget {
+    31→  id: string;
+    32→  label: string;
+    33→  commandId: string;
+    34→  area: string; // tailwind classes for placement within the canvas
+    35→}
+    36→
+    37→const DEFAULT_TARGETS: HoverTarget[] = [
+    38→  { id: "tl", label: "Top-Left", commandId: "edit.copy", area: "top-[14%] left-[12%]" },
+    39→  { id: "tr", label: "Top-Right", commandId: "edit.paste", area: "top-[14%] right-[12%]" },
+    40→  { id: "c", label: "Center", commandId: "color-wheel.reset", area: "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" },
+    41→  { id: "bl", label: "Bottom-Left", commandId: "global.search", area: "bottom-[14%] left-[12%]" },
+    42→  { id: "br", label: "Bottom-Right", commandId: "global.escape", area: "bottom-[14%] right-[12%]" },
+    43→];
+    44→
+    45→const POSITION_OPTIONS: { value: SmartTooltipPosition; label: string; icon: typeof ArrowUp }[] = [
+    46→  { value: "top", label: "Top", icon: ArrowUp },
+    47→  { value: "bottom", label: "Bottom", icon: ArrowDown },
+    48→  { value: "left", label: "Left", icon: ArrowLeft },
+    49→  { value: "right", label: "Right", icon: ArrowRight },
+    50→];
+    51→
+    52→export function SmartTooltipPlayground() {
+    53→  const meta = getComponent("smart-tooltip")!;
+    54→  const [state, setState] = React.useState<PlaygroundState>(DEFAULTS);
+    55→  const [targets, setTargets] = React.useState<HoverTarget[]>(DEFAULT_TARGETS.map((t) => ({ ...t })));
+    56→  const [lastHovered, setLastHovered] = React.useState<string | null>(null);
+    57→  const [activeTab, setActiveTab] = React.useState<
+    58→    "javascript" | "html" | "css" | "api"
+    59→  >("javascript");
+    60→  const [registryVersion, setRegistryVersion] = React.useState(0);
+    61→
+    62→  const containerRef = React.useRef<HTMLDivElement>(null);
+    63→  const targetRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+    64→  const instancesRef = React.useRef<SmartTooltip[]>([]);
+    65→  const targetsRef = React.useRef(targets);
+    66→  targetsRef.current = targets;
+    67→
+    68→  // Capture initial props for the create-once effect.
+    69→  const initialCommandIdRef = React.useRef(state.commandId);
+    70→  const initialPositionRef = React.useRef<SmartTooltipPosition>(state.position);
+    71→
+    72→  // Register the built-in commands on mount.
+    73→  React.useEffect(() => {
+    74→    registerBuiltinCommands();
+    75→    setRegistryVersion((v) => v + 1);
+    76→  }, []);
+    77→
+    78→  // Create one tooltip instance per hoverable target.
+    79→  React.useEffect(() => {
+    80→    if (!containerRef.current) return;
+    81→    const container = containerRef.current;
+    82→    const instances: SmartTooltip[] = [];
+    83→    for (let i = 0; i < targetRefs.current.length; i++) {
+    84→      const target = targetRefs.current[i];
+    85→      if (!target) continue;
+    86→      const cmdId = targetsRef.current[i]?.commandId ?? initialCommandIdRef.current;
+    87→      const inst = new SmartTooltip(container, {
+    88→        bounds: container,
+    89→        commandId: cmdId,
+    90→        position: initialPositionRef.current,
+    91→      });
+    92→      inst.attachTo(target);
+    93→      const onShow = () => setLastHovered(targetsRef.current[i]?.commandId ?? cmdId);
+    94→      inst.on("show", onShow);
+    95→      instances.push(inst);
+    96→    }
+    97→    instancesRef.current = instances;
+    98→    return () => {
+    99→      instances.forEach((i) => i.destroy());
+   100→      instancesRef.current = [];
+   101→    };
+   102→    // Intentionally empty deps — created once on mount.
+   103→  }, []);
+   104→
+   105→  // Forward position changes to all instances.
+   106→  React.useEffect(() => {
+   107→    instancesRef.current.forEach((i) => i.setPosition(state.position));
+   108→  }, [state.position]);
+   109→
+   110→  const update = React.useCallback(
+   111→    <K extends keyof PlaygroundState>(key: K, value: PlaygroundState[K]) => {
+   112→      setState((s) => ({ ...s, [key]: value }));
+   113→    },
+   114→    [],
+   115→  );
+   116→
+   117→  const setTargetCommandId = React.useCallback((index: number, id: string) => {
+   118→    setTargets((cur) => cur.map((t, i) => (i === index ? { ...t, commandId: id } : t)));
+   119→    const inst = instancesRef.current[index];
+   120→    if (!inst) return;
+   121→    inst.setCommandId(id);
+   122→    setLastHovered(id);
+   123→  }, []);
+   124→
+   125→  const reset = React.useCallback(() => {
+   126→    setState(DEFAULTS);
+   127→    setTargets(DEFAULT_TARGETS.map((t) => ({ ...t })));
+   128→    DEFAULT_TARGETS.forEach((t, i) => {
+   129→      instancesRef.current[i]?.setCommandId(t.commandId);
+   130→    });
+   131→    instancesRef.current.forEach((i) => i.setPosition(DEFAULTS.position));
+   132→    setLastHovered(null);
+   133→    toast.success("Reset to defaults");
+   134→  }, []);
+   135→
+   136→  const allCommands = React.useMemo(
+   137→    () => commandRegistry.list(),
+   138→    [registryVersion],
+   139→  );
+   140→
+   141→  // ---- Code generation ----
+   142→
+   143→  const jsCode = React.useMemo(
+   144→    () => generateJsCode(state, targets, lastHovered),
+   145→    [state, targets, lastHovered],
+   146→  );
+   147→  const htmlCode = React.useMemo(() => generateHtmlCode(), []);
+   148→  const cssCode = React.useMemo(() => generateCssCode(), []);
+   149→  const apiCode = React.useMemo(() => generateApiCode(), []);
+   150→
+   151→  return (
+   152→    <div>
+   153→      {/* Page header */}
+   154→      <div className="border-b border-border bg-background">
+   155→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   156→          <Breadcrumbs />
+   157→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   158→            <div>
+   159→              <PageOverline>Components / Layout</PageOverline>
+   160→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+   161→                {meta.name}
+   162→              </h1>
+   163→              <p className="mt-2 max-w-2xl text-[15px] text-muted-foreground">
+   164→                {meta.longDescription}
+   165→              </p>
+   166→            </div>
+   167→            <div className="flex flex-wrap items-center gap-2">
+   168→              {meta.tags.map((tag) => (
+   169→                <span
+   170→                  key={tag}
+   171→                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground"
+   172→                >
+   173→                  {tag}
+   174→                </span>
+   175→              ))}
+   176→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   177→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />
+   178→                {meta.status}
+   179→              </span>
+   180→            </div>
+   181→          </div>
+   182→        </div>
+   183→      </div>
+   184→
+   185→      {/* Playground workspace */}
+   186→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   187→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
+   188→          {/* Live preview */}
+   189→          <section
+   190→            aria-label="Live preview"
+   191→            className="panel relative flex min-h-[480px] flex-col"
+   192→          >
+   193→            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+   194→              <div className="flex items-center gap-2">
+   195→                <span className="h-2 w-2 rounded-full bg-brand-lemon animate-pulse" />
+   196→                <span className="eyebrow">Live canvas</span>
+   197→              </div>
+   198→              <div className="flex items-center gap-1">
+   199→                <button
+   200→                  type="button"
+   201→                  onClick={reset}
+   202→                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+   203→                >
+   204→                  <RotateCcw className="h-3 w-3" />
+   205→                  Reset
+   206→                </button>
+   207→              </div>
+   208→            </div>
+   209→
+   210→            {/* Live canvas — this div IS the bounds/container */}
+   211→            <div
+   212→              ref={containerRef}
+   213→              className="relative flex-1 bg-grid"
+   214→            >
+   215→              {targets.map((t, i) => (
+   216→                <button
+   217→                  key={t.id}
+   218→                  type="button"
+   219→                  ref={(el) => { targetRefs.current[i] = el; }}
+   220→                  className={cn(
+   221→                    "absolute inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-[12px] font-medium text-foreground shadow-sm transition-colors hover:border-brand-lemon/50 hover:text-brand-lemon focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   222→                    t.area,
+   223→                  )}
+   224→                >
+   225→                  {t.label}
+   226→                </button>
+   227→              ))}
+   228→              <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 text-[11px] text-muted-foreground/60">
+   229→                Hover any button — the tooltip flips if it would overflow the panel.
+   230→              </div>
+   231→            </div>
+   232→
+   233→            {/* Output section */}
+   234→            <div className="border-t border-border p-4">
+   235→              <div className="mb-3 flex items-center justify-between">
+   236→                <span className="eyebrow">Output</span>
+   237→                <span className="font-mono text-[11px] text-muted-foreground">
+   238→                  {targets.length} hoverable targets
+   239→                </span>
+   240→              </div>
+   241→              <div className="flex flex-col gap-2">
+   242→                <div className="flex flex-wrap items-center gap-2">
+   243→                  <CopyableValue
+   244→                    label="lastHovered"
+   245→                    value={lastHovered ?? "(none)"}
+   246→                  />
+   247→                  {lastHovered && (
+   248→                    <CopyableValue
+   249→                      label="label"
+   250→                      value={commandRegistry.get(lastHovered)?.label ?? ""}
+   251→                    />
+   252→                  )}
+   253→                </div>
+   254→                <p className="text-[11px] text-muted-foreground/70">
+   255→                  Hover a button to show its tooltip. The position dropdown controls the preferred
+   256→                  side for the inspector-bound target only — each target keeps its own command.
+   257→                  Move the mouse away to hide.
+   258→                </p>
+   259→              </div>
+   260→            </div>
+   261→          </section>
+   262→
+   263→          {/* Property inspector */}
+   264→          <aside aria-label="Property inspector" className="panel flex flex-col">
+   265→            <div className="border-b border-border px-4 py-2.5">
+   266→              <span className="eyebrow">Properties</span>
+   267→            </div>
+   268→            <div className="flex max-h-[640px] flex-col gap-6 overflow-y-auto p-4">
+   269→              {/* Preferred position (applies to the inspector-bound target) */}
+   270→              <div>
+   271→                <label className="mb-1.5 block text-[12px] font-medium text-foreground">
+   272→                  Position (inspector-bound target)
+   273→                </label>
+   274→                <div className="grid grid-cols-4 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   275→                  {POSITION_OPTIONS.map((o) => {
+   276→                    const Icon = o.icon;
+   277→                    const active = state.position === o.value;
+   278→                    return (
+   279→                      <button
+   280→                        key={o.value}
+   281→                        type="button"
+   282→                        onClick={() => update("position", o.value)}
+   283→                        aria-pressed={active}
+   284→                        title={o.label}
+   285→                        className={cn(
+   286→                          "flex items-center justify-center rounded px-1 py-2 text-[11px] font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   287→                          active
+   288→                            ? "bg-brand-purple-strong text-foreground"
+   289→                            : "text-muted-foreground hover:text-foreground hover:bg-accent",
+   290→                        )}
+   291→                      >
+   292→                        <Icon className="h-3.5 w-3.5" />
+   293→                      </button>
+   294→                    );
+   295→                  })}
+   296→                </div>
+   297→                <p className="mt-1 text-[11px] text-muted-foreground/70">
+   298→                  Applies to all targets. The tooltip auto-flips when the preferred side overflows.
+   299→                </p>
+   300→              </div>
+   301→
+   302→              {/* Inspector-bound command selector */}
+   303→              <div>
+   304→                <label className="mb-1.5 block text-[12px] font-medium text-foreground">
+   305→                  Inspector-bound command
+   306→                </label>
+   307→                <select
+   308→                  value={state.commandId}
+   309→                  onChange={(e) => update("commandId", e.target.value)}
+   310→                  className="h-8 w-full rounded-md border border-border bg-background px-2 text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   311→                >
+   312→                  {allCommands.map((c) => (
+   313→                    <option key={c.id} value={c.id}>
+   314→                      {c.label} — {c.id}
+   315→                    </option>
+   316→                  ))}
+   317→                </select>
+   318→                <p className="mt-1 text-[11px] text-muted-foreground/70">
+   319→                  Bound to the center target on apply. Hover the center button to preview.
+   320→                </p>
+   321→                <button
+   322→                  type="button"
+   323→                  onClick={() => setTargetCommandId(2, state.commandId)}
+   324→                  className="mt-2 inline-flex h-7 items-center rounded-md border border-brand-lemon/40 bg-brand-lemon/10 px-2.5 text-[12px] font-medium text-brand-lemon transition-colors hover:bg-brand-lemon/20"
+   325→                >
+   326→                  Apply to center target
+   327→                </button>
+   328→              </div>
+   329→
+   330→              <div className="h-px bg-border" />
+   331→
+   332→              {/* Per-target command binding */}
+   333→              <section>
+   334→                <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+   335→                  Targets ({targets.length})
+   336→                </h3>
+   337→                <div className="flex flex-col gap-2">
+   338→                  {targets.map((t, i) => (
+   339→                    <div
+   340→                      key={t.id}
+   341→                      className="rounded-md border border-border bg-muted/10 p-2"
+   342→                    >
+   343→                      <div className="mb-1.5 flex items-center justify-between">
+   344→                        <span className="font-mono text-[11px] text-foreground">{t.label}</span>
+   345→                        <span className="font-mono text-[10px] text-muted-foreground/60">{t.id}</span>
+   346→                      </div>
+   347→                      <select
+   348→                        value={t.commandId}
+   349→                        onChange={(e) => {
+   350→                          setTargetCommandId(i, e.target.value);
+   351→                        }}
+   352→                        className="h-7 w-full rounded-md border border-border bg-background px-2 text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   353→                      >
+   354→                        {allCommands.map((c) => (
+   355→                          <option key={c.id} value={c.id}>
+   356→                            {c.label}
+   357→                          </option>
+   358→                        ))}
+   359→                      </select>
+   360→                    </div>
+   361→                  ))}
+   362→                </div>
+   363→              </section>
+   364→            </div>
+   365→          </aside>
+   366→        </div>
+   367→
+   368→        {/* Code panel */}
+   369→        <section className="panel mt-6 overflow-hidden">
+   370→          <div className="flex items-center justify-between border-b border-border px-2">
+   371→            <div className="flex">
+   372→              {([["javascript","JavaScript"],["html","HTML"],["css","CSS"],["api","API"]] as const).map(([key, label]) => (
+   373→                <button
+   374→                  key={key}
+   375→                  type="button"
+   376→                  onClick={() => setActiveTab(key)}
+   377→                  className={cn(
+   378→                    "relative h-9 px-3 text-[12px] font-medium transition-colors focus-visible:outline-none",
+   379→                    activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+   380→                  )}
+   381→                >
+   382→                  {label}
+   383→                  {activeTab === key && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   384→                </button>
+   385→              ))}
+   386→            </div>
+   387→            <span className="pr-2 text-[11px] font-mono text-muted-foreground/70">
+   388→              Synchronized with live configuration
+   389→            </span>
+   390→          </div>
+   391→          <div className="p-4">
+   392→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   393→            {activeTab === "html" && <CodeBlock code={htmlCode} language="html" filename="index.html" />}
+   394→            {activeTab === "css" && <CodeBlock code={cssCode} language="css" filename="styles.css" />}
+   395→            {activeTab === "api" && <CodeBlock code={apiCode} language="typescript" filename="api.ts" />}
+   396→          </div>
+   397→        </section>
+   398→
+   399→        {/* Documentation */}
+   400→        <ComponentDocumentation />
+   401→      </div>
+   402→    </div>
+   403→  );
+   404→}
+   405→
+   406→// ---- Code generators ----
+   407→
+   408→function generateJsCode(state: PlaygroundState, targets: HoverTarget[], lastHovered: string | null): string {
+   409→  const targetLines = targets
+   410→    .map((t) => `  { id: "${t.id}", label: "${t.label}", commandId: "${t.commandId}" }`)
+   411→    .join(",\n");
+   412→  return `import { SmartTooltip } from "@workshop/smart-tooltip";
+   413→import { registerBuiltinCommands, commandRegistry } from "@/lib/commands";
+   414→
+   415→// Register the platform commands once on app init.
+   416→registerBuiltinCommands();
+   417→
+   418→const container = document.querySelector("#canvas");
+   419→
+   420→const targets = [
+   421→${targetLines}
+   422→];
+   423→
+   424→// Create one tooltip per hoverable target. Each attaches to its own element.
+   425→const tooltips = targets.map((t) => {
+   426→  const target = container.querySelector(\`[data-target="\${t.id}"]\`);
+   427→  const tip = new SmartTooltip(container, {
+   428→    bounds: container,
+   429→    commandId: t.commandId,
+   430→    position: ${JSON.stringify(state.position)},
+   431→  });
+   432→  tip.attachTo(target);
+   433→  tip.on("show", () => console.log("show:", t.commandId));
+   434→  tip.on("hide", () => console.log("hide:", t.commandId));
+   435→  return tip;
+   436→});
+   437→
+   438→// Update the position at runtime:
+   439→// tooltips.forEach((t) => t.setPosition("bottom"));
+   440→
+   441→// Or rebind a target to a different command:
+   442→// tooltips[0].setCommandId("edit.copy");
+   443→
+   444→// Cleanup.
+   445→// tooltips.forEach((t) => t.destroy());${lastHovered ? `\n\n// Last hovered: ${lastHovered}` : ""}`;
+   446→}
+   447→
+   448→function generateHtmlCode(): string {
+   449→  return `<!DOCTYPE html>
+   450→<html>
+   451→  <head><link rel="stylesheet" href="smart-tooltip.css" /></head>
+   452→  <body>
+   453→    <div id="canvas" style="position: relative; width: 600px; height: 400px;">
+   454→      <button data-target="tl">Top-Left</button>
+   455→      <button data-target="tr">Top-Right</button>
+   456→      <button data-target="c">Center</button>
+   457→      <button data-target="bl">Bottom-Left</button>
+   458→      <button data-target="br">Bottom-Right</button>
+   459→    </div>
+   460→    <script type="module" src="init.js"></script>
+   461→  </body>
+   462→</html>`;
+   463→}
+   464→
+   465→function generateCssCode(): string {
+   466→  return `/* The component ships its own scoped styles (.smart-tooltip-* prefix).
+   467→   Override the visual tokens below to customize appearance. */
+   468→
+   469→:root {
+   470→  --brand-lemon: #D9FF66;
+   471→  --brand-lemon-hover: #C8F34F;
+   472→  --popover: #1A1422;
+   473→  --popover-foreground: #F4F1FF;
+   474→  --border: #383343;
+   475→  --accent: #342348;
+   476→  --muted-foreground: #B8B2CA;
+   477→}
+   478→
+   479→/* The accent color used for the icon and shortcut kbd text. */
+   480→.smart-tooltip {
+   481→  --tt-accent: var(--brand-lemon);
+   482→}
+   483→
+   484→/* Example: make the tooltip wider. */
+   485→/* .smart-tooltip { max-width: 320px; } */`;
+   486→}
+   487→
+   488→function generateApiCode(): string {
+   489→  return `type SmartTooltipPosition = "top" | "bottom" | "left" | "right";
+   490→
+   491→interface SmartTooltipOptions {
+   492→  /** The container element that bounds the tooltip. */
+   493→  bounds: HTMLElement;
+   494→  /** Command ID to display. */
+   495→  commandId: string;
+   496→  /** Position relative to the target element. Default "top". */
+   497→  position?: SmartTooltipPosition;
+   498→}
+   499→
+   500→class SmartTooltip {
+   501→  constructor(container: HTMLElement, options: SmartTooltipOptions);
+   502→
+   503→  /** Attach to a target element. mouseenter shows; mouseleave hides. */
+   504→  attachTo(target: HTMLElement): void;
+   505→
+   506→  /** Detach from the current target (and hide). */
+   507→  detach(): void;
+   508→
+   509→  /** Manually show the tooltip (still requires a target). */
+   510→  show(): void;
+   511→
+   512→  /** Manually hide the tooltip. */
+   513→  hide(): void;
+   514→
+   515→  /** Change the displayed command at runtime. */
+   516→  setCommandId(id: string): void;
+   517→
+   518→  /** Change the preferred position. The tooltip auto-flips if the preferred
+   519→      side overflows the bounds. */
+   520→  setPosition(pos: SmartTooltipPosition): void;
+   521→
+   522→  on(event: "show" | "hide", handler: () => void): void;
+   523→  off(event: string, handler: Function): void;
+   524→  destroy(): void;
+   525→}
+   526→
+   527→// Smart positioning
+   528→//   On show, the tooltip:
+   529→//     1. Measures its natural width/height.
+   530→//     2. Computes the target rect (viewport) and converts to container-relative coords.
+   531→//     3. Places the tooltip on the preferred side (top/bottom/left/right) of the target.
+   532→//     4. If that side overflows the bounds, flips to the opposite side.
+   533→//     5. Clamps the non-primary axis so the tooltip stays inside the bounds.
+   534→//   The tooltip uses position: absolute inside the container (the container is
+   535→//   made position: relative if it was static).`;
+   536→}
+   537→
+   538→// ---- Documentation ----
+   539→
+   540→function ComponentDocumentation() {
+   541→  const meta = getComponent("smart-tooltip")!;
+   542→  return (
+   543→    <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_200px]">
+   544→      <div className="min-w-0 max-w-[760px]">
+   545→        <h2 className="text-2xl font-semibold tracking-tight">Documentation</h2>
+   546→        <p className="mt-2 text-sm text-muted-foreground">
+   547→          The Smart Tooltip is a framework-independent vanilla JavaScript component — no React or
+   548→          Next.js required. It renders a command&apos;s label, description, and keyboard shortcut
+   549→          from the shared command registry.
+   550→        </p>
+   551→
+   552→        <section className="mt-8">
+   553→          <h3 className="text-lg font-semibold">Overview</h3>
+   554→          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+   555→            {meta.longDescription} The tooltip attaches to a target element and shows on mouseenter
+   556→            (or focus). It renders the command&apos;s icon, bold label, optional description, and
+   557→            the keyboard shortcut as styled <code className="font-mono text-brand-lemon">kbd</code> badges.
+   558→            On show, the tooltip measures its natural size and flips to the opposite side if the
+   559→            preferred side would overflow the bounds, then clamps to stay inside.
+   560→          </p>
+   561→        </section>
+   562→
+   563→        <section className="mt-8">
+   564→          <h3 className="text-lg font-semibold">When to use it</h3>
+   565→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   566→            {meta.whenToUse.map((item) => (
+   567→              <li key={item} className="flex gap-2">
+   568→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />
+   569→                {item}
+   570→              </li>
+   571→            ))}
+   572→          </ul>
+   573→        </section>
+   574→
+   575→        <section className="mt-8">
+   576→          <h3 className="text-lg font-semibold">When not to use it</h3>
+   577→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   578→            {meta.whenNotToUse.map((item) => (
+   579→              <li key={item} className="flex gap-2">
+   580→                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
+   581→                {item}
+   582→              </li>
+   583→            ))}
+   584→          </ul>
+   585→        </section>
+   586→
+   587→        <section className="mt-8">
+   588→          <h3 className="text-lg font-semibold">Properties and defaults</h3>
+   589→          <div className="mt-3 overflow-hidden rounded-lg border border-border">
+   590→            <table className="w-full text-left text-[13px]">
+   591→              <thead className="bg-muted/30">
+   592→                <tr>
+   593→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Property</th>
+   594→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Type</th>
+   595→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Default</th>
+   596→                  <th className="px-3 py-2 font-mono text-[11px] uppercase text-muted-foreground">Description</th>
+   597→                </tr>
+   598→              </thead>
+   599→              <tbody className="divide-y divide-border">
+   600→                {meta.properties.map((p) => (
+   601→                  <tr key={p.name}>
+   602→                    <td className="px-3 py-2 font-mono text-brand-lemon">{p.name}</td>
+   603→                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.type}</td>
+   604→                    <td className="px-3 py-2 font-mono text-foreground">{p.default}</td>
+   605→                    <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
+   606→                  </tr>
+   607→                ))}
+   608→              </tbody>
+   609→            </table>
+   610→          </div>
+   611→        </section>
+   612→
+   613→        <section className="mt-8">
+   614→          <h3 className="text-lg font-semibold">Methods</h3>
+   615→          <div className="mt-3 space-y-2">
+   616→            {meta.methods.map((m) => (
+   617→              <div key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   618→                <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   619→                <p className="mt-1 text-[13px] text-muted-foreground">{m.description}</p>
+   620→                {m.returns && (
+   621→                  <p className="mt-0.5 text-[11px] font-mono text-muted-foreground/70">
+   622→                    returns: {m.returns}
+   623→                  </p>
+   624→                )}
+   625→              </div>
+   626→            ))}
+   627→          </div>
+   628→        </section>
+   629→
+   630→        <section className="mt-8">
+   631→          <h3 className="text-lg font-semibold">Events</h3>
+   632→          <div className="mt-3 space-y-2">
+   633→            {meta.events.map((e) => (
+   634→              <div key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   635→                <div className="flex items-center gap-3">
+   636→                  <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   637→                  <code className="font-mono text-[11px] text-muted-foreground">{e.payload}</code>
+   638→                </div>
+   639→                <p className="mt-1 text-[13px] text-muted-foreground">{e.description}</p>
+   640→              </div>
+   641→            ))}
+   642→          </div>
+   643→        </section>
+   644→
+   645→        <section className="mt-8">
+   646→          <h3 className="text-lg font-semibold">Smart positioning</h3>
+   647→          <ol className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   648→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Measures the tooltip&apos;s natural width/height while invisible.</li>
+   649→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Computes the target rect (viewport) and converts to container-relative coordinates.</li>
+   650→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Places the tooltip on the preferred side (top/bottom/left/right) of the target.</li>
+   651→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />If that side overflows the bounds, flips to the opposite side.</li>
+   652→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Clamps the non-primary axis so the tooltip stays inside the bounds.</li>
+   653→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Uses <code className="font-mono text-brand-lemon">position: absolute</code> inside the container (made <code className="font-mono text-brand-lemon">relative</code> if it was static).</li>
+   654→          </ol>
+   655→        </section>
+   656→
+   657→        <section className="mt-8">
+   658→          <h3 className="text-lg font-semibold">Accessibility</h3>
+   659→          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+   660→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />The tooltip has <code className="font-mono text-brand-lemon">role=&quot;tooltip&quot;</code> and toggles <code className="font-mono text-brand-lemon">aria-hidden</code>.</li>
+   661→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Shows on both <code className="font-mono text-brand-lemon">mouseenter</code> and <code className="font-mono text-brand-lemon">focus</code>, so keyboard users see it too.</li>
+   662→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Hides on <code className="font-mono text-brand-lemon">mouseleave</code> and <code className="font-mono text-brand-lemon">blur</code>.</li>
+   663→            <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />The shortcut badge has an <code className="font-mono text-brand-lemon">aria-label</code> for screen readers.</li>
+   664→          </ul>
+   665→        </section>
+   666→      </div>
+   667→
+   668→      <aside className="hidden lg:block">
+   669→        <div className="sticky top-20">
+   670→          <span className="eyebrow mb-2 block">On this page</span>
+   671→          <nav className="space-y-1 text-[12px]">
+   672→            {["Overview", "When to use it", "When not to use it", "Properties and defaults", "Methods", "Events", "Smart positioning", "Accessibility"].map((s) => (
+   673→              <a
+   674→                key={s}
+   675→                href="#"
+   676→                onClick={(e) => e.preventDefault()}
+   677→                className="block rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+   678→              >
+   679→                {s}
+   680→              </a>
+   681→            ))}
+   682→          </nav>
+   683→        </div>
+   684→      </aside>
+   685→    </div>
+   686→  );
+   687→}
+   688→

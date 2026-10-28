@@ -1,0 +1,505 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  Navigation as NavIcon, RotateCcw, Plus, Trash2, ChevronRight,
+     6→} from "lucide-react";
+     7→import { getComponent } from "@/lib/platform/content";
+     8→import { Breadcrumbs, PageOverline } from "@/components/platform/breadcrumbs";
+     9→import { CodeBlock, CopyableValue } from "@/components/platform/code-block";
+    10→import { AgentSkillTabs } from "@/components/platform/agent-skill-tabs";
+    11→import { CollapsibleDescription } from "@/components/platform/collapsible-description";
+    12→import {
+    13→  BreadcrumbReact,
+    14→  type BreadcrumbItem,
+    15→  type CrumbSeparator,
+    16→  type BreadcrumbEventPayload,
+    17→} from "./breadcrumb-react";
+    18→import type { Breadcrumb } from "@/lib/components/breadcrumb";
+    19→import { cn } from "@/lib/utils";
+    20→import { toast } from "sonner";
+    21→
+    22→interface State {
+    23→  separator: CrumbSeparator;
+    24→  maxItems: number;
+    25→  showIcons: boolean;
+    26→  markCurrent: boolean;
+    27→  density: "compact" | "comfortable" | "spacious";
+    28→  readOnly: boolean;
+    29→}
+    30→
+    31→const DEFAULTS: State = {
+    32→  separator: "chevron",
+    33→  maxItems: 0,
+    34→  showIcons: true,
+    35→  markCurrent: true,
+    36→  density: "comfortable",
+    37→  readOnly: false,
+    38→};
+    39→
+    40→const SEED_ITEMS: BreadcrumbItem[] = [
+    41→  { id: "home", label: "Home", icon: "home", href: "/" },
+    42→  { id: "projects", label: "Projects", icon: "folder", href: "/projects" },
+    43→  { id: "web-app", label: "Web App", icon: "file", href: "/projects/web-app" },
+    44→  { id: "settings", label: "Settings", icon: "settings", href: "/projects/web-app/settings" },
+    45→  { id: "billing", label: "Billing", icon: "settings", href: "/projects/web-app/settings/billing" },
+    46→  { id: "current", label: "Current Invoice", icon: "file", href: "/projects/web-app/settings/billing/current" },
+    47→];
+    48→
+    49→export function BreadcrumbPlayground() {
+    50→  const meta = getComponent("breadcrumb")!;
+    51→  const [state, setState] = React.useState<State>(DEFAULTS);
+    52→  const [items, setItems] = React.useState<BreadcrumbItem[]>(SEED_ITEMS);
+    53→  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+    54→  const [lastEvent, setLastEvent] = React.useState<string>("—");
+    55→  const [activeTab, setActiveTab] = React.useState<"javascript" | "html" | "css" | "api">("javascript");
+    56→  const instanceRef = React.useRef<Breadcrumb | null>(null);
+    57→
+    58→  const update = React.useCallback(<K extends keyof State>(k: K, v: State[K]) => {
+    59→    setState((s) => ({ ...s, [k]: v }));
+    60→  }, []);
+    61→
+    62→  const onItemSelected = React.useCallback((p: BreadcrumbEventPayload) => {
+    63→    setSelectedId(p.itemId ?? null);
+    64→  }, []);
+    65→
+    66→  const onItemActivated = React.useCallback((p: BreadcrumbEventPayload) => {
+    67→    setLastEvent(`activated ${p.itemId}`);
+    68→    toast.info("Item activated", {
+    69→      description: `${p.item?.label ?? p.itemId} — host should navigate.`,
+    70→    });
+    71→  }, []);
+    72→
+    73→  const onOverflowToggled = React.useCallback((p: BreadcrumbEventPayload) => {
+    74→    setLastEvent(`overflow ${p.overflowOpen ? "opened" : "closed"}`);
+    75→  }, []);
+    76→
+    77→  const reset = React.useCallback(() => {
+    78→    setItems(SEED_ITEMS);
+    79→    setSelectedId(null);
+    80→    setLastEvent("reset");
+    81→    setTimeout(() => {
+    82→      instanceRef.current?.setItems(SEED_ITEMS);
+    83→    }, 0);
+    84→    toast.info("Breadcrumb reset", { description: "Restored seed items." });
+    85→  }, []);
+    86→
+    87→  const selectedItem = React.useMemo(() => items.find((it) => it.id === selectedId) ?? null, [items, selectedId]);
+    88→
+    89→  const jsCode = React.useMemo(() => `import { Breadcrumb } from "@workshop/breadcrumb";
+    90→
+    91→const trail = new Breadcrumb(container, {
+    92→  separator: "${state.separator}",
+    93→  maxItems: ${state.maxItems},
+    94→  showIcons: ${state.showIcons},
+    95→  markCurrent: ${state.markCurrent},
+    96→  density: "${state.density}",
+    97→  readOnly: ${state.readOnly},
+    98→  items: [
+    99→    { id: "home", label: "Home", icon: "home", href: "/" },
+   100→    { id: "projects", label: "Projects", icon: "folder", href: "/projects" },
+   101→    { id: "web-app", label: "Web App", icon: "file", href: "/projects/web-app" },
+   102→    { id: "settings", label: "Settings", icon: "settings", href: "/projects/web-app/settings" },
+   103→    { id: "current", label: "Current Invoice", icon: "file" },
+   104→  ],
+   105→});
+   106→
+   107→trail.on("item_activated", ({ itemId, item }) => {
+   108→  console.log(\`Navigated to \${itemId}\`, item);
+   109→  // Host router navigates to item.href here
+   110→});`, [state]);
+   111→
+   112→  return (
+   113→    <div>
+   114→      <div className="border-b border-border bg-background">
+   115→        <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-8 lg:px-10">
+   116→          <Breadcrumbs />
+   117→          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+   118→            <div>
+   119→              <PageOverline>Components / Navigation</PageOverline>
+   120→              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Breadcrumb</h1>
+   121→              <CollapsibleDescription
+   122→                text={meta.longDescription}
+   123→                maxLength={220}
+   124→                className="mt-2 max-w-2xl text-[15px] text-muted-foreground"
+   125→              />
+   126→            </div>
+   127→            <div className="flex flex-wrap items-center gap-2">
+   128→              {meta.tags.map((t) => (
+   129→                <span key={t} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">{t}</span>
+   130→              ))}
+   131→              <span className="inline-flex items-center gap-1.5 rounded-md border border-brand-lemon/30 bg-brand-lemon/10 px-2.5 py-1 text-[11px] font-mono text-brand-lemon">
+   132→                <span className="h-1.5 w-1.5 rounded-full bg-brand-lemon" />{meta.status}
+   133→              </span>
+   134→            </div>
+   135→          </div>
+   136→        </div>
+   137→      </div>
+   138→
+   139→      <div className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-10">
+   140→        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px] lg:items-start">
+   141→          {/* Live canvas */}
+   142→          <section aria-label="Live preview" className="panel relative flex h-[600px] flex-col overflow-hidden">
+   143→            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+   144→              <div className="flex items-center gap-2">
+   145→                <NavIcon className="h-4 w-4 text-brand-lemon" />
+   146→                <span className="eyebrow">Live canvas</span>
+   147→                <span className="ml-2 inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+   148→                  {items.length} items
+   149→                </span>
+   150→              </div>
+   151→              <div className="flex items-center gap-3">
+   152→                <button
+   153→                  type="button"
+   154→                  onClick={reset}
+   155→                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-brand-lemon/40"
+   156→                >
+   157→                  <RotateCcw className="h-3 w-3" />
+   158→                  Reset
+   159→                </button>
+   160→              </div>
+   161→            </div>
+   162→
+   163→            {/* Live breadcrumb renders here — multiple instances showing different configurations */}
+   164→            <div className="flex-1 min-h-0 overflow-auto bg-grid p-6">
+   165→              <div className="flex flex-col gap-6">
+   166→                {/* Primary trail */}
+   167→                <div>
+   168→                  <div className="mb-2 flex items-center gap-2">
+   169→                    <span className="eyebrow">Primary trail</span>
+   170→                    <span className="font-mono text-[10px] text-muted-foreground">separator={state.separator} · maxItems={state.maxItems || "∞"}</span>
+   171→                  </div>
+   172→                  <div className="panel p-4">
+   173→                    <BreadcrumbReact
+   174→                      items={items}
+   175→                      separator={state.separator}
+   176→                      maxItems={state.maxItems}
+   177→                      showIcons={state.showIcons}
+   178→                      markCurrent={state.markCurrent}
+   179→                      density={state.density}
+   180→                      readOnly={state.readOnly}
+   181→                      onItemSelected={onItemSelected}
+   182→                      onItemActivated={onItemActivated}
+   183→                      onOverflowToggled={onOverflowToggled}
+   184→                      instanceRef={instanceRef}
+   185→                    />
+   186→                  </div>
+   187→                </div>
+   188→
+   189→                {/* Variant: slash separator */}
+   190→                <div>
+   191→                  <div className="mb-2 flex items-center gap-2">
+   192→                    <span className="eyebrow">Slash variant</span>
+   193→                    <span className="font-mono text-[10px] text-muted-foreground">separator=slash · compact</span>
+   194→                  </div>
+   195→                  <div className="panel p-4">
+   196→                    <BreadcrumbReact
+   197→                      items={items}
+   198→                      separator="slash"
+   199→                      maxItems={0}
+   200→                      showIcons={false}
+   201→                      markCurrent
+   202→                      density="compact"
+   203→                    />
+   204→                  </div>
+   205→                </div>
+   206→
+   207→                {/* Variant: maxItems=4 (collapse) */}
+   208→                <div>
+   209→                  <div className="mb-2 flex items-center gap-2">
+   210→                    <span className="eyebrow">Collapsed variant</span>
+   211→                    <span className="font-mono text-[10px] text-muted-foreground">maxItems=4 · chevron</span>
+   212→                  </div>
+   213→                  <div className="panel p-4">
+   214→                    <BreadcrumbReact
+   215→                      items={items}
+   216→                      separator="chevron"
+   217→                      maxItems={4}
+   218→                      showIcons
+   219→                      markCurrent
+   220→                      density="comfortable"
+   221→                    />
+   222→                  </div>
+   223→                </div>
+   224→
+   225→                {/* Variant: read-only */}
+   226→                <div>
+   227→                  <div className="mb-2 flex items-center gap-2">
+   228→                    <span className="eyebrow">Read-only variant</span>
+   229→                    <span className="font-mono text-[10px] text-muted-foreground">readOnly · spacious</span>
+   230→                  </div>
+   231→                  <div className="panel p-4">
+   232→                    <BreadcrumbReact
+   233→                      items={items}
+   234→                      separator="arrow"
+   235→                      maxItems={0}
+   236→                      showIcons
+   237→                      markCurrent
+   238→                      density="spacious"
+   239→                      readOnly
+   240→                    />
+   241→                  </div>
+   242→                </div>
+   243→              </div>
+   244→            </div>
+   245→
+   246→            {/* Output */}
+   247→            <div className="shrink-0 border-t border-border p-4">
+   248→              <div className="mb-2 flex items-center justify-between gap-3">
+   249→                <span className="eyebrow">Output</span>
+   250→                <span className="truncate font-mono text-[11px] text-muted-foreground">
+   251→                  last: <span className="text-brand-lemon">{lastEvent}</span>
+   252→                </span>
+   253→              </div>
+   254→              <div className="flex flex-wrap items-center gap-2">
+   255→                <CopyableValue label="Selected" value={selectedItem ? `${selectedItem.id} · ${selectedItem.label}` : "—"} />
+   256→                {selectedItem && selectedItem.href && (
+   257→                  <span className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 font-mono text-[12px]">
+   258→                    <span className="text-muted-foreground">href:</span>
+   259→                    <span className="text-brand-lemon">{selectedItem.href}</span>
+   260→                  </span>
+   261→                )}
+   262→              </div>
+   263→              <p className="mt-2 text-[11px] text-muted-foreground">
+   264→                Tip: click items to activate them, press <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">←/→</kbd> to move focus, click the <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">⋯</kbd> overflow button to expand collapsed items.
+   265→              </p>
+   266→            </div>
+   267→          </section>
+   268→
+   269→          {/* Properties */}
+   270→          <AgentSkillTabs
+   271→            agentPath="/docs/components/breadcrumb-AGENT.md"
+   272→            skillPath="/docs/components/breadcrumb-SKILL.md"
+   273→          >
+   274→            {/* Separator */}
+   275→            <div>
+   276→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Separator</label>
+   277→              <div className="grid grid-cols-4 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   278→                {(["chevron", "slash", "arrow", "dot"] as const).map((s) => (
+   279→                  <button key={s} type="button" onClick={() => update("separator", s)} aria-pressed={state.separator === s}
+   280→                    className={cn("rounded px-2 py-2 text-[11px] font-medium capitalize transition-colors",
+   281→                      state.separator === s ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+   282→                    {s}
+   283→                  </button>
+   284→                ))}
+   285→              </div>
+   286→            </div>
+   287→
+   288→            {/* Density */}
+   289→            <div>
+   290→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">Density</label>
+   291→              <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/20 p-1">
+   292→                {(["compact", "comfortable", "spacious"] as const).map((d) => (
+   293→                  <button key={d} type="button" onClick={() => update("density", d)} aria-pressed={state.density === d}
+   294→                    className={cn("rounded px-2 py-2 text-[11px] font-medium capitalize transition-colors",
+   295→                      state.density === d ? "bg-brand-purple-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>
+   296→                    {d}
+   297→                  </button>
+   298→                ))}
+   299→              </div>
+   300→            </div>
+   301→
+   302→            {/* Max items */}
+   303→            <div>
+   304→              <label className="mb-1.5 block text-[12px] font-medium text-foreground">
+   305→                Max items: <span className="font-mono text-brand-lemon">{state.maxItems === 0 ? "∞ (no limit)" : state.maxItems}</span>
+   306→              </label>
+   307→              <input type="range" min={0} max={8} step={1} value={state.maxItems} onChange={(e) => update("maxItems", Number(e.target.value))}
+   308→                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted"
+   309→                style={{ background: `linear-gradient(to right, var(--brand-lemon) ${state.maxItems / 8 * 100}%, var(--muted) ${state.maxItems / 8 * 100}%)` }} />
+   310→              <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+   311→                <span>0 (∞)</span><span>8</span>
+   312→              </div>
+   313→              <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+   314→                When the trail exceeds this number, the middle items collapse into an overflow menu. The first and last items stay visible.
+   315→              </p>
+   316→            </div>
+   317→
+   318→            {/* Toggles */}
+   319→            <div className="flex flex-col gap-2">
+   320→              {([
+   321→                { k: "showIcons" as const, l: "Show icons" },
+   322→                { k: "markCurrent" as const, l: "Mark current page" },
+   323→                { k: "readOnly" as const, l: "Read-only" },
+   324→              ]).map(({ k, l }) => (
+   325→                <div key={k} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+   326→                  <span className="text-[12px] text-foreground">{l}</span>
+   327→                  <button type="button" role="switch" aria-checked={state[k]} onClick={() => update(k, !state[k])}
+   328→                    className={cn("relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+   329→                      state[k] ? "bg-brand-lemon" : "bg-muted-foreground/30")}>
+   330→                    <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform",
+   331→                      state[k] ? "translate-x-4" : "translate-x-0.5")} />
+   332→                  </button>
+   333→                </div>
+   334→              ))}
+   335→            </div>
+   336→
+   337→            {/* Quick actions */}
+   338→            <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+   339→              <button
+   340→                type="button"
+   341→                onClick={() => {
+   342→                  const n = items.length + 1;
+   343→                  const newItem: BreadcrumbItem = {
+   344→                    id: `item-${n}`,
+   345→                    label: `Item ${n}`,
+   346→                    icon: "file",
+   347→                  };
+   348→                  const newItems = [...items.slice(0, -1), newItem, items[items.length - 1]];
+   349→                  setItems(newItems);
+   350→                  instanceRef.current?.setItems(newItems);
+   351→                  toast.success("Item added", { description: `Inserted before the current page.` });
+   352→                }}
+   353→                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-brand-lemon/40 hover:bg-accent"
+   354→              >
+   355→                <Plus className="h-3 w-3 text-brand-lemon" /> Add item
+   356→              </button>
+   357→              <button
+   358→                type="button"
+   359→                onClick={() => {
+   360→                  if (items.length <= 2) {
+   361→                    toast.error("Cannot remove", { description: "Keep at least 2 items." });
+   362→                    return;
+   363→                  }
+   364→                  const newItems = items.slice(0, -2).concat(items[items.length - 1]);
+   365→                  setItems(newItems);
+   366→                  instanceRef.current?.setItems(newItems);
+   367→                  toast.success("Item removed");
+   368→                }}
+   369→                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-destructive/40 hover:bg-accent"
+   370→              >
+   371→                <Trash2 className="h-3 w-3 text-destructive" /> Remove last
+   372→              </button>
+   373→            </div>
+   374→          </AgentSkillTabs>
+   375→        </div>
+   376→
+   377→        {/* Code panel */}
+   378→        <section className="panel mt-6 overflow-hidden">
+   379→          <div className="flex items-center justify-between border-b border-border px-2">
+   380→            <div className="flex">
+   381→              {([["javascript","JavaScript"],["html","HTML"],["css","CSS"],["api","API"]] as const).map(([k, l]) => (
+   382→                <button key={k} type="button" onClick={() => setActiveTab(k)}
+   383→                  className={cn("relative h-9 px-3 text-[12px] font-medium transition-colors",
+   384→                    activeTab === k ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+   385→                  {l}
+   386→                  {activeTab === k && <span className="absolute inset-x-2 -bottom-px h-px bg-brand-lemon" />}
+   387→                </button>
+   388→              ))}
+   389→            </div>
+   390→          </div>
+   391→          <div className="p-4">
+   392→            {activeTab === "javascript" && <CodeBlock code={jsCode} language="javascript" filename="init.js" />}
+   393→            {activeTab === "html" && <CodeBlock code={'<div id="breadcrumb"></div>\n<script type="module" src="init.js"></script>'} language="html" filename="index.html" />}
+   394→            {activeTab === "css" && <CodeBlock code={".crumb-nav {\n  /* Override tokens to retheme the breadcrumb */\n  --cb-accent: #D9FF66;\n  --cb-surface: #211A30;\n  --cb-border: #383343;\n  --cb-text: #F4F1FF;\n  --cb-muted: #B8B2CA;\n}\n\n/* Compact density for tight headers */\n.crumb-nav.crumb-density-compact .crumb-item {\n  padding: 2px 6px;\n}"} language="css" filename="styles.css" />}
+   395→            {activeTab === "api" && <CodeBlock code={"class Breadcrumb {\n  constructor(container, options)\n  setItems(items): void\n  selectItem(id | null, source?): void\n  clearSelection(): void\n  getSelectedItem(): string | null\n  getItems(): BreadcrumbItem[]\n  setProperty(name, value): void\n  on(event, handler): void\n  off(event, handler): void\n  destroy(): void\n}\n\n// Events:\n//   item_selected, item_activated, overflow_toggled\n\n// Options:\n//   items, separator (chevron|slash|arrow|dot),\n//   maxItems (0 = no limit), overflowMode (dropdown|inline),\n//   showIcons, markCurrent, density (compact|comfortable|spacious),\n//   readOnly, disabled"} language="typescript" filename="api.ts" />}
+   396→          </div>
+   397→        </section>
+   398→
+   399→        {/* Documentation */}
+   400→        <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_220px]">
+   401→          <div className="flex flex-col gap-6">
+   402→            <div className="panel p-6">
+   403→              <h2 className="text-lg font-semibold text-foreground">Overview</h2>
+   404→              <p className="mt-2 text-[14px] text-muted-foreground">{meta.description}</p>
+   405→              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+   406→                <div>
+   407→                  <h3 className="text-[12px] font-semibold uppercase tracking-wide text-brand-lemon">When to use</h3>
+   408→                  <ul className="mt-2 space-y-1 text-[13px] text-muted-foreground">
+   409→                    {meta.whenToUse.map((u) => <li key={u} className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />{u}</li>)}
+   410→                  </ul>
+   411→                </div>
+   412→                <div>
+   413→                  <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Not for</h3>
+   414→                  <ul className="mt-2 space-y-1 text-[13px] text-muted-foreground">
+   415→                    {meta.whenNotToUse.map((u) => <li key={u} className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />{u}</li>)}
+   416→                  </ul>
+   417→                </div>
+   418→              </div>
+   419→            </div>
+   420→
+   421→            <div className="panel p-6">
+   422→              <h2 className="text-lg font-semibold text-foreground">Properties</h2>
+   423→              <div className="mt-3 overflow-x-auto">
+   424→                <table className="w-full text-left text-[12px]">
+   425→                  <thead>
+   426→                    <tr className="border-b border-border text-muted-foreground">
+   427→                      <th className="py-2 pr-4 font-mono font-medium">Property</th>
+   428→                      <th className="py-2 pr-4 font-mono font-medium">Type</th>
+   429→                      <th className="py-2 pr-4 font-mono font-medium">Default</th>
+   430→                      <th className="py-2 font-mono font-medium">Description</th>
+   431→                    </tr>
+   432→                  </thead>
+   433→                  <tbody>
+   434→                    {meta.properties.map((p) => (
+   435→                      <tr key={p.name} className="border-b border-border/60 align-top">
+   436→                        <td className="py-2 pr-4 font-mono text-brand-lemon">{p.name}</td>
+   437→                        <td className="py-2 pr-4 font-mono text-foreground">{p.type}</td>
+   438→                        <td className="py-2 pr-4 font-mono text-muted-foreground">{p.default}</td>
+   439→                        <td className="py-2 text-muted-foreground">{p.description}</td>
+   440→                      </tr>
+   441→                    ))}
+   442→                  </tbody>
+   443→                </table>
+   444→              </div>
+   445→            </div>
+   446→
+   447→            <div className="grid gap-6 sm:grid-cols-2">
+   448→              <div className="panel p-6">
+   449→                <h2 className="text-lg font-semibold text-foreground">Methods</h2>
+   450→                <ul className="mt-3 space-y-2 max-h-96 overflow-y-auto">
+   451→                  {meta.methods.map((m) => (
+   452→                    <li key={m.signature} className="rounded-md border border-border bg-muted/20 p-3">
+   453→                      <code className="font-mono text-[12px] text-brand-lemon">{m.signature}</code>
+   454→                      <p className="mt-1 text-[12px] text-muted-foreground">{m.description}</p>
+   455→                    </li>
+   456→                  ))}
+   457→                </ul>
+   458→              </div>
+   459→              <div className="panel p-6">
+   460→                <h2 className="text-lg font-semibold text-foreground">Events</h2>
+   461→                <ul className="mt-3 space-y-2">
+   462→                  {meta.events.map((e) => (
+   463→                    <li key={e.name} className="rounded-md border border-border bg-muted/20 p-3">
+   464→                      <code className="font-mono text-[12px] text-brand-lemon">{e.name}</code>
+   465→                      <p className="mt-1 text-[12px] text-muted-foreground">{e.description}</p>
+   466→                      <p className="mt-1 font-mono text-[11px] text-muted-foreground/80">payload: {e.payload}</p>
+   467→                    </li>
+   468→                  ))}
+   469→                </ul>
+   470→              </div>
+   471→            </div>
+   472→
+   473→            <div className="panel p-6">
+   474→              <h2 className="text-lg font-semibold text-foreground">Accessibility</h2>
+   475→              <ul className="mt-3 space-y-1.5 text-[13px] text-muted-foreground">
+   476→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Rendered as a <code className="font-mono text-brand-lemon">&lt;nav aria-label=&quot;Breadcrumb&quot;&gt;</code> with an ordered list inside.</li>
+   477→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />The current page (last item) gets <code className="font-mono text-brand-lemon">aria-current=&quot;page&quot;</code> when <code className="font-mono text-brand-lemon">markCurrent</code> is true.</li>
+   478→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Items are focusable (<code className="font-mono text-brand-lemon">tabindex=&quot;0&quot;</code>) with a visible lemon focus ring.</li>
+   479→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" /><kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Tab</kbd>/<kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Shift+Tab</kbd> moves between items; <kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">←/→</kbd> roves focus.</li>
+   480→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" /><kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Enter</kbd>/<kbd className="rounded border border-border bg-muted/40 px-1 font-mono text-[10px]">Space</kbd> activates the focused item.</li>
+   481→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Overflow menu uses <code className="font-mono text-brand-lemon">role=&quot;menu&quot;</code> / <code className="font-mono text-brand-lemon">role=&quot;menuitem&quot;</code> with <code className="font-mono text-brand-lemon">aria-expanded</code>.</li>
+   482→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Disabled items get <code className="font-mono text-brand-lemon">aria-disabled=&quot;true&quot;</code> and are removed from the tab order.</li>
+   483→                <li className="flex gap-2"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-lemon" />Separators are <code className="font-mono text-brand-lemon">aria-hidden=&quot;true&quot;</code> so screen readers skip them.</li>
+   484→              </ul>
+   485→            </div>
+   486→          </div>
+   487→
+   488→          <aside className="hidden lg:block">
+   489→            <div className="sticky top-6 panel p-4">
+   490→              <h3 className="eyebrow mb-3">On this page</h3>
+   491→              <ul className="space-y-2 text-[12px] text-muted-foreground">
+   492→                <li><a href="#" className="hover:text-foreground">Overview</a></li>
+   493→                <li><a href="#" className="hover:text-foreground">Properties</a></li>
+   494→                <li><a href="#" className="hover:text-foreground">Methods</a></li>
+   495→                <li><a href="#" className="hover:text-foreground">Events</a></li>
+   496→                <li><a href="#" className="hover:text-foreground">Accessibility</a></li>
+   497→              </ul>
+   498→            </div>
+   499→          </aside>
+   500→        </section>
+   501→      </div>
+   502→    </div>
+   503→  );
+   504→}
+   505→
